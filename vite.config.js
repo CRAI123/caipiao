@@ -22,6 +22,7 @@ export default defineConfig(({ mode }) => {
   const env = loadEnv(mode, process.cwd(), '')
   const databaseUrl = env.VITE_DATABASE_URL || env.DATABASE_URL || ''
   return {
+    base: './',
     plugins: [react()],
     define: {
       __NEON_DATABASE_URL__: JSON.stringify(databaseUrl),
