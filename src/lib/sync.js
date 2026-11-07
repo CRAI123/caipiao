@@ -8,6 +8,7 @@ import { pushRecords, getSql } from './neon.js'
 import { analyzeJournal } from './ai.js'
 import { journalStats } from './journal.js'
 import { ensureAccessTables, getSharedLlmConfig, getSharedLarkConfig } from './access.js'
+import { isTauri, invoke } from './tauri.js'
 
 /** 把一条记录上传 Neon，成功返回带上同步时间的新记录 */
 export async function syncRecordToNeon(rec) {
@@ -106,9 +107,7 @@ export async function syncToLark(records) {
     throw new Error('管理员尚未配置飞书，请联系管理员在后台填写飞书应用凭证')
   }
 
-  const isTauri = typeof window !== 'undefined' && !!window.__TAURI_INTERNALS__
-  if (isTauri) {
-    const { invoke } = await import('@tauri-apps/api/core')
+  if (isTauri()) {
     const result = await invoke('sync_lark', {
       records,
       cfg: {

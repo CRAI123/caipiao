@@ -5,12 +5,10 @@
 // 接口特点：name=kl8，每期 result.red 返回 20 个逗号分隔号码，无 blue。
 // ============================================================
 
+import { isTauri, invoke } from './tauri.js'
+
 const CWL_BASE = 'https://www.cwl.gov.cn'
 const API_PATH = '/cwl_admin/front/cwlkj/search/kjxx/findDrawNotice'
-
-function isTauri() {
-  return typeof window !== 'undefined' && !!window.__TAURI_INTERNALS__
-}
 
 /**
  * 抓取最近 count 期快乐8开奖。
@@ -25,7 +23,6 @@ export async function fetchKl8Draws(count = 100) {
   if (isTauri()) {
     // 桌面端：由 Rust 端请求官网，自动带 Referer，无跨域问题
     try {
-      const { invoke } = await import('@tauri-apps/api/core')
       data = await invoke('fetch_cwl', { path: `${API_PATH}?${query}` })
     } catch (e) {
       throw new Error(`桌面端抓取失败：${e?.message || e}`)
