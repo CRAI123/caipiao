@@ -3,10 +3,11 @@
 // 单条记录 → Neon upsert；单条记录 → AI 分析（结果写回记录）
 // ============================================================
 
-import { loadSettings, isNeonReady } from './settings.js'
-import { pushRecords } from './neon.js'
+import { loadSettings, isNeonReady, isLlmReady } from './settings.js'
+import { pushRecords, getSql } from './neon.js'
 import { analyzeJournal } from './ai.js'
 import { journalStats } from './journal.js'
+import { ensureAccessTables, getSharedLlmConfig } from './access.js'
 
 /** 把一条记录上传 Neon，成功返回带上同步时间的新记录 */
 export async function syncRecordToNeon(rec) {
@@ -26,12 +27,34 @@ export async function syncAllToNeon(records) {
 }
 
 /**
+ * 解析大模型配置：优先用本机 localStorage；未配置则从 Neon 的 admin_config
+ * 读取管理员统一配置的共享参数，实现「管理员配一次，所有人可用」。
+ */
+export async function resolveLlmSettings() {
+  const local = loadSettings()
+  if (isLlmReady(local)) return local
+  if (!isNeonReady(local)) return local
+  try {
+    const sql = getSql(local.neonUrl)
+    await ensureAccessTables(sql)
+    const shared = await getSharedLlmConfig(sql)
+    if (shared && shared.llmKey) {
+      return { ...local, ...shared }
+    }
+  } catch {
+    /* 云端读取失败，退回本地配置 */
+  }
+  return local
+}
+
+/**
  * 对一条记录跑 AI 分析（分析对象是整本账本，结果存档到该条记录上）。
  * 返回带上 aiReport 与同步时间的新记录。
  */
 export async function analyzeRecord(rec, list, latestDraw) {
   const settings = loadSettings()
-  const result = await analyzeJournal(settings, {
+  const llmSettings = await resolveLlmSettings()
+  const result = await analyzeJournal(llmSettings, {
     stats: journalStats(list),
     records: list,
     latestDraw,

@@ -15,8 +15,8 @@ import {
   perTicketHits,
   normalizeRecord,
 } from '../lib/journal.js'
-import { loadSettings, isNeonReady, isLlmReady } from '../lib/settings.js'
-import { syncRecordToNeon, analyzeRecord } from '../lib/sync.js'
+import { loadSettings, isNeonReady } from '../lib/settings.js'
+import { syncRecordToNeon, analyzeRecord, resolveLlmSettings } from '../lib/sync.js'
 
 const NO_BUY_REASONS = ['今天没开', '忘了买', '理性停购', '出差/忙', '其他']
 
@@ -98,8 +98,9 @@ export default function DailyCheckin({ draws, draw, onChanged }) {
 
   async function runAi() {
     if (!existing) return
-    if (!isLlmReady(loadSettings())) {
-      return setStatus('warn', '尚未配置大模型 API，请先到「设置」页填写 Base URL / Key / 模型名')
+    const llmSettings = await resolveLlmSettings()
+    if (!llmSettings.llmKey) {
+      return setStatus('warn', '尚未配置大模型 API（管理员需在「后台」统一配置，或本机自行填写）')
     }
     setBusy(true)
     try {

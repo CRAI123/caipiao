@@ -45,11 +45,15 @@ export default function Settings() {
     }
   }, [])
 
+  // 是否可查看 / 修改系统级配置（云数据库、大模型）
+  // 规则：本地模式（无 Neon）无门禁，视为管理员；Neon 模式下仅管理员设备可见
+  const canEditSystem = access?.mode === 'local' || access?.isAdmin
+
   const set = (k) => (e) => setForm({ ...form, [k]: e.target.value })
 
   function save() {
     saveSettings(form)
-    setMsg({ tone: 'info', text: '设置已保存到浏览器本地' })
+    setMsg({ tone: 'info', text: '设置已保存' })
   }
 
   async function testNeon() {
@@ -58,9 +62,9 @@ export default function Settings() {
     try {
       saveSettings(form)
       await testConnection(form.neonUrl)
-      setMsg({ tone: 'info', text: 'Neon 连接成功，账本表 kl8_journal 已就绪' })
+      setMsg({ tone: 'info', text: 'Neon 连接成功，数据表已就绪' })
     } catch (e) {
-      setMsg({ tone: 'warn', text: `Neon 连接失败：${e.message}` })
+      setMsg({ tone: 'warn', text: `连不上云数据库：${e.message}` })
     } finally {
       setBusy(false)
     }
@@ -72,9 +76,9 @@ export default function Settings() {
     try {
       saveSettings(form)
       const reply = await pingLlm(form)
-      setMsg({ tone: 'info', text: `大模型接口连通，测试回复：${reply}` })
+      setMsg({ tone: 'info', text: `大模型连通成功，测试回复：${reply}` })
     } catch (e) {
-      setMsg({ tone: 'warn', text: `大模型接口测试失败：${e.message}` })
+      setMsg({ tone: 'warn', text: `大模型连通失败：${e.message}` })
     } finally {
       setBusy(false)
     }
@@ -83,14 +87,15 @@ export default function Settings() {
   return (
     <div className="page">
       <Note tone="warn">
-        本页所有内容（连接串、API Key、应用密钥）<b>只保存在当前浏览器的 localStorage 中</b>，
-        不会上传到除你配置的 Neon / 大模型 / 飞书之外的任何地方。这是个人本地使用方式——
-        请勿公开部署填好了密钥的站点，也不要把设置截图分享出去。
+        这里填的连接串、API Key 等敏感信息<b>只保存在你这台设备上</b>，不会泄露给第三方。
+        请勿把填好密钥的版本分享给别人，也不要截图外传。
       </Note>
 
-      <Card title="Neon 云数据库（后台）" tag={isNeonReady(form) ? '已配置' : '未配置'}>
+      {canEditSystem ? (
+        <>
+      <Card title="云数据库（Neon）" tag={isNeonReady(form) ? '已配置' : '未配置'}>
         <div className="field">
-          <label className="field-label">Postgres 连接串</label>
+          <label className="field-label">数据库连接串</label>
           <input
             className="text-input mono"
             type="password"
@@ -111,24 +116,21 @@ export default function Settings() {
           )}
         </div>
         <div className="settings-guide">
-          <b>获取方式：</b>
-          已通过 Neon CLI 接入：<code>neon init</code> 写入 <code>neon.ts</code>（声明 postgres 服务），
-          <code>neon deploy</code> 应用到 production 分支并把 <code>DATABASE_URL</code>（pooled，应用流量首选）
-          拉取到 <code>.env.local</code>；构建时由 <code>vite.config.js</code> 注入为默认值填入上方。
-          手动获取：打开 <a href="https://console.neon.tech" target="_blank" rel="noreferrer">Neon 控制台</a> →
-          创建/选择一个项目 → Dashboard 里的 <b>Connection Details</b> → 打开
-          「Connection string」切换，复制形如 <code>postgres://…?sslmode=require</code> 的完整串（含密码）。
-          点「测试连接并建表」会自动创建数据表 <code>kl8_journal</code>（date 主键 + jsonb payload）。
-          打卡保存、AI 分析结果都会按日期 upsert 到这张表。
-          <b>驱动：</b><code>@neondatabase/serverless</code>——浏览器端走 WebSocket 直连，服务端/边缘运行时同样适用，
-          是 Neon 官方推荐的通用驱动。
+          <b>怎么获取：</b>
+          打开 <a href="https://console.neon.tech" target="_blank" rel="noreferrer">Neon 控制台</a> →
+          选好项目 → 在 Dashboard 的 <b>Connection Details</b> 里复制完整的连接串
+          （形如 <code>postgres://…?sslmode=require</code>，含密码）。
+          如果用了 Neon CLI，<code>neon deploy</code> 会自动把连接串写入 <code>.env.local</code>，
+          构建时自动填入上方，无需手动复制。
+          <br />
+          点「测试连接并建表」会自动建好账本表，之后打卡记录和 AI 分析结果都会自动同步上去。
         </div>
       </Card>
 
-      <Card title="大模型 API（AI 分析）" tag={isLlmReady(form) ? '已配置' : '未配置'}>
+      <Card title="大模型（AI 分析）" tag={isLlmReady(form) ? '已配置' : '未配置'}>
         <div className="field-row">
           <div className="field">
-            <label className="field-label">Base URL（OpenAI 兼容接口）</label>
+            <label className="field-label">接口地址（OpenAI 兼容）</label>
             <input className="text-input mono" value={form.llmBaseUrl} onChange={set('llmBaseUrl')} />
           </div>
           <div className="field">
@@ -153,17 +155,21 @@ export default function Settings() {
           <button className="tab-btn" onClick={save}>保存设置</button>
         </div>
         <div className="settings-guide">
-          <b>获取方式：</b>默认填的是 DeepSeek（
-          <a href="https://platform.deepseek.com/api_keys" target="_blank" rel="noreferrer">platform.deepseek.com</a>
-          → 创建 API Key，模型 <code>deepseek-chat</code>，充值 1 元起即可用很久）。
-          任何 OpenAI 兼容接口都可以用：把 Base URL、模型名换成对应服务商的即可
-          （如 Moonshot <code>https://api.moonshot.cn/v1</code> + <code>kimi-k2</code>，
-          阿里百炼 <code>https://dashscope.aliyuncs.com/compatible-mode/v1</code> + <code>qwen-plus</code>）。
+          <b>推荐用 DeepSeek：</b>到
+          <a href="https://platform.deepseek.com/api_keys" target="_blank" rel="noreferrer"> platform.deepseek.com</a>
+          创建一个 API Key，模型填 <code>deepseek-chat</code> 即可（充 1 元能用很久）。
+          也支持任何 OpenAI 兼容的接口，把 Base URL 和模型名换成对应的就行。
           <br />
-          <b>分析边界（已写死在提示词中）：</b>AI 只分析你的真实账本（投入产出、命中分布对照理论概率、行为变化），
-          <b>不允许预测号码、不允许宣称发现规律、不允许鼓励加大投注</b>。
+          <b>AI 能做什么：</b>帮你复盘真实账本（投入产出、命中率对照理论概率、消费习惯变化）。
+          <b>不会做什么：</b>绝不预测号码、不宣称有规律、不建议你多买。
         </div>
       </Card>
+        </>
+      ) : (
+        <Note tone="info">
+          云数据库和大模型 API 已由管理员统一配置好了，大家共用同一套，你不需要再填写，直接用就行。
+        </Note>
+      )}
 
       <Card title="飞书多维表格（同步）" tag={isLarkReady(form) ? '已配置' : '未配置'}>
         <div className="field-row">
@@ -199,7 +205,7 @@ export default function Settings() {
               save()
               try {
                 await navigator.clipboard.writeText(larkSyncCommand(form))
-                setMsg({ tone: 'info', text: '同步命令已复制（含密钥，勿外传）' })
+                setMsg({ tone: 'info', text: '同步命令已复制到剪贴板（含密钥，请勿外传）' })
               } catch {
                 setMsg({ tone: 'warn', text: `复制失败，请手动复制：${larkSyncCommand(form)}` })
               }
@@ -209,26 +215,26 @@ export default function Settings() {
           </button>
         </div>
         <div className="settings-guide">
-          <b>获取方式：</b>
-          ① 新建一个飞书多维表格，浏览器地址栏链接形如{' '}
-          <code>https://xxx.feishu.cn/base/&lt;app_token&gt;?table=&lt;table_id&gt;</code>，两段分别填入上方；
+          <b>三步搞定：</b>
+          ① 新建一个飞书多维表格，从地址栏链接里复制 <code>app_token</code>（<code>/base/</code> 后面那段）
+          和 <code>table_id</code>（<code>?table=</code> 后面那段），填到上方；
           ② 到<a href="https://open.feishu.cn/app" target="_blank" rel="noreferrer">飞书开放平台</a>创建企业自建应用，
-          拿到 App ID / App Secret，并在「权限管理」中开通 <code>bitable:app</code> 读写权限、发布应用版本；
-          ③ 在多维表格右上角「…」→ 更多 → 添加文档应用，把应用加为协作者（可编辑）。
+          拿到 App ID / App Secret，开通 <code>bitable:app</code> 权限并发布；
+          ③ 回到多维表格，右上角「…」→ 添加文档应用，把刚建的应用加为可编辑协作者。
           <br />
-          <b>使用方式：</b>浏览器不允许直接携带应用密钥调飞书接口，所以同步由本地脚本完成：
-          在「购彩账本」页点「导出 JSON」→「复制飞书同步命令」，在项目根目录的 PowerShell 中粘贴执行。
-          脚本会按「日期」字段自动更新已有记录或新建，并补齐缺失字段（日期/期号/是否购买/号码/花费/命中/奖金/备注/AI分析/同步时间）。
+          <b>怎么同步：</b>由于浏览器不能直接带密钥调飞书接口，同步靠本地脚本完成——
+          在「购彩账本」页点「复制飞书同步命令」，在项目目录的 PowerShell 里粘贴执行即可。
+          脚本会按日期自动更新或新建记录，缺的字段也会自动补上。
         </div>
       </Card>
 
-      <Card title="本机访问身份" tag="设备识别码 · 申请状态">
+      <Card title="我的设备身份" tag="识别码 · 申请状态">
         <div className="field">
-          <label className="field-label">本机识别码（后台凭此区分用户）</label>
+          <label className="field-label">本机识别码</label>
           <div className="text-input mono" style={{ userSelect: 'all' }}>{dev?.id || '生成中…'}</div>
         </div>
         <div className="row-actions">
-          {access?.mode === 'local' && <span className="sync-badge">本地模式（未配置 Neon，不启用门禁）</span>}
+          {access?.mode === 'local' && <span className="sync-badge">本地模式：未连接云数据库，数据只存本机</span>}
           {access?.mode === 'neon' && (
             <>
               <span className="sync-badge">
@@ -238,12 +244,13 @@ export default function Settings() {
               {access.isAdmin && <span className="sync-badge">管理员设备</span>}
             </>
           )}
-          {access?.mode === 'error' && <span className="muted small">查询失败：{access.message}</span>}
+          {access?.mode === 'error' && <span className="muted small">暂时连不上云数据库：{access.message}</span>}
         </div>
         <div className="settings-guide">
-          <b>说明：</b>访客首次打开站点会看到「访问申请」页——填昵称 + 自动生成的本机识别码提交申请；
-          你在「后台」页同意后，对方刷新即可进入。识别码由浏览器特征（UA/屏幕/时区/硬件/Canvas/WebGL）
-          加本地盐值生成，同一电脑同一浏览器稳定不变，清浏览器数据或换电脑会视为新设备需重新申请。
+          <b>这串码是干嘛的：</b>系统靠它认出「你是谁」。第一次打开站点时会让你填昵称、提交申请，
+          管理员在后台同意后，你刷新页面就能正常使用了。
+          同一台电脑、同一个浏览器，这串码是固定不变的；如果清理了浏览器数据或换了电脑，
+          就会被当成新设备，需要重新申请一次。
         </div>
       </Card>
 
@@ -254,14 +261,14 @@ export default function Settings() {
             onClick={() => {
               resetSettings()
               setForm(loadSettings())
-              setMsg({ tone: 'info', text: '已清空本地设置（账本记录不受影响）' })
+              setMsg({ tone: 'info', text: '已清空所有设置（账本记录不受影响）' })
             }}
           >
             清空全部设置
           </button>
         </div>
         <Note>
-          账本记录本身保存在 localStorage 的 <code>kl8_journal_v1</code> 键中；删库前建议先在「购彩账本」页导出 JSON 备份。
+          账本记录单独保存在本地，不会被清空。清空设置前建议先到「购彩账本」页导出 JSON 备份一份。
         </Note>
       </Card>
 

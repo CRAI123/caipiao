@@ -149,3 +149,34 @@ export async function countJournal(sql) {
   const rows = await sql`SELECT count(*)::int AS n FROM kl8_journal`
   return rows[0]?.n || 0
 }
+
+// ---------- 共享系统配置（大模型等，存 admin_config，所有人共用） ----------
+
+const LLM_CONFIG_KEY = 'shared_llm_config'
+
+/** 读取管理员统一配置的大模型参数；未配置返回 null */
+export async function getSharedLlmConfig(sql) {
+  const raw = await readConfig(sql, LLM_CONFIG_KEY)
+  if (!raw) return null
+  try {
+    const obj = JSON.parse(raw)
+    if (!obj || typeof obj !== 'object') return null
+    return {
+      llmBaseUrl: obj.llmBaseUrl || '',
+      llmModel: obj.llmModel || '',
+      llmKey: obj.llmKey || '',
+    }
+  } catch {
+    return null
+  }
+}
+
+/** 管理员保存共享大模型配置 */
+export async function setSharedLlmConfig(sql, { llmBaseUrl, llmModel, llmKey }) {
+  const payload = JSON.stringify({
+    llmBaseUrl: String(llmBaseUrl || ''),
+    llmModel: String(llmModel || ''),
+    llmKey: String(llmKey || ''),
+  })
+  await writeConfig(sql, LLM_CONFIG_KEY, payload)
+}

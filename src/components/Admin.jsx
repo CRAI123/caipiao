@@ -3,8 +3,9 @@
 import React, { useEffect, useState } from 'react'
 import { Card, Note } from './common.jsx'
 import { shortDevice } from '../lib/device.js'
-import { loadSettings, isNeonReady } from '../lib/settings.js'
+import { loadSettings, isNeonReady, envNeonUrl } from '../lib/settings.js'
 import { getSql } from '../lib/neon.js'
+import { pingLlm } from '../lib/ai.js'
 import {
   ensureAccessTables,
   hasAdminToken,
@@ -17,6 +18,8 @@ import {
   listAdmins,
   removeAdmin,
   countJournal,
+  getSharedLlmConfig,
+  setSharedLlmConfig,
 } from '../lib/access.js'
 
 const STATUS_LABEL = { pending: '待审核', approved: '已同意', rejected: '已拒绝' }
@@ -32,6 +35,9 @@ export default function Admin({ deviceId, isAdmin, onExit, onAdminStatus }) {
   const [admins, setAdmins] = useState([])
   const [journalCount, setJournalCount] = useState(0)
   const [notes, setNotes] = useState({})
+  const [llmForm, setLlmForm] = useState({ llmBaseUrl: '', llmModel: '', llmKey: '' })
+  const [llmSaving, setLlmSaving] = useState(false)
+  const [llmMsg, setLlmMsg] = useState(null)
 
   function sqlOrNull() {
     const settings = loadSettings()
@@ -47,12 +53,48 @@ export default function Admin({ deviceId, isAdmin, onExit, onAdminStatus }) {
     if (!sql) return
     try {
       await ensureAccessTables(sql)
-      const [reqs, ads, n] = await Promise.all([listRequests(sql), listAdmins(sql), countJournal(sql)])
+      const [reqs, ads, n, sharedLlm] = await Promise.all([
+        listRequests(sql),
+        listAdmins(sql),
+        countJournal(sql),
+        getSharedLlmConfig(sql),
+      ])
       setRequests(reqs)
       setAdmins(ads)
       setJournalCount(n)
+      if (sharedLlm) setLlmForm(sharedLlm)
     } catch (e) {
       setMsg({ tone: 'warn', text: `加载失败：${e.message}` })
+    }
+  }
+
+  const setLlm = (k) => (e) => setLlmForm({ ...llmForm, [k]: e.target.value })
+
+  async function saveLlm() {
+    const sql = sqlOrNull()
+    if (!sql) return
+    setLlmSaving(true)
+    setLlmMsg(null)
+    try {
+      await setSharedLlmConfig(sql, llmForm)
+      setLlmMsg({ tone: 'info', text: '大模型配置已保存到云端，所有用户共用' })
+    } catch (e) {
+      setLlmMsg({ tone: 'warn', text: `保存失败：${e.message}` })
+    } finally {
+      setLlmSaving(false)
+    }
+  }
+
+  async function testLlm() {
+    setLlmSaving(true)
+    setLlmMsg(null)
+    try {
+      const reply = await pingLlm(llmForm)
+      setLlmMsg({ tone: 'info', text: `大模型接口连通，测试回复：${reply}` })
+    } catch (e) {
+      setLlmMsg({ tone: 'warn', text: `大模型接口测试失败：${e.message}` })
+    } finally {
+      setLlmSaving(false)
     }
   }
 
@@ -342,6 +384,57 @@ export default function Admin({ deviceId, isAdmin, onExit, onAdminStatus }) {
               移除后该设备需重新输入令牌才能进后台。申请数据存放在 Neon 的 access_requests 表，
               与账本（kl8_journal）相互独立。
             </Note>
+          </Card>
+
+          <Card title="系统配置" tag="云数据库 / 大模型（全体用户共用）">
+            <div className="field">
+              <label className="field-label">Neon 云数据库连接串（构建期注入，只读）</label>
+              <div className="text-input mono" style={{ userSelect: 'all', opacity: 0.85 }}>
+                {loadSettings().neonUrl || envNeonUrl || '(未配置)'}
+              </div>
+              <div className="muted small" style={{ marginTop: 4 }}>
+                连接串由 <code>.env.local</code> 的 <code>DATABASE_URL</code> 在构建时注入，普通用户无法在设置页修改。
+                账本、申请、管理员、共享大模型配置都存在这个库里。
+              </div>
+            </div>
+
+            <div style={{ height: 16 }} />
+
+            <div className="field-row">
+              <div className="field">
+                <label className="field-label">大模型 Base URL（OpenAI 兼容）</label>
+                <input className="text-input mono" value={llmForm.llmBaseUrl} onChange={setLlm('llmBaseUrl')} placeholder="https://api.deepseek.com" />
+              </div>
+              <div className="field">
+                <label className="field-label">模型名</label>
+                <input className="text-input mono" value={llmForm.llmModel} onChange={setLlm('llmModel')} placeholder="deepseek-chat" />
+              </div>
+              <div className="field">
+                <label className="field-label">API Key</label>
+                <input
+                  className="text-input mono"
+                  type="password"
+                  value={llmForm.llmKey}
+                  onChange={setLlm('llmKey')}
+                  placeholder="sk-…"
+                />
+              </div>
+            </div>
+            <div className="row-actions">
+              <button className="btn-primary" onClick={testLlm} disabled={llmSaving || !llmForm.llmKey}>
+                {llmSaving ? '测试中…' : '测试连通'}
+              </button>
+              <button className="tab-btn" onClick={saveLlm} disabled={llmSaving}>
+                {llmSaving ? '保存中…' : '保存到云端（全员生效）'}
+              </button>
+            </div>
+            {llmMsg && <Note tone={llmMsg.tone === 'warn' ? 'warn' : 'info'}>{llmMsg.text}</Note>}
+            <div className="settings-guide">
+              <b>共享机制：</b>保存在 Neon 的 <code>admin_config</code> 表中，所有已授权用户的 AI 分析都会自动使用这套配置
+              （用户本机未自行填写时回退到此）。管理员改一次，全员生效，无需每个人单独配 Key。
+              <br />
+              <b>边界（已写死在提示词）：</b>AI 只分析真实账本，严禁预测号码/宣称规律/鼓励加注。
+            </div>
           </Card>
         </>
       )}
