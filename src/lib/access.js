@@ -180,3 +180,36 @@ export async function setSharedLlmConfig(sql, { llmBaseUrl, llmModel, llmKey }) 
   })
   await writeConfig(sql, LLM_CONFIG_KEY, payload)
 }
+
+// ---------- 共享飞书配置（应用凭证 + 多维表格，存 admin_config，所有人共用） ----------
+
+const LARK_CONFIG_KEY = 'shared_lark_config'
+
+/** 读取管理员统一配置的飞书参数；未配置返回 null */
+export async function getSharedLarkConfig(sql) {
+  const raw = await readConfig(sql, LARK_CONFIG_KEY)
+  if (!raw) return null
+  try {
+    const obj = JSON.parse(raw)
+    if (!obj || typeof obj !== 'object') return null
+    return {
+      feishuAppId: obj.feishuAppId || '',
+      feishuAppSecret: obj.feishuAppSecret || '',
+      feishuAppToken: obj.feishuAppToken || '',
+      feishuTableId: obj.feishuTableId || '',
+    }
+  } catch {
+    return null
+  }
+}
+
+/** 管理员保存共享飞书配置 */
+export async function setSharedLarkConfig(sql, { feishuAppId, feishuAppSecret, feishuAppToken, feishuTableId }) {
+  const payload = JSON.stringify({
+    feishuAppId: String(feishuAppId || ''),
+    feishuAppSecret: String(feishuAppSecret || ''),
+    feishuAppToken: String(feishuAppToken || ''),
+    feishuTableId: String(feishuTableId || ''),
+  })
+  await writeConfig(sql, LARK_CONFIG_KEY, payload)
+}

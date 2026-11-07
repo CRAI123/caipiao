@@ -7,7 +7,7 @@ import { loadSettings, isNeonReady, isLlmReady } from './settings.js'
 import { pushRecords, getSql } from './neon.js'
 import { analyzeJournal } from './ai.js'
 import { journalStats } from './journal.js'
-import { ensureAccessTables, getSharedLlmConfig } from './access.js'
+import { ensureAccessTables, getSharedLlmConfig, getSharedLarkConfig } from './access.js'
 
 /** 把一条记录上传 Neon，成功返回带上同步时间的新记录 */
 export async function syncRecordToNeon(rec) {
@@ -69,4 +69,58 @@ export async function analyzeRecord(rec, list, latestDraw) {
     }
   }
   return next
+}
+
+/**
+ * 解析飞书配置：优先用本机 localStorage；未配置则从 Neon 的 admin_config
+ * 读取管理员统一配置的共享参数。
+ */
+export async function resolveLarkSettings() {
+  const local = loadSettings()
+  if (local.feishuAppId && local.feishuAppSecret && local.feishuAppToken && local.feishuTableId) {
+    return local
+  }
+  if (!isNeonReady(local)) return local
+  try {
+    const sql = getSql(local.neonUrl)
+    await ensureAccessTables(sql)
+    const shared = await getSharedLarkConfig(sql)
+    if (shared && shared.feishuAppId) {
+      return { ...local, ...shared }
+    }
+  } catch {
+    /* 云端读取失败，退回本地配置 */
+  }
+  return local
+}
+
+/**
+ * 把账本记录同步到飞书多维表格。
+ * - 桌面端（Tauri）：调用 Rust 命令 sync_lark，服务端请求飞书，无跨域限制
+ * - 浏览器端：返回提示让用户用本地脚本同步
+ */
+export async function syncToLark(records) {
+  const settings = await resolveLarkSettings()
+  const { feishuAppId, feishuAppSecret, feishuAppToken, feishuTableId } = settings
+  if (!feishuAppId || !feishuAppSecret || !feishuAppToken || !feishuTableId) {
+    throw new Error('管理员尚未配置飞书，请联系管理员在后台填写飞书应用凭证')
+  }
+
+  const isTauri = typeof window !== 'undefined' && !!window.__TAURI_INTERNALS__
+  if (isTauri) {
+    const { invoke } = await import('@tauri-apps/api/core')
+    const result = await invoke('sync_lark', {
+      records,
+      cfg: {
+        appId: feishuAppId,
+        appSecret: feishuAppSecret,
+        appToken: feishuAppToken,
+        tableId: feishuTableId,
+      },
+    })
+    return result
+  }
+
+  // 浏览器模式无法直接调飞书（CORS），需要本地脚本
+  throw new Error('浏览器模式下请用本地脚本同步：到「购彩账本」页导出 JSON，然后运行 scripts/sync-lark.mjs')
 }

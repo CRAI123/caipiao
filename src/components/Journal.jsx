@@ -1,6 +1,6 @@
 // 购彩账本 —— 记录总览：统计卡 / 命中分布 vs 理论 / 按玩法 / 补录 / AI 报告历史
 // ⚠️ 账本只复盘真实购买行为；命中波动属随机现象，不代表方法有效或失效。
-import React, { useMemo, useState } from 'react'
+import React, { useEffect, useMemo, useState } from 'react'
 import { Card, Note, Ball, StatCard, yuan } from './common.jsx'
 import {
   loadJournal,
@@ -10,8 +10,8 @@ import {
   journalStats,
   exportJson,
 } from '../lib/journal.js'
-import { loadSettings, isNeonReady, isLlmReady, isLarkReady, larkSyncCommand } from '../lib/settings.js'
-import { syncRecordToNeon, syncAllToNeon, analyzeRecord } from '../lib/sync.js'
+import { loadSettings, isNeonReady, isLlmReady } from '../lib/settings.js'
+import { syncRecordToNeon, syncAllToNeon, analyzeRecord, syncToLark, resolveLarkSettings } from '../lib/sync.js'
 import DailyCheckin from './DailyCheckin.jsx'
 
 export default function Journal({ draws }) {
@@ -19,6 +19,15 @@ export default function Journal({ draws }) {
   const [msg, setMsg] = useState(null)
   const [busy, setBusy] = useState(false)
   const [backfillId, setBackfillId] = useState('')
+  const [larkReady, setLarkReady] = useState(false)
+
+  // 检查飞书配置是否就绪（含管理员共享配置）
+  useEffect(() => {
+    ;(async () => {
+      const s = await resolveLarkSettings()
+      setLarkReady(!!(s.feishuAppId && s.feishuAppSecret && s.feishuAppToken && s.feishuTableId))
+    })()
+  }, [])
 
   const stats = useMemo(() => journalStats(list), [list])
   const settings = loadSettings()
@@ -85,13 +94,19 @@ export default function Journal({ draws }) {
     URL.revokeObjectURL(a.href)
   }
 
-  async function copyLarkCommand() {
-    const cmd = larkSyncCommand(loadSettings())
+  async function doSyncLark() {
+    setBusy(true)
     try {
-      await navigator.clipboard.writeText(cmd)
-      setMsg({ tone: 'info', text: '同步命令已复制：在项目根目录打开 PowerShell 粘贴执行（含密钥，勿外传）' })
-    } catch {
-      setMsg({ tone: 'warn', text: `复制失败，请手动执行：${cmd}` })
+      const result = await syncToLark(list)
+      if (result.skipped) {
+        setMsg({ tone: 'info', text: '没有需要同步的记录' })
+      } else {
+        setMsg({ tone: 'info', text: `飞书同步完成：更新 ${result.updated} 条，新建 ${result.created} 条` })
+      }
+    } catch (e) {
+      setMsg({ tone: 'warn', text: `飞书同步失败：${e.message}` })
+    } finally {
+      setBusy(false)
     }
   }
 
@@ -188,26 +203,24 @@ export default function Journal({ draws }) {
         </Card>
       </div>
 
-      <Card title="账本工具" tag="Neon 云数据库 / 飞书多维表格">
+      <Card title="账本工具" tag="云数据库 / 飞书多维表格">
         <div className="row-actions">
           <button className="btn-primary" onClick={doSyncAll} disabled={busy || !list.length || !isNeonReady(settings)}>
-            同步全部到 Neon
+            同步全部到云数据库
+          </button>
+          <button className="btn-primary" onClick={doSyncLark} disabled={busy || !list.length || !larkReady}>
+            {busy ? '同步中…' : '同步到飞书'}
           </button>
           <button className="tab-btn" onClick={doExport} disabled={!list.length}>
-            导出 JSON（journal-export.json）
-          </button>
-          <button className="tab-btn" onClick={copyLarkCommand} disabled={!list.length || !isLarkReady(settings)}>
-            复制飞书同步命令
+            导出 JSON
           </button>
           <span className="muted small">
-            Neon：{isNeonReady(settings) ? '已配置' : '未配置'} · 飞书：{isLarkReady(settings) ? '已配置' : '未配置'}
-            （到「设置」页填写）
+            云数据库：{isNeonReady(settings) ? '已配置' : '未配置'} · 飞书：{larkReady ? '已配置' : '未配置'}
+            （由管理员统一配置）
           </span>
         </div>
         <Note>
-          飞书多维表格由本地脚本写入（浏览器无法安全携带应用密钥调用）：先点「导出 JSON」，
-          再复制同步命令，在项目根目录的 PowerShell 中执行。
-          脚本会自动把记录按「日期」更新或新建，并补齐缺失的表格字段。
+          账本会同步到管理员配置的飞书多维表格，按「日期」自动更新或新建记录，无需手动操作。
         </Note>
         {msg && <Note tone={msg.tone === 'warn' ? 'warn' : 'info'}>{msg.text}</Note>}
       </Card>

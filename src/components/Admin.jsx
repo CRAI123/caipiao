@@ -20,6 +20,8 @@ import {
   countJournal,
   getSharedLlmConfig,
   setSharedLlmConfig,
+  getSharedLarkConfig,
+  setSharedLarkConfig,
 } from '../lib/access.js'
 
 const STATUS_LABEL = { pending: '待审核', approved: '已同意', rejected: '已拒绝' }
@@ -38,6 +40,9 @@ export default function Admin({ deviceId, isAdmin, onExit, onAdminStatus }) {
   const [llmForm, setLlmForm] = useState({ llmBaseUrl: '', llmModel: '', llmKey: '' })
   const [llmSaving, setLlmSaving] = useState(false)
   const [llmMsg, setLlmMsg] = useState(null)
+  const [larkForm, setLarkForm] = useState({ feishuAppId: '', feishuAppSecret: '', feishuAppToken: '', feishuTableId: '' })
+  const [larkSaving, setLarkSaving] = useState(false)
+  const [larkMsg, setLarkMsg] = useState(null)
 
   function sqlOrNull() {
     const settings = loadSettings()
@@ -53,22 +58,25 @@ export default function Admin({ deviceId, isAdmin, onExit, onAdminStatus }) {
     if (!sql) return
     try {
       await ensureAccessTables(sql)
-      const [reqs, ads, n, sharedLlm] = await Promise.all([
+      const [reqs, ads, n, sharedLlm, sharedLark] = await Promise.all([
         listRequests(sql),
         listAdmins(sql),
         countJournal(sql),
         getSharedLlmConfig(sql),
+        getSharedLarkConfig(sql),
       ])
       setRequests(reqs)
       setAdmins(ads)
       setJournalCount(n)
       if (sharedLlm) setLlmForm(sharedLlm)
+      if (sharedLark) setLarkForm(sharedLark)
     } catch (e) {
       setMsg({ tone: 'warn', text: `加载失败：${e.message}` })
     }
   }
 
   const setLlm = (k) => (e) => setLlmForm({ ...llmForm, [k]: e.target.value })
+  const setLark = (k) => (e) => setLarkForm({ ...larkForm, [k]: e.target.value })
 
   async function saveLlm() {
     const sql = sqlOrNull()
@@ -95,6 +103,21 @@ export default function Admin({ deviceId, isAdmin, onExit, onAdminStatus }) {
       setLlmMsg({ tone: 'warn', text: `大模型接口测试失败：${e.message}` })
     } finally {
       setLlmSaving(false)
+    }
+  }
+
+  async function saveLark() {
+    const sql = sqlOrNull()
+    if (!sql) return
+    setLarkSaving(true)
+    setLarkMsg(null)
+    try {
+      await setSharedLarkConfig(sql, larkForm)
+      setLarkMsg({ tone: 'info', text: '飞书配置已保存到云端，所有用户共用' })
+    } catch (e) {
+      setLarkMsg({ tone: 'warn', text: `保存失败：${e.message}` })
+    } finally {
+      setLarkSaving(false)
     }
   }
 
@@ -434,6 +457,42 @@ export default function Admin({ deviceId, isAdmin, onExit, onAdminStatus }) {
               （用户本机未自行填写时回退到此）。管理员改一次，全员生效，无需每个人单独配 Key。
               <br />
               <b>边界（已写死在提示词）：</b>AI 只分析真实账本，严禁预测号码/宣称规律/鼓励加注。
+            </div>
+
+            <div style={{ height: 16 }} />
+
+            <div className="field-row">
+              <div className="field">
+                <label className="field-label">飞书 App ID</label>
+                <input className="text-input mono" value={larkForm.feishuAppId} onChange={setLark('feishuAppId')} placeholder="cli_a1b2c3…" />
+              </div>
+              <div className="field">
+                <label className="field-label">App Secret</label>
+                <input className="text-input mono" type="password" value={larkForm.feishuAppSecret} onChange={setLark('feishuAppSecret')} />
+              </div>
+            </div>
+            <div className="field-row">
+              <div className="field">
+                <label className="field-label">多维表格 app_token</label>
+                <input className="text-input mono" value={larkForm.feishuAppToken} onChange={setLark('feishuAppToken')} placeholder="多维表格链接 /base/XXXX 里的 XXXX" />
+              </div>
+              <div className="field">
+                <label className="field-label">数据表 table_id</label>
+                <input className="text-input mono" value={larkForm.feishuTableId} onChange={setLark('feishuTableId')} placeholder="tblXXXX" />
+              </div>
+            </div>
+            <div className="row-actions">
+              <button className="tab-btn" onClick={saveLark} disabled={larkSaving}>
+                {larkSaving ? '保存中…' : '保存到云端（全员生效）'}
+              </button>
+            </div>
+            {larkMsg && <Note tone={larkMsg.tone === 'warn' ? 'warn' : 'info'}>{larkMsg.text}</Note>}
+            <div className="settings-guide">
+              <b>同步方式：</b>用户在「购彩账本」页点「同步到飞书」，由桌面端 Rust 直接调用飞书 OpenAPI
+              写入多维表格，按「日期」自动更新或新建，无需用户操作本地脚本。
+              <br />
+              <b>配置步骤：</b>新建多维表格 → 飞书开放平台创建企业自建应用（开通 bitable:app 权限）→
+              把应用加为多维表格的可编辑协作者。
             </div>
           </Card>
         </>

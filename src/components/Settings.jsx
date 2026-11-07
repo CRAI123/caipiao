@@ -3,11 +3,11 @@
 //    请勿把填好了密钥的本站部署到公网或分享给他人。
 import React, { useEffect, useState } from 'react'
 import { Card, Note } from './common.jsx'
-import { loadSettings, saveSettings, resetSettings, isNeonReady, isLlmReady, isLarkReady, larkSyncCommand, envNeonUrl } from '../lib/settings.js'
+import { loadSettings, saveSettings, resetSettings, isNeonReady, isLlmReady, isLarkReady, envNeonUrl } from '../lib/settings.js'
 import { testConnection, getSql } from '../lib/neon.js'
 import { pingLlm } from '../lib/ai.js'
 import { getDeviceId } from '../lib/device.js'
-import { ensureAccessTables, fetchMyRequest, listAdmins } from '../lib/access.js'
+import { ensureAccessTables, fetchMyRequest, listAdmins, getSharedLarkConfig, setSharedLarkConfig } from '../lib/access.js'
 
 const ACCESS_LABEL = { pending: '待审核', approved: '已同意', rejected: '被拒绝' }
 
@@ -54,6 +54,30 @@ export default function Settings() {
   function save() {
     saveSettings(form)
     setMsg({ tone: 'info', text: '设置已保存' })
+  }
+
+  async function saveLarkToCloud() {
+    const s = loadSettings()
+    if (!isNeonReady(s)) {
+      return setMsg({ tone: 'warn', text: '请先配置云数据库，才能把飞书配置同步到云端' })
+    }
+    setBusy(true)
+    try {
+      const sql = getSql(s.neonUrl)
+      await ensureAccessTables(sql)
+      await setSharedLarkConfig(sql, {
+        feishuAppId: form.feishuAppId,
+        feishuAppSecret: form.feishuAppSecret,
+        feishuAppToken: form.feishuAppToken,
+        feishuTableId: form.feishuTableId,
+      })
+      saveSettings(form)
+      setMsg({ tone: 'info', text: '飞书配置已保存到云端，所有用户共用' })
+    } catch (e) {
+      setMsg({ tone: 'warn', text: `保存失败：${e.message}` })
+    } finally {
+      setBusy(false)
+    }
   }
 
   async function testNeon() {
@@ -164,12 +188,6 @@ export default function Settings() {
           <b>不会做什么：</b>绝不预测号码、不宣称有规律、不建议你多买。
         </div>
       </Card>
-        </>
-      ) : (
-        <Note tone="info">
-          云数据库和大模型 API 已由管理员统一配置好了，大家共用同一套，你不需要再填写，直接用就行。
-        </Note>
-      )}
 
       <Card title="飞书多维表格（同步）" tag={isLarkReady(form) ? '已配置' : '未配置'}>
         <div className="field-row">
@@ -199,19 +217,8 @@ export default function Settings() {
         </div>
         <div className="row-actions">
           <button className="tab-btn" onClick={save}>保存设置</button>
-          <button
-            className="tab-btn"
-            onClick={async () => {
-              save()
-              try {
-                await navigator.clipboard.writeText(larkSyncCommand(form))
-                setMsg({ tone: 'info', text: '同步命令已复制到剪贴板（含密钥，请勿外传）' })
-              } catch {
-                setMsg({ tone: 'warn', text: `复制失败，请手动复制：${larkSyncCommand(form)}` })
-              }
-            }}
-          >
-            复制同步命令
+          <button className="btn-primary" onClick={saveLarkToCloud} disabled={busy}>
+            {busy ? '保存中…' : '保存到云端（全员生效）'}
           </button>
         </div>
         <div className="settings-guide">
@@ -222,11 +229,16 @@ export default function Settings() {
           拿到 App ID / App Secret，开通 <code>bitable:app</code> 权限并发布；
           ③ 回到多维表格，右上角「…」→ 添加文档应用，把刚建的应用加为可编辑协作者。
           <br />
-          <b>怎么同步：</b>由于浏览器不能直接带密钥调飞书接口，同步靠本地脚本完成——
-          在「购彩账本」页点「复制飞书同步命令」，在项目目录的 PowerShell 里粘贴执行即可。
-          脚本会按日期自动更新或新建记录，缺的字段也会自动补上。
+          <b>怎么同步：</b>在「购彩账本」页点「同步到飞书」按钮，系统会自动把记录按「日期」更新或新建到表格里，
+          缺的字段也会自动补上。
         </div>
       </Card>
+        </>
+      ) : (
+        <Note tone="info">
+          云数据库、大模型和飞书都由管理员统一配置好了，大家共用同一套，你不需要填写，直接用就行。
+        </Note>
+      )}
 
       <Card title="我的设备身份" tag="识别码 · 申请状态">
         <div className="field">
