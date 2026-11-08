@@ -13,6 +13,7 @@ import {
   isBig,
   road,
 } from '../lib/stats.js'
+import { aiPredict, storePrediction } from '../lib/api.js'
 import BetVerify from './BetVerify.jsx'
 
 const MODES = [
@@ -48,6 +49,10 @@ function profile(nums) {
 export default function Predict({ draws }) {
   const [hotMode, setHotMode] = useState('mix')
   const [play, setPlay] = useState(10)
+  const [aiPicks, setAiPicks] = useState(null)
+  const [aiReasoning, setAiReasoning] = useState('')
+  const [aiBusy, setAiBusy] = useState(false)
+  const [aiMsg, setAiMsg] = useState(null)
 
   const { scores, weighted, missing, window } = useMemo(
     () => scoreBalls(draws, { periods: 100, halfLife: 20, hotMode }),
@@ -127,6 +132,40 @@ export default function Predict({ draws }) {
     URL.revokeObjectURL(a.href)
   }
 
+  /** AI 选号：底层统计逻辑之后，调用 AI 辅助分析选号，并自动存储预测 */
+  async function doAiPredict() {
+    setAiBusy(true)
+    setAiMsg(null)
+    try {
+      const result = await aiPredict({ draws, play, mode: hotMode })
+      setAiPicks(result.aiPicks)
+      setAiReasoning(result.aiReasoning)
+      // 自动存储预测，供每日 cron 复盘对比
+      const latest = draws[0]
+      const nextId = latest ? latest.id + 1 : null
+      if (nextId) {
+        try {
+          await storePrediction({
+            drawId: nextId,
+            play,
+            mode: hotMode,
+            picks: mainNums,
+            dans,
+            tuos,
+            aiPicks: result.aiPicks,
+          })
+          setAiMsg({ tone: 'info', text: `AI 选号已生成，预测已自动存档（第 ${nextId} 期）` })
+        } catch {
+          setAiMsg({ tone: 'info', text: 'AI 选号已生成（存档失败，不影响使用）' })
+        }
+      }
+    } catch (e) {
+      setAiMsg({ tone: 'warn', text: `AI 选号失败：${e.message}` })
+    } finally {
+      setAiBusy(false)
+    }
+  }
+
   return (
     <div className="page">
       <div className="toolbar">
@@ -146,7 +185,10 @@ export default function Predict({ draws }) {
         ))}
         <span className="toolbar-note">样本 {window} 期 · {hotMode === 'multi' ? '四窗口加权 25/30/30/15' : '半衰期 20 期'}</span>
         <span className="toolbar-sep" />
-        <button className="btn-primary" onClick={exportTxt}>导出推荐方案（.txt）</button>
+        <button className="btn-primary" onClick={doAiPredict} disabled={aiBusy}>
+          {aiBusy ? 'AI 分析中…' : '🤖 AI 选号'}
+        </button>
+        <button className="tab-btn" onClick={exportTxt}>导出推荐方案（.txt）</button>
       </div>
 
       <Card title={`第 ${nextId} 期 · ${PLAY_LABEL[play]} 研究推荐`} tag="评分前列 + 结构约束 · 三张单式票">
@@ -203,6 +245,32 @@ export default function Predict({ draws }) {
           奇偶接近均衡。这让号码形态更像常见开奖，<b>但不提高中奖概率</b>。
         </Note>
       </Card>
+
+      {aiPicks && (
+        <Card title={`🤖 AI 选号 · 第 ${nextId} 期`} tag="底层统计 + AI 分析">
+          <div className="predict-head">
+            <div>
+              <div className="predict-sub">AI 推荐 {play} 码</div>
+              <span className="draw-balls predict-balls">
+                {aiPicks.map((n) => (
+                  <Ball key={n} n={n} size="md" kind="auto" />
+                ))}
+              </span>
+            </div>
+          </div>
+          {aiReasoning && (
+            <div className="settings-guide" style={{ marginTop: 12, whiteSpace: 'pre-wrap' }}>
+              <b>AI 分析理由：</b>
+              {'\n'}{aiReasoning}
+            </div>
+          )}
+          <Note tone="warn">
+            AI 选号仅基于历史数据统计做参考分析，开奖为独立随机事件，不提高中奖概率。理性购彩，量力而行。
+          </Note>
+        </Card>
+      )}
+
+      {aiMsg && <Note tone={aiMsg.tone === 'warn' ? 'warn' : 'info'}>{aiMsg.text}</Note>}
 
       <div className="stat-grid stat-grid-4">
         <StatCard label="参与打分号码" value={BALL_MAX} note="全部 80 个号码" />

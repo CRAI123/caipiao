@@ -37,7 +37,12 @@ export default function Admin({ deviceId, isAdmin, onExit, onAdminStatus }) {
   const [admins, setAdmins] = useState([])
   const [journalCount, setJournalCount] = useState(0)
   const [notes, setNotes] = useState({})
-  const [llmForm, setLlmForm] = useState({ llmBaseUrl: '', llmModel: '', llmKey: '' })
+  const defaultSettings = loadSettings()
+  const [llmForm, setLlmForm] = useState({
+    llmBaseUrl: defaultSettings.llmBaseUrl,
+    llmModel: defaultSettings.llmModel,
+    llmKey: defaultSettings.llmKey,
+  })
   const [llmSaving, setLlmSaving] = useState(false)
   const [llmMsg, setLlmMsg] = useState(null)
   const [larkForm, setLarkForm] = useState({ feishuAppId: '', feishuAppSecret: '', feishuAppToken: '', feishuTableId: '' })

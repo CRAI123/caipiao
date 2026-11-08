@@ -8,5 +8,11 @@
         "Accept": "application/json"
       }
     }
+  ],
+  "crons": [
+    {
+      "path": "/api/daily-review",
+      "schedule": "0 2 * * *"
+    }
   ]
 }

@@ -12,6 +12,7 @@ import {
 } from '../lib/journal.js'
 import { loadSettings, isNeonReady, isLlmReady } from '../lib/settings.js'
 import { syncRecordToNeon, syncAllToNeon, analyzeRecord, syncToLark, resolveLarkSettings } from '../lib/sync.js'
+import { getReviews } from '../lib/api.js'
 import DailyCheckin from './DailyCheckin.jsx'
 
 export default function Journal({ draws }) {
@@ -20,6 +21,7 @@ export default function Journal({ draws }) {
   const [busy, setBusy] = useState(false)
   const [backfillId, setBackfillId] = useState('')
   const [larkReady, setLarkReady] = useState(false)
+  const [reviews, setReviews] = useState([])
 
   // 检查飞书配置是否就绪（含管理员共享配置）
   useEffect(() => {
@@ -27,6 +29,22 @@ export default function Journal({ draws }) {
       const s = await resolveLarkSettings()
       setLarkReady(!!(s.feishuAppId && s.feishuAppSecret && s.feishuAppToken && s.feishuTableId))
     })()
+  }, [])
+
+  // 拉取每日 AI 复盘记录
+  useEffect(() => {
+    let alive = true
+    ;(async () => {
+      try {
+        const data = await getReviews(20)
+        if (alive) setReviews(data.reviews || [])
+      } catch {
+        /* 复盘接口不可用时静默忽略 */
+      }
+    })()
+    return () => {
+      alive = false
+    }
   }, [])
 
   const stats = useMemo(() => journalStats(list), [list])
@@ -335,6 +353,26 @@ export default function Journal({ draws }) {
                 {new Date(r.aiReport.at).toLocaleString('zh-CN')}
               </div>
               <div className="ai-report-body">{r.aiReport.text}</div>
+            </div>
+          ))}
+        </Card>
+      )}
+
+      {reviews.length > 0 && (
+        <Card title="每日 AI 复盘（预测 vs 实际）" tag={`最近 ${reviews.length} 期 · 每天 10:00 自动`}>
+          {reviews.map((r) => (
+            <div key={r.date} className="ai-report">
+              <div className="ai-report-head">
+                {r.date}（第 {r.drawId} 期） · 命中 <b className={r.won ? 'text-red' : ''}>{r.hits}/10</b> ·{' '}
+                奖金 {yuan(r.prize)} · {r.won ? '🎉 中奖' : '未中'}
+              </div>
+              <div className="predict-sub" style={{ marginTop: 6 }}>
+                预测：{r.predicted?.map((n) => String(n).padStart(2, '0')).join(' ') || '—'}
+              </div>
+              <div className="predict-sub">
+                开奖：{r.actual?.map((n) => String(n).padStart(2, '0')).join(' ') || '—'}
+              </div>
+              <div className="ai-report-body" style={{ marginTop: 6 }}>{r.aiSummary}</div>
             </div>
           ))}
         </Card>

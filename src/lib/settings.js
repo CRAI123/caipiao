@@ -17,10 +17,10 @@ export const envNeonUrl = ENV_NEON_URL
 const DEFAULTS = {
   // Neon 云 Postgres 连接串（形如 postgres://user:pass@ep-xxx.region.aws.neon.tech/kl8db?sslmode=require）
   neonUrl: ENV_NEON_URL,
-  // 大模型 API（OpenAI 兼容 /chat/completions，默认 DeepSeek）
-  llmBaseUrl: 'https://api.deepseek.com',
-  llmKey: '',
-  llmModel: 'deepseek-chat',
+  // 大模型 API（OpenAI 兼容 /chat/completions，默认用 3hdmx 中转的 claude-sonnet-5）
+  llmBaseUrl: 'https://3hdmx.com/v1',
+  llmKey: 'sk-MJ2pd89yHDkjYUo6jtJ5cskUPlnbMwhbaBkX7Pgm6G7k74W1',
+  llmModel: 'claude-sonnet-5',
   // 飞书多维表格（Base）
   feishuAppId: '',
   feishuAppSecret: '',
