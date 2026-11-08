@@ -4,14 +4,16 @@
 // 3. 对比命中数与奖金
 // 4. 调用 AI 总结：中了→总结方法；没中→总结上报
 // 5. 存入 kl8_daily_reviews
-import { getSql, ensureTables, readConfig } from './lib/neon.js'
-import { fetchKl8Draws } from './lib/kl8.js'
-import { resolveLlmSettings, callAi } from './lib/ai.js'
+import { getSql, ensureTables } from './_lib/neon.js'
+import { fetchKl8Draws } from './_lib/kl8.js'
+import { resolveLlmSettings, callAi } from './_lib/ai.js'
 import { prizeFor } from '../src/lib/stats.js'
+import { applyCors } from './_lib/http.js'
 
 const PLAY = 10 // 默认选十
 
 export default async function handler(req, res) {
+  if (applyCors(req, res)) return
   try {
     const sql = getSql()
     await ensureTables(sql)

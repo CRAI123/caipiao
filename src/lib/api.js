@@ -7,15 +7,14 @@ const WEB_BASE = 'https://cai.rayzo.cn'
 
 /** 解析 API 基础地址 */
 export function apiBase() {
-  // 浏览器环境且非 Tauri：用相对路径（同域 Vercel）
-  if (typeof window !== 'undefined' && !isTauri()) {
-    // 如果当前页面是 file:// 或 localhost，也走线上域名
-    const proto = window.location?.protocol
-    if (proto === 'http:' || proto === 'https:') {
-      return ''
-    }
-  }
-  return WEB_BASE
+  // 桌面端（含 iframe 嵌套）：直接走线上域名的 Serverless 接口
+  if (isTauri()) return WEB_BASE
+  if (typeof window === 'undefined') return WEB_BASE
+  // 本地开发 / file:// 等非线上环境：也只能调用线上接口
+  const host = window.location?.hostname || ''
+  if (!host || host === 'localhost' || host === '127.0.0.1') return WEB_BASE
+  // 线上部署：同域相对路径
+  return ''
 }
 
 /** 通用 fetch 封装 */

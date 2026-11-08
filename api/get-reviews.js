@@ -1,8 +1,10 @@
 // GET /api/get-reviews?limit=30
 // 拉取每日 AI 复盘记录，供前端展示
-import { getSql, ensureTables } from './lib/neon.js'
+import { getSql, ensureTables } from './_lib/neon.js'
+import { applyCors } from './_lib/http.js'
 
 export default async function handler(req, res) {
+  if (applyCors(req, res)) return
   try {
     const limit = Math.min(Number(req.query?.limit) || 30, 100)
     const sql = getSql()

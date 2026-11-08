@@ -3,9 +3,11 @@
 // body: { draws: [{id, date, nums}], play: 10, mode: 'mix' }
 // 返回: { basePicks, aiPicks, aiReasoning }
 import { scoreBalls, pickBalanced, range, BALL_MAX } from '../src/lib/stats.js'
-import { resolveLlmSettings, callAi } from './lib/ai.js'
+import { resolveLlmSettings, callAi } from './_lib/ai.js'
+import { applyCors } from './_lib/http.js'
 
 export default async function handler(req, res) {
+  if (applyCors(req, res)) return
   if (req.method !== 'POST') {
     return res.status(405).json({ error: 'Method not allowed' })
   }

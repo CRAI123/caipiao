@@ -1,9 +1,11 @@
 // POST /api/store-prediction
 // 存储一期预测号码，供每日 cron 与实际开奖对比
 // body: { drawId, play, mode, picks: number[], dans: number[], tuos: number[], aiPicks: number[] }
-import { getSql, ensureTables } from './lib/neon.js'
+import { getSql, ensureTables } from './_lib/neon.js'
+import { applyCors } from './_lib/http.js'
 
 export default async function handler(req, res) {
+  if (applyCors(req, res)) return
   if (req.method !== 'POST') {
     return res.status(405).json({ error: 'Method not allowed' })
   }
