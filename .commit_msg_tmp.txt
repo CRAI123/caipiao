@@ -1,5 +1,0 @@
-fix: 修正 Vercel 部署细节（共享模块目录、CORS、API 基址）
-
-- api/lib 更名为 api/_lib，避免被 Vercel 当作独立接口路由暴露
-- 新增 CORS 响应头，支持桌面端 iframe 跨域调用线上 API
-- apiBase 在桌面端/本地开发时固定指向线上域名，避免请求打到错误 host
