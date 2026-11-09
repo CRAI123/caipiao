@@ -221,6 +221,159 @@ export default function FC3D({ draws }) {
         </div>
       )}
 
+      {/* 012 路专项 */}
+      {pred.road012 && (
+        <div className="odd-card">
+          <div className="odd-card-head">
+            <h3>012 路专项</h3>
+            <span className="muted small">除 3 余数分布 · 荐路 / 杀路</span>
+          </div>
+
+          <div className="road-legend">
+            {pred.road012.roadName.map((name, r) => (
+              <span key={r} className={`road-chip road-${r}`}>
+                {name}：{pred.road012.roadDigits[r].join(' ')}
+              </span>
+            ))}
+          </div>
+
+          <div className="odd-pos-row">
+            {pred.road012.perPosRoad.map((p) => (
+              <div key={p.pos} className="odd-pos">
+                <div className="odd-pos-label">{p.label}位路数</div>
+                <span className={`road-bit road-${p.recommend}`}>{p.recommend}路</span>
+                <div className="odd-pos-sub">
+                  当前 {p.current}路 · 近{p.counts.join('/')}
+                </div>
+                <div className="odd-pos-reason">
+                  倾向 {p.recommend} 路（{pred.road012.roadDigits[p.recommend].join(' ')}）
+                </div>
+              </div>
+            ))}
+          </div>
+
+          <div className="table-scroll">
+            <table className="ledger-table">
+              <thead>
+                <tr>
+                  <th>路数</th>
+                  <th>号码</th>
+                  <th>近期次数</th>
+                  <th>遗漏</th>
+                  <th>评分</th>
+                  <th>建议</th>
+                </tr>
+              </thead>
+              <tbody>
+                {pred.road012.roadName.map((name, r) => {
+                  const order = pred.road012.recommendedRoads.indexOf(r)
+                  return (
+                    <tr key={r}>
+                      <td>{name}</td>
+                      <td className="mono">{pred.road012.roadDigits[r].join(' ')}</td>
+                      <td className="mono">{pred.road012.roadCount[r]}</td>
+                      <td className="mono">{pred.road012.roadOmit[r]}</td>
+                      <td className="mono">{pred.road012.roadScore[r]}</td>
+                      <td>
+                        {pred.road012.killedRoad === r ? (
+                          <span className="prize-badge prize-badge-invalid">杀路</span>
+                        ) : order < 2 ? (
+                          <span className="prize-badge prize-badge-win">荐路</span>
+                        ) : (
+                          <span className="prize-badge prize-badge-lose">观望</span>
+                        )}
+                      </td>
+                    </tr>
+                  )
+                })}
+              </tbody>
+            </table>
+          </div>
+          <div className="muted small" style={{ marginTop: 8 }}>
+            推荐路数组合：{pred.road012.recommendedPatterns.join(' / ')}（百十个）
+          </div>
+        </div>
+      )}
+
+      {/* 重号 · 邻号 · 杀号 */}
+      {pred.repeatNeighbor && (
+        <div className="odd-card">
+          <div className="odd-card-head">
+            <h3>重号 · 邻号 · 杀号</h3>
+            <span className="muted small">上期 {pred.repeatNeighbor.lastNums.join(' ')}</span>
+          </div>
+
+          <div className="metric-grid">
+            <div className="metric-card">
+              <div className="metric-name">平均重号</div>
+              <div className="metric-value">{pred.repeatNeighbor.avgRepeat}</div>
+              <div className="metric-sub">相邻两期重复号码个数</div>
+            </div>
+            <div className="metric-card">
+              <div className="metric-name">预期重号</div>
+              <div className="metric-value">{pred.repeatNeighbor.expectedRepeat}</div>
+              <div className="metric-sub">近期重号个数众数</div>
+            </div>
+            <div className="metric-card">
+              <div className="metric-name">邻号命中率</div>
+              <div className="metric-value">{pred.repeatNeighbor.neighborRate}%</div>
+              <div className="metric-sub">下期出现邻号的比例</div>
+            </div>
+          </div>
+
+          <div className="predict-row">
+            <div className="predict-label">重号候选</div>
+            <div className="predict-value">
+              {pred.repeatNeighbor.repeatCandidates.map((d) => (
+                <span key={`rep-${d}`} className="digit-ball small">{d}</span>
+              ))}
+            </div>
+          </div>
+          <div className="predict-row">
+            <div className="predict-label">邻号推荐</div>
+            <div className="predict-value">
+              {pred.repeatNeighbor.neighborNums.map((d) => (
+                <span key={`nb-${d}`} className="digit-ball small">{d}</span>
+              ))}
+            </div>
+          </div>
+          <div className="predict-row">
+            <div className="predict-label">杀号建议</div>
+            <div className="predict-value">
+              {pred.kill.map((k) => (
+                <span key={`kill-${k.digit}`} className="kill-chip" title={k.reason}>
+                  {k.digit}<em>漏{k.omit}</em>
+                </span>
+              ))}
+            </div>
+          </div>
+
+          <div className="table-scroll" style={{ marginTop: 10 }}>
+            <table className="ledger-table">
+              <thead>
+                <tr>
+                  <th>重号个数</th>
+                  <th>出现期数</th>
+                  <th>占比</th>
+                </tr>
+              </thead>
+              <tbody>
+                {pred.repeatNeighbor.repeatDist.map((r) => (
+                  <tr key={r.k}>
+                    <td>{r.k} 个</td>
+                    <td className="mono">{r.count}</td>
+                    <td className="mono">{r.rate}%</td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+          <div className="muted small" style={{ marginTop: 8 }}>
+            杀号理由：{pred.kill.map((k) => `${k.digit}（${k.reason}）`).join('；')}
+          </div>
+        </div>
+      )}
+
       {/* 全部数字评分 */}
       <div className="digit-scores">
         <div className="predict-label">0-9 综合评分（含遗漏期数）</div>

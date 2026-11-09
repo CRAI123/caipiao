@@ -188,6 +188,168 @@ export function buildOddEven(draws, windowN = 50) {
   }
 }
 
+// ============================================================
+// 012 路专项模型
+// 012 路 = 号码除以 3 的余数：0 路(0,3,6,9)、1 路(1,4,7)、2 路(2,5,8)。
+// 3D 经典第三维度：可做路比、路数遗漏、荐路 / 杀路。
+// ============================================================
+const ROAD_DIGITS = [
+  [0, 3, 6, 9],
+  [1, 4, 7],
+  [2, 5, 8],
+]
+const ROAD_NAME = ['0路', '1路', '2路']
+const roadOf = (d) => d % 3
+
+// 27 种路数组合（百十个）
+const ALL_ROAD_PATTERNS = []
+for (let m = 0; m < 27; m++) {
+  const roads = [Math.floor(m / 9), Math.floor(m / 3) % 3, m % 3]
+  ALL_ROAD_PATTERNS.push({ roads, pattern: roads.join('') })
+}
+
+/**
+ * 012 路评测：
+ * - roadCount / roadOmit：三路近期出现次数与遗漏
+ * - roadScore：各路综合分（频率 60 + 遗漏回补 40，理论周期 3 期）
+ * - recommendedRoads / killedRoad：荐路（前二）与杀路（末位）
+ * - perPosRoad：百十个各位置的路数倾向
+ * - patRanked：27 种路数组合评分
+ */
+export function build012(draws, windowN = 50) {
+  if (!draws.length) return null
+  const N = Math.min(windowN, draws.length)
+  const recent = draws.slice(0, N)
+
+  const roadCount = [0, 0, 0]
+  recent.forEach((d) => d.num.forEach((n) => roadCount[roadOf(n)]++))
+
+  const roadOmit = [0, 0, 0]
+  for (let r = 0; r < 3; r++) {
+    let omit = draws.length
+    for (let i = 0; i < draws.length; i++) {
+      if (draws[i].num.some((n) => roadOf(n) === r)) {
+        omit = i
+        break
+      }
+    }
+    roadOmit[r] = omit
+  }
+
+  const totalOcc = roadCount.reduce((s, v) => s + v, 0) || 1
+  const roadScore = [0, 0, 0]
+  for (let r = 0; r < 3; r++) {
+    roadScore[r] =
+      (roadCount[r] / totalOcc) * 60 + (Math.min(roadOmit[r] / 3, 4) / 4) * 40
+  }
+  const recommendedRoads = [0, 1, 2].sort((a, b) => roadScore[b] - roadScore[a])
+  const killedRoad = recommendedRoads[recommendedRoads.length - 1]
+
+  // 位置路数倾向
+  const perPosRoad = [0, 1, 2].map((pos) => {
+    const counts = [0, 0, 0]
+    recent.forEach((d) => counts[roadOf(d.num[pos])]++)
+    const current = roadOf(draws[0].num[pos])
+    let recommend = 0
+    if (counts[1] > counts[recommend]) recommend = 1
+    if (counts[2] > counts[recommend]) recommend = 2
+    return { pos, label: ['百', '十', '个'][pos], counts, current, recommend }
+  })
+
+  // 27 种路数组合评分
+  const patCount = {}
+  ALL_ROAD_PATTERNS.forEach((p) => (patCount[p.pattern] = 0))
+  recent.forEach((d) => {
+    const p = d.num.map(roadOf).join('')
+    if (patCount[p] !== undefined) patCount[p]++
+  })
+  const patOmit = {}
+  ALL_ROAD_PATTERNS.forEach((p) => (patOmit[p.pattern] = draws.length))
+  for (let i = 0; i < draws.length; i++) {
+    const p = draws[i].num.map(roadOf).join('')
+    if (patOmit[p] === draws.length) patOmit[p] = i
+  }
+  const patRanked = ALL_ROAD_PATTERNS.map((p) => {
+    const cnt = patCount[p.pattern] || 0
+    const om = patOmit[p.pattern]
+    const score =
+      (cnt / Math.max(N, 1)) / (1 / 27) * 50 + (Math.min(om / 27, 4) / 4) * 50
+    return { ...p, count: cnt, omit: om, score: Math.round(score * 10) / 10 }
+  }).sort((a, b) => b.score - a.score)
+
+  return {
+    recentN: N,
+    roadDigits: ROAD_DIGITS,
+    roadName: ROAD_NAME,
+    roadCount,
+    roadOmit,
+    roadScore: roadScore.map((s) => Math.round(s * 10) / 10),
+    recommendedRoads,
+    killedRoad,
+    perPosRoad,
+    patRanked,
+    recommendedPatterns: patRanked.slice(0, 3).map((p) => p.pattern),
+  }
+}
+
+// ============================================================
+// 重号 / 邻号模型 + 杀号
+// 重号：与上期重复的号码；邻号：上期号码 ±1（不含重号）。
+// 杀号：综合评分垫底的号码，给出排除建议。
+// ============================================================
+export function buildRepeatNeighbor(draws, windowN = 50) {
+  if (draws.length < 2) return null
+  const last = draws[0].num
+  const lastSet = new Set(last)
+  const N = Math.min(windowN, draws.length - 1)
+
+  const repeatCounts = [0, 0, 0, 0]
+  let neighborHit = 0
+  for (let i = 0; i < N; i++) {
+    const cur = draws[i].num
+    const prev = draws[i + 1].num
+    const prevSet = new Set(prev)
+    const repeats = cur.filter((d) => prevSet.has(d)).length
+    repeatCounts[repeats]++
+
+    const neigh = new Set()
+    prev.forEach((d) => {
+      if (d > 0) neigh.add(d - 1)
+      if (d < 9) neigh.add(d + 1)
+    })
+    // 邻号不含重号
+    const hasNeighbor = cur.some((d) => neigh.has(d) && !prevSet.has(d))
+    if (hasNeighbor) neighborHit++
+  }
+  const total = repeatCounts.reduce((s, v) => s + v, 0) || 1
+  const repeatDist = [0, 1, 2, 3].map((k) => ({
+    k,
+    count: repeatCounts[k],
+    rate: +((repeatCounts[k] / total) * 100).toFixed(0),
+  }))
+  const avgRepeat = +(
+    (repeatCounts[1] + repeatCounts[2] * 2 + repeatCounts[3] * 3) / total
+  ).toFixed(2)
+
+  // 邻号候选（上期号码 ±1，去重且排除重号）
+  const neighSet = new Set()
+  last.forEach((d) => {
+    if (d > 0) neighSet.add(d - 1)
+    if (d < 9) neighSet.add(d + 1)
+  })
+  const neighborNums = [...neighSet].filter((d) => !lastSet.has(d)).sort((a, b) => a - b)
+
+  return {
+    lastNums: last,
+    repeatDist,
+    avgRepeat,
+    expectedRepeat: repeatCounts[1] >= repeatCounts[0] ? 1 : 0,
+    repeatCandidates: [...last],
+    neighborNums,
+    neighborRate: +((neighborHit / total) * 100).toFixed(0),
+  }
+}
+
 /** 频率统计：每个数字 0-9 出现次数 */
 function digitFrequency(draws) {
   const freq = Array(10).fill(0)
@@ -277,6 +439,18 @@ export function predictFC3D(draws) {
   // --- 推荐奇偶形态（奇偶专项模型） ---
   const recommendedOdd = oddEven.recommendedPatterns
 
+  // --- 012 路专项 ---
+  const road012 = build012(all, 50)
+  // --- 重号 / 邻号专项 ---
+  const repeatNeighbor = buildRepeatNeighbor(all)
+  // --- 杀号 ---
+  const kill = ranked.slice(-2).map((r) => ({
+    digit: r.digit,
+    score: r.score,
+    omit: omit[r.digit],
+    reason: omit[r.digit] <= 1 ? '刚开出，短期重复概率低' : '综合评分垫底，可排除',
+  }))
+
   // --- 推荐形态 ---
   const formRanked = Object.entries(formFreq).sort((a, b) => b[1] - a[1])
   const recommendedForms = formRanked.slice(0, 2).map(([f]) => f)
@@ -299,6 +473,9 @@ export function predictFC3D(draws) {
     recommendedOdd,
     recommendedForms,
     oddEven,
+    road012,
+    repeatNeighbor,
+    kill,
     omit,
     freq10,
   }
@@ -506,6 +683,23 @@ export function predictFC3Dv2(draws) {
   const recentN = Math.min(50, draws.length)
   const recentDraws = draws.slice(0, recentN)
 
+  // 总遗漏（不分位置）
+  const omit = Array(10).fill(0)
+  for (let d = 0; d < 10; d++) {
+    for (let i = 0; i < draws.length; i++) {
+      if (draws[i].num.includes(d)) break
+      omit[d]++
+    }
+  }
+
+  // --- 012 路专项（影响数字评分） ---
+  const road012 = build012(draws, 50)
+  const topRoads = road012.recommendedRoads.slice(0, 2)
+  const killRoad = road012.killedRoad
+
+  // --- 重号 / 邻号专项 ---
+  const repeatNeighbor = buildRepeatNeighbor(draws)
+
   // --- 每个位置的综合评分 ---
   const posScores = [] // [百, 十, 个]，每个是 Array(10) 的分数
   for (let pos = 0; pos < 3; pos++) {
@@ -537,6 +731,10 @@ export function predictFC3Dv2(draws) {
   const totalScores = Array(10).fill(0)
   for (let d = 0; d < 10; d++) {
     totalScores[d] = (posScores[0][d] + posScores[1][d] + posScores[2][d]) / 3
+    // 012 路加权：荐路 +8，杀路 -6
+    const r = d % 3
+    if (topRoads.includes(r)) totalScores[d] += 8
+    if (r === killRoad) totalScores[d] -= 6
   }
   const ranked = totalScores
     .map((s, i) => ({ digit: i, score: Math.round(s * 100) / 100 }))
@@ -572,14 +770,13 @@ export function predictFC3Dv2(draws) {
   })
   const recommendedForms = Object.entries(formDist).sort((a, b) => b[1] - a[1]).slice(0, 2).map(([f]) => f)
 
-  // 总遗漏（不分位置）
-  const omit = Array(10).fill(0)
-  for (let d = 0; d < 10; d++) {
-    for (let i = 0; i < draws.length; i++) {
-      if (draws[i].num.includes(d)) break
-      omit[d]++
-    }
-  }
+  // 杀号：综合评分垫底的两个号码
+  const kill = ranked.slice(-2).map((r) => ({
+    digit: r.digit,
+    score: r.score,
+    omit: omit[r.digit],
+    reason: omit[r.digit] <= 1 ? '刚开出，短期重复概率低' : '综合评分垫底，可排除',
+  }))
 
   return {
     drawCount: draws.length,
@@ -593,6 +790,9 @@ export function predictFC3Dv2(draws) {
     recommendedOdd,
     recommendedForms,
     oddEven,
+    road012,
+    repeatNeighbor,
+    kill,
     omit,
     posTop,
     algorithm: 'v2',

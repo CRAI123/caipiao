@@ -1256,3 +1256,25 @@ code {
 @media (max-width: 640px) {
   .odd-pos-row { grid-template-columns: 1fr; }
 }
+
+/* ---------- 福彩3D 012路 & 杀号 ---------- */
+.road-legend { display: flex; flex-wrap: wrap; gap: 10px; margin-bottom: 14px; }
+.road-chip {
+  padding: 4px 10px; border-radius: 4px; font-size: 12.5px; font-weight: 600;
+  border: 1px solid currentColor;
+}
+.road-0 { color: #1f6fbf; background: rgba(31, 111, 191, 0.08); }
+.road-1 { color: var(--red-deep); background: rgba(193, 39, 45, 0.08); }
+.road-2 { color: #a87000; background: rgba(230, 160, 0, 0.10); }
+.road-bit {
+  display: inline-flex; align-items: center; justify-content: center;
+  min-width: 48px; height: 34px; padding: 0 10px; border-radius: 6px;
+  font-size: 15px; font-weight: 800; border: 1px solid currentColor;
+}
+.kill-chip {
+  display: inline-flex; align-items: baseline; gap: 2px;
+  padding: 4px 10px; margin-right: 6px; border-radius: 4px;
+  background: var(--ink-10, #eee); color: var(--ink-50, #777);
+  font-weight: 700; text-decoration: line-through; text-decoration-color: var(--red);
+}
+.kill-chip em { font-style: normal; font-size: 10px; text-decoration: none; opacity: .7; }
