@@ -243,18 +243,52 @@ export default function Settings() {
           </button>
         </div>
         <div className="settings-guide">
-          <b>每个用户用自己的表格：</b>你在这里填的凭证只保存在你这台设备，同步时写入的是<b>你自己的</b>飞书多维表格，
+          <b>每个用户用自己的表格：</b>这里填的凭证只保存在你这台设备，同步时写入的是<b>你自己的</b>飞书多维表格，
           与其他人互不影响。未填写时会回退使用管理员配置的默认表格。
           <br />
-          <b>三步搞定：</b>
-          ① 新建一个飞书多维表格，从地址栏链接里复制 <code>app_token</code>（<code>/base/</code> 后面那段）
-          和 <code>table_id</code>（<code>?table=</code> 后面那段），填到上方；
-          ② 到<a href="https://open.feishu.cn/app" target="_blank" rel="noreferrer">飞书开放平台</a>创建企业自建应用，
-          拿到 App ID / App Secret，开通 <code>bitable:app</code> 权限并发布；
-          ③ 回到多维表格，右上角「…」→ 添加文档应用，把刚建的应用加为可编辑协作者。
-          <br />
-          <b>怎么同步：</b>到「购彩账本」页点「同步到飞书」，网页端和桌面端都会按「日期」自动更新或新建记录，
-          缺的字段也会自动补上。
+          <b>第一次配置？按下面 5 步照做（约 5 分钟）：</b>
+          <ol className="settings-steps">
+            <li>
+              <b>新建表格，抄下两段 ID。</b>在飞书里新建一个「多维表格」，然后看浏览器地址栏：
+              <br />
+              <code>https://xxx.feishu.cn/base/<b>这一段是 app_token</b>?table=<b>tbl 开头这段是 table_id</b></code>
+              <br />
+              <code>/base/</code> 后面那一长串（一般不带斜杠后面内容）就是 <code>app_token</code>；
+              地址里 <code>?table=</code> 后面以 <code>tbl</code> 开头的那串就是 <code>table_id</code>。
+              分别填到上面的「多维表格 app_token」和「数据表 table_id」里。
+            </li>
+            <li>
+              <b>建一个应用，拿到钥匙。</b>打开
+              <a href="https://open.feishu.cn/app" target="_blank" rel="noreferrer">飞书开放平台 → 开发者后台</a>，
+              点右上角「创建企业自建应用」，名字随便起（例如「研彩室同步」）。
+              进入应用后左侧「凭证与基础信息」里复制 <code>App ID</code>（<code>cli_</code> 开头）和
+              <code>App Secret</code>，填到上面最前面两个框。
+            </li>
+            <li>
+              <b>开通权限并发布（最常漏的一步）。</b>同一个应用里点左侧「权限管理」→ 搜索 <code>bitable</code>
+              → 勾选 <code>bitable:app</code>（查看、评论、编辑和管理多维表格）。
+              然后到左侧「版本管理与发布」→「创建版本」→ 保存并发起发布。
+              如果你不是企业管理员，需要管理员在飞书「审批」里点通过，权限才会真正生效。
+            </li>
+            <li>
+              <b>把应用加进表格（第二常漏的一步）。</b>回到你刚才建的多维表格页面 →
+              右上角「…」（更多）→「添加文档应用」→ 搜索第 2 步那个应用名 →
+              权限选<b>可编辑</b> → 添加。少了这一步，同步一定会报 91403 无权限。
+            </li>
+            <li>
+              <b>保存并试一次同步。</b>点上面的「保存到本机」→ 切到「购彩账本」页点「同步到飞书」。
+              第一次同步会自动把缺的列补上，共 14 列：日期、彩种、期号、是否购买、玩法、号码、注数、
+              花费、命中、奖金、盈亏、备注、AI分析、同步时间。之后再同步，会按「日期 + 彩种」更新原行，不会重复新建。
+            </li>
+          </ol>
+          <b>常见报错对照：</b>
+          <ul className="settings-errs">
+            <li><code>91403 Forbidden</code>／提示无权限：应用没被加为表格协作者 → 做第 4 步。</li>
+            <li><code>app_token</code> 或 <code>table_id</code> 相关报错：复制时带上了空格或问号，或把 <code>/base/</code> 和 <code>?table=</code> 一起抄进去了。</li>
+            <li><code>app secret invalid</code>：Secret 没复制全，或已在后台重置过，回第 2 步重新复制。</li>
+            <li>权限明明勾了还是报错：第 3 步的版本还没发布，或管理员还没审批通过。</li>
+            <li>表格里字段类型冲突：请不要手动把「日期」列改成日期类型，留作纯文本最稳。</li>
+          </ul>
         </div>
       </Card>
 

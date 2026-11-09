@@ -985,6 +985,18 @@ code {
   line-height: 1.8;
 }
 .settings-guide b { color: var(--blue); }
+.settings-guide code b { color: var(--blue); font-weight: 600; }
+.settings-steps {
+  margin: 8px 0 10px;
+  padding-left: 22px;
+}
+.settings-steps li { margin: 7px 0; }
+.settings-steps li::marker { color: var(--blue); font-weight: 700; }
+.settings-errs {
+  margin: 4px 0 0;
+  padding-left: 20px;
+}
+.settings-errs li { margin: 3px 0; }
 
 /* ---------- 访问门禁 / 后台 ---------- */
 .gate {
