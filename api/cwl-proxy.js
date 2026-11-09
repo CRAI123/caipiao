@@ -24,17 +24,17 @@ export default async function handler(req, res) {
         Referer: 'https://www.cwl.gov.cn/ygkj/wqkjgg/kl8/',
         Accept: 'application/json, text/javascript, */*; q=0.01',
         'Accept-Language': 'zh-CN,zh;q=0.9,en;q=0.8',
-        'Accept-Encoding': 'gzip, deflate',
-        Connection: 'keep-alive',
         'User-Agent':
           'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
         X-Requested-With: 'XMLHttpRequest',
       },
     })
     const text = await upstream.text()
+    res.statusCode = upstream.status
     res.setHeader('Content-Type', 'application/json; charset=utf-8')
     res.setHeader('Cache-Control', 's-maxage=60, stale-while-revalidate=300')
-    return res.status(upstream.status).send(text)
+    res.end(text)
+    return
   } catch (e) {
     console.error('cwl-proxy error:', e)
     return res.status(502).json({ error: `代理请求失败：${e.message}` })
