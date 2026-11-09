@@ -37,11 +37,12 @@ function digitFrequency(draws) {
   return freq
 }
 
-/** 遗漏统计：每个数字距上次出现的期数 */
+/** 遗漏统计：每个数字距上次出现的期数（draws 最新在前） */
 function omission(draws) {
   const omit = Array(10).fill(0)
   for (let i = 0; i < 10; i++) {
-    for (let j = draws.length - 1; j >= 0; j--) {
+    for (let j = 0; j < draws.length; j++) {
+      // 从最新（index 0）往旧扫描，遇到即停
       if (draws[j].num.includes(i)) break
       omit[i]++
     }
@@ -49,16 +50,16 @@ function omission(draws) {
   return omit
 }
 
-/** 取近期 N 期 */
+/** 取近期 N 期（draws 最新在前 → 取前 N 个） */
 function recent(draws, n) {
-  return draws.slice(-n)
+  return draws.slice(0, n)
 }
 
-/** 综合预测：返回下期推荐 */
+/** 综合预测：返回下期推荐（draws 约定：最新在前，draws[0] 为最新一期） */
 export function predictFC3D(draws) {
   if (draws.length < 5) return null
   const all = draws
-  const last = draws[draws.length - 1]
+  const last = draws[0] // 最新一期
   const lastAnalysis = analyzeDraw(last.num)
 
   // --- 1. 热冷号（近10期 + 近30期加权） ---
@@ -149,12 +150,12 @@ export function predictFC3D(draws) {
   }
 }
 
-/** 回算验证：用上上期及之前的数据预测上期，对比实际开奖 */
+/** 回算验证：用除最新一期外的数据预测最新一期，对比实际开奖（draws 最新在前） */
 export function backtestFC3D(draws) {
   if (draws.length < 6) return null
-  // 用除最后一期外的数据做预测
-  const train = draws.slice(0, -1)
-  const actual = draws[draws.length - 1]
+  // 去掉最新一期（index 0），用剩余更旧的数据做预测
+  const train = draws.slice(1)
+  const actual = draws[0] // 最新一期
   const pred = predictFC3D(train)
   if (!pred) return null
 
@@ -213,7 +214,7 @@ function mode(arr) {
 /**
  * 滚动回测：对最近 periods 期，每期只用「它之前」的数据做预测，再与真实开奖对比。
  * 这样预测时看不到未来，结果才是对方法本身的公平检验。
- * draws 约定：最新在前。
+ * draws 约定：最新在前（draws[0] 为最新一期）。
  */
 export function walkForwardAuditFC3D(draws, { periods = 50, minTrain = 20 } = {}) {
   const n = Math.min(periods, draws.length - minTrain)
@@ -221,11 +222,11 @@ export function walkForwardAuditFC3D(draws, { periods = 50, minTrain = 20 } = {}
     return { periods: 0, rows: [], dist: [], avgHits: 0, baseline: 0, spanRate: 0, sumRate: 0, oddRate: 0, formRate: 0 }
   }
   const rows = []
-  // draws 最新在前，我们从旧到新滚动：取 [minTrain, minTrain+n) 作为测试期
+  // draws 最新在前：从最新（index 0）往旧滚动测试
+  // 对第 i 期，训练集为 draws.slice(i+1)（所有更旧的期）
   for (let i = 0; i < n; i++) {
-    const testIdx = draws.length - 1 - i // 从最旧的测试期开始
-    const actual = draws[testIdx]
-    const train = draws.slice(testIdx + 1) // 仅用之后（更旧）的数据
+    const actual = draws[i]
+    const train = draws.slice(i + 1)
     if (train.length < minTrain) break
     const pred = predictFC3D(train)
     if (!pred) continue
@@ -253,8 +254,7 @@ export function walkForwardAuditFC3D(draws, { periods = 50, minTrain = 20 } = {}
       score,
     })
   }
-  // 按最新在前排序（rows 当前是从旧到新加入的）
-  rows.reverse()
+  // rows 已按最新在前顺序（i 从小到大），无需 reverse
 
   const total = rows.length
   const dist = [0, 1, 2, 3].map((k) => ({

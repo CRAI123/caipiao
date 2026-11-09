@@ -1,5 +1,6 @@
 // 福彩3D 历史开奖数据（示例数据，演示用）
 // 格式：{ drawId, date, num: [百, 十, 个] }
+// 排序约定：最新在前（与 fetchFc3dDraws 返回一致），draws[0] 为最新一期
 export const FC3D_DRAWS = [
   { drawId: '2024300', date: '2024-11-05', num: [3, 7, 2] },
   { drawId: '2024301', date: '2024-11-06', num: [8, 1, 5] },
@@ -62,4 +63,4 @@ export const FC3D_DRAWS = [
   { drawId: '2024358', date: '2025-01-02', num: [4, 7, 0] },
   { drawId: '2024359', date: '2025-01-03', num: [8, 5, 1] },
   { drawId: '2024360', date: '2025-01-04', num: [2, 9, 6] },
-]
+].sort((a, b) => Number(b.drawId) - Number(a.drawId))
