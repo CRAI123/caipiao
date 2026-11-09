@@ -87,16 +87,12 @@ body {
 }
 .masthead-title { display: flex; align-items: center; gap: 16px; }
 .masthead-mark {
-  display: grid;
-  place-items: center;
+  display: block;
   width: 58px;
   height: 58px;
-  background: var(--red);
-  color: #f6efdd;
-  font-size: 30px;
-  font-weight: 900;
+  object-fit: contain;
   border-radius: 6px;
-  box-shadow: var(--shadow-hard), inset 0 0 0 2px rgba(255, 246, 224, 0.35), inset 0 0 0 4px var(--red);
+  box-shadow: var(--shadow-hard);
   transform: rotate(-3deg);
 }
 .masthead-title h1 {

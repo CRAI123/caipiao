@@ -1,4 +1,5 @@
 import React, { useCallback, useEffect, useMemo, useState } from 'react'
+import logoImg from './assets/logo.png'
 import { HISTORY_DRAWS, SAMPLE_DRAWS } from './data/sample.js'
 import Overview from './components/Overview.jsx'
 import DailyCheckin from './components/DailyCheckin.jsx'
@@ -111,7 +112,7 @@ export default function App() {
     return (
       <div className="gate">
         <div className="gate-card">
-          <div className="masthead-mark gate-mark">研</div>
+          <img className="masthead-mark gate-mark" src={logoImg} alt="研彩室" />
           <h1 className="gate-title">研彩室</h1>
           <p className="gate-sub">正在检查访问权限…</p>
         </div>
@@ -160,7 +161,7 @@ export default function App() {
       <header className="masthead">
         <div className="masthead-inner">
           <div className="masthead-title">
-            <span className="masthead-mark">研</span>
+            <img className="masthead-mark" src={logoImg} alt="研彩室" />
             <div>
               <h1>研彩室</h1>
               <p className="masthead-sub">
