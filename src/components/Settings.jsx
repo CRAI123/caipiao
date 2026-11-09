@@ -7,7 +7,7 @@ import { loadSettings, saveSettings, resetSettings, isNeonReady, isLlmReady, isL
 import { testConnection, getSql } from '../lib/neon.js'
 import { pingLlm } from '../lib/ai.js'
 import { getDeviceId } from '../lib/device.js'
-import { ensureAccessTables, fetchMyRequest, listAdmins, getSharedLarkConfig, setSharedLarkConfig } from '../lib/access.js'
+import { ensureAccessTables, fetchMyRequest, listAdmins, setSharedLarkConfig } from '../lib/access.js'
 
 const ACCESS_LABEL = { pending: '待审核', approved: '已同意', rejected: '被拒绝' }
 
@@ -189,7 +189,15 @@ export default function Settings() {
         </div>
       </Card>
 
-      <Card title="飞书多维表格（同步）" tag={isLarkReady(form) ? '已配置' : '未配置'}>
+        </>
+      ) : (
+        <Note tone="info">
+          云数据库和大模型由管理员统一配置好了，大家共用同一套，你不需要填写。
+          飞书表格请在下方的「我的飞书多维表格」里绑定你自己的。
+        </Note>
+      )}
+
+      <Card title="我的飞书多维表格（同步到自己的表格）" tag={isLarkReady(form) ? '已绑定' : '未绑定'}>
         <div className="field-row">
           <div className="field">
             <label className="field-label">App ID（cli_ 开头）</label>
@@ -216,12 +224,28 @@ export default function Settings() {
           </div>
         </div>
         <div className="row-actions">
-          <button className="tab-btn" onClick={save}>保存设置</button>
-          <button className="btn-primary" onClick={saveLarkToCloud} disabled={busy}>
-            {busy ? '保存中…' : '保存到云端（全员生效）'}
+          <button className="tab-btn" onClick={save} disabled={busy}>保存到本机</button>
+          {canEditSystem && (
+            <button className="btn-primary" onClick={saveLarkToCloud} disabled={busy}>
+              {busy ? '保存中…' : '保存为全员默认'}
+            </button>
+          )}
+          <button
+            className="tab-btn"
+            onClick={() => {
+              if (!form.feishuAppToken) return
+              const url = `https://www.feishu.cn/base/${form.feishuAppToken}${form.feishuTableId ? `?table=${form.feishuTableId}` : ''}`
+              window.open(url, '_blank', 'noopener')
+            }}
+            disabled={!form.feishuAppToken}
+          >
+            打开我的表格 ↗
           </button>
         </div>
         <div className="settings-guide">
+          <b>每个用户用自己的表格：</b>你在这里填的凭证只保存在你这台设备，同步时写入的是<b>你自己的</b>飞书多维表格，
+          与其他人互不影响。未填写时会回退使用管理员配置的默认表格。
+          <br />
           <b>三步搞定：</b>
           ① 新建一个飞书多维表格，从地址栏链接里复制 <code>app_token</code>（<code>/base/</code> 后面那段）
           和 <code>table_id</code>（<code>?table=</code> 后面那段），填到上方；
@@ -229,16 +253,10 @@ export default function Settings() {
           拿到 App ID / App Secret，开通 <code>bitable:app</code> 权限并发布；
           ③ 回到多维表格，右上角「…」→ 添加文档应用，把刚建的应用加为可编辑协作者。
           <br />
-          <b>怎么同步：</b>在「购彩账本」页点「同步到飞书」按钮，系统会自动把记录按「日期」更新或新建到表格里，
+          <b>怎么同步：</b>到「购彩账本」页点「同步到飞书」，网页端和桌面端都会按「日期」自动更新或新建记录，
           缺的字段也会自动补上。
         </div>
       </Card>
-        </>
-      ) : (
-        <Note tone="info">
-          云数据库、大模型和飞书都由管理员统一配置好了，大家共用同一套，你不需要填写，直接用就行。
-        </Note>
-      )}
 
       <Card title="我的设备身份" tag="识别码 · 申请状态">
         <div className="field">

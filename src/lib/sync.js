@@ -98,13 +98,14 @@ export async function resolveLarkSettings() {
 /**
  * 把账本记录同步到飞书多维表格。
  * - 桌面端（Tauri）：调用 Rust 命令 sync_lark，服务端请求飞书，无跨域限制
- * - 浏览器端：返回提示让用户用本地脚本同步
+ * - 浏览器端：POST 到 /api/lark-proxy，由服务端代理请求飞书（绕过 CORS）
+ * 每个用户使用自己在「设置」页绑定的飞书表格。
  */
 export async function syncToLark(records) {
   const settings = await resolveLarkSettings()
   const { feishuAppId, feishuAppSecret, feishuAppToken, feishuTableId } = settings
   if (!feishuAppId || !feishuAppSecret || !feishuAppToken || !feishuTableId) {
-    throw new Error('管理员尚未配置飞书，请联系管理员在后台填写飞书应用凭证')
+    throw new Error('尚未配置飞书，请到「设置」页绑定你自己的飞书多维表格')
   }
 
   if (isTauri()) {
@@ -120,6 +121,21 @@ export async function syncToLark(records) {
     return result
   }
 
-  // 浏览器模式无法直接调飞书（CORS），需要本地脚本
-  throw new Error('浏览器模式下请用本地脚本同步：到「购彩账本」页导出 JSON，然后运行 scripts/sync-lark.mjs')
+  // 浏览器端：走服务端代理，避免飞书 OpenAPI 的跨域限制
+  const res = await fetch('/api/lark-proxy', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({
+      cfg: {
+        appId: feishuAppId,
+        appSecret: feishuAppSecret,
+        appToken: feishuAppToken,
+        tableId: feishuTableId,
+      },
+      records,
+    }),
+  })
+  const data = await res.json().catch(() => ({}))
+  if (!res.ok) throw new Error(data.error || `飞书同步失败（HTTP ${res.status}）`)
+  return data
 }

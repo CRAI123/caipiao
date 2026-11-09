@@ -247,12 +247,13 @@ export default function Journal({ draws }) {
             导出 JSON
           </button>
           <span className="muted small">
-            云数据库：{isNeonReady(settings) ? '已配置' : '未配置'} · 飞书：{larkReady ? '已配置' : '未配置'}
-            （由管理员统一配置）
+            云数据库：{isNeonReady(settings) ? '已配置' : '未配置'} · 飞书：{larkReady ? '已绑定' : '未绑定'}
+            （可在设置页绑定自己的飞书表格）
           </span>
         </div>
         <Note>
-          账本会同步到管理员配置的飞书多维表格，按「日期」自动更新或新建记录。你也可以点「打开飞书表格」直接在飞书里查看或手动填写数据，两种方式互通。
+          账本会同步到你在「设置」页绑定的飞书多维表格，按「日期」自动更新或新建记录；未绑定时回退使用管理员配置的默认表格。
+          你也可以点「打开飞书表格」直接在飞书里查看或手动填写数据，两种方式互通。
         </Note>
         {msg && <Note tone={msg.tone === 'warn' ? 'warn' : 'info'}>{msg.text}</Note>}
       </Card>
