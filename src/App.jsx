@@ -1,5 +1,5 @@
 import React, { useCallback, useEffect, useMemo, useState } from 'react'
-import logoImg from './assets/logo.png'
+import logoImg from './assets/logo.webp'
 import { HISTORY_DRAWS, SAMPLE_DRAWS } from './data/sample.js'
 import Overview from './components/Overview.jsx'
 import DailyCheckin from './components/DailyCheckin.jsx'

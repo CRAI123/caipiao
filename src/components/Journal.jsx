@@ -13,6 +13,7 @@ import {
 import { loadSettings, isNeonReady, isLlmReady } from '../lib/settings.js'
 import { syncRecordToNeon, syncAllToNeon, analyzeRecord, syncToLark, resolveLarkSettings } from '../lib/sync.js'
 import { getReviews } from '../lib/api.js'
+import { openUrl } from '../lib/tauri.js'
 import DailyCheckin from './DailyCheckin.jsx'
 
 export default function Journal({ draws }) {
@@ -21,13 +22,16 @@ export default function Journal({ draws }) {
   const [busy, setBusy] = useState(false)
   const [backfillId, setBackfillId] = useState('')
   const [larkReady, setLarkReady] = useState(false)
+  const [larkCfg, setLarkCfg] = useState(null)
   const [reviews, setReviews] = useState([])
 
   // 检查飞书配置是否就绪（含管理员共享配置）
   useEffect(() => {
     ;(async () => {
       const s = await resolveLarkSettings()
-      setLarkReady(!!(s.feishuAppId && s.feishuAppSecret && s.feishuAppToken && s.feishuTableId))
+      const ready = !!(s.feishuAppId && s.feishuAppSecret && s.feishuAppToken && s.feishuTableId)
+      setLarkReady(ready)
+      setLarkCfg(ready ? { appToken: s.feishuAppToken, tableId: s.feishuTableId } : null)
     })()
   }, [])
 
@@ -126,6 +130,13 @@ export default function Journal({ draws }) {
     } finally {
       setBusy(false)
     }
+  }
+
+  // 打开飞书多维表格，用户可直接在表格里查看 / 填写数据
+  function doOpenLark() {
+    if (!larkCfg) return
+    const url = `https://www.feishu.cn/base/${larkCfg.appToken}?table=${larkCfg.tableId}`
+    openUrl(url).catch((e) => setMsg({ tone: 'warn', text: `打开飞书表格失败：${e.message}` }))
   }
 
   return (
@@ -229,6 +240,9 @@ export default function Journal({ draws }) {
           <button className="btn-primary" onClick={doSyncLark} disabled={busy || !list.length || !larkReady}>
             {busy ? '同步中…' : '同步到飞书'}
           </button>
+          <button className="tab-btn" onClick={doOpenLark} disabled={!larkReady}>
+            打开飞书表格 ↗
+          </button>
           <button className="tab-btn" onClick={doExport} disabled={!list.length}>
             导出 JSON
           </button>
@@ -238,7 +252,7 @@ export default function Journal({ draws }) {
           </span>
         </div>
         <Note>
-          账本会同步到管理员配置的飞书多维表格，按「日期」自动更新或新建记录，无需手动操作。
+          账本会同步到管理员配置的飞书多维表格，按「日期」自动更新或新建记录。你也可以点「打开飞书表格」直接在飞书里查看或手动填写数据，两种方式互通。
         </Note>
         {msg && <Note tone={msg.tone === 'warn' ? 'warn' : 'info'}>{msg.text}</Note>}
       </Card>

@@ -87,3 +87,16 @@ export async function invoke(cmd, args) {
     }, 30000)
   })
 }
+
+/**
+ * 用系统默认浏览器打开 URL。
+ * - 桌面端：通过 postMessage 桥接委托父窗口调用 opener 插件
+ * - 浏览器端：直接 window.open
+ */
+export async function openUrl(url) {
+  if (!url) throw new Error('URL 不能为空')
+  if (isTauri()) {
+    return invoke('open_url', { url })
+  }
+  window.open(url, '_blank', 'noopener,noreferrer')
+}

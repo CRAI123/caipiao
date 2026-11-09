@@ -1,7 +1,7 @@
 // 访问门禁 —— 未获授权的访客看到的三态页面：申请 / 等待审核 / 已被拒绝
 // 用户标识 = 设备识别码（device.js）+ 昵称；审核在「后台」由管理员操作。
 import React, { useState } from 'react'
-import logoImg from '../assets/logo.png'
+import logoImg from '../assets/logo.webp'
 import { Note } from './common.jsx'
 import { shortDevice } from '../lib/device.js'
 import { loadSettings } from '../lib/settings.js'
