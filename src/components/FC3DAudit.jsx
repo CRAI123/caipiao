@@ -1,7 +1,11 @@
 // 福彩3D 方法体检 —— 滚动回测：每期只用「之前」的数据预测，与真实开奖对比
+// 支持 v1 / v2 双算法对比
 import React, { useMemo, useState } from 'react'
 import { Card, Note, StatCard } from './common.jsx'
-import { walkForwardAuditFC3D, predictFC3D, analyzeDraw } from '../lib/fc3dPredict.js'
+import {
+  walkForwardAuditFC3D, predictFC3D, analyzeDraw,
+  walkForwardAuditFC3Dv2, predictFC3Dv2,
+} from '../lib/fc3dPredict.js'
 
 const PERIODS = [20, 30, 50, 80]
 
@@ -15,21 +19,35 @@ function Digit({ d, hit }) {
 
 export default function FC3DAudit({ draws }) {
   const [periods, setPeriods] = useState(30)
+  const [algo, setAlgo] = useState('v2')
 
-  const audit = useMemo(() => walkForwardAuditFC3D(draws, { periods, minTrain: 20 }), [draws, periods])
+  const audit = useMemo(
+    () => (algo === 'v2'
+      ? walkForwardAuditFC3Dv2(draws, { periods, minTrain: 20 })
+      : walkForwardAuditFC3D(draws, { periods, minTrain: 20 })),
+    [draws, periods, algo],
+  )
 
-  // 最新一期的回滚验证：删掉最新一期，用剩下的数据预测，再对比
+  // v1 vs v2 对比
+  const compare = useMemo(() => {
+    if (draws.length < 40) return null
+    const a1 = walkForwardAuditFC3D(draws, { periods, minTrain: 20 })
+    const a2 = walkForwardAuditFC3Dv2(draws, { periods, minTrain: 20 })
+    return { a1, a2 }
+  }, [draws, periods])
+
+  // 最新一期的回滚验证
   const rollback = useMemo(() => {
     if (draws.length < 21) return null
-    const train = draws.slice(1) // 去掉最新一期
+    const train = draws.slice(1)
     const actual = draws[0]
-    const pred = predictFC3D(train)
+    const pred = algo === 'v2' ? predictFC3Dv2(train) : predictFC3D(train)
     if (!pred) return null
     const a = analyzeDraw(actual.num)
     const allRec = [...pred.dan, ...pred.tuo]
     const hits = actual.num.filter((d) => allRec.includes(d))
     return { draw: actual, prediction: pred, hits, analysis: a }
-  }, [draws])
+  }, [draws, algo])
 
   if (audit.periods === 0) {
     return (
@@ -57,12 +75,70 @@ export default function FC3DAudit({ draws }) {
             近 {n} 期
           </button>
         ))}
+        <span className="toolbar-sep" />
+        <span className="toolbar-label">算法</span>
+        <button className={`tab-btn ${algo === 'v1' ? 'active' : ''}`} onClick={() => setAlgo('v1')}>经典 v1</button>
+        <button className={`tab-btn ${algo === 'v2' ? 'active' : ''}`} onClick={() => setAlgo('v2')}>精准 v2</button>
       </div>
 
       <Note>
         体检规则：对最近 {audit.periods} 个历史期，<b>每一期只用它之前的数据</b>推算胆码/拖码，
         再和该期真实开奖对答案。这样预测时看不到未来，结果才是对方法本身的公平检验。
       </Note>
+
+      {/* v1 vs v2 对比 */}
+      {compare && (
+        <Card title="算法对比" tag={`近 ${periods} 期滚动回测`}>
+          <div className="table-scroll">
+            <table className="ledger-table">
+              <thead>
+                <tr>
+                  <th>指标</th>
+                  <th>经典 v1</th>
+                  <th>精准 v2</th>
+                  <th>机选基准</th>
+                </tr>
+              </thead>
+              <tbody>
+                <tr>
+                  <td>平均组选命中</td>
+                  <td className="mono">{compare.a1.avgHits}</td>
+                  <td className="mono"><b>{compare.a2.avgHits}</b></td>
+                  <td className="mono muted">{compare.a1.baseline}</td>
+                </tr>
+                <tr>
+                  <td>跨度命中率</td>
+                  <td className="mono">{compare.a1.spanRate}%</td>
+                  <td className="mono"><b>{compare.a2.spanRate}%</b></td>
+                  <td className="muted">—</td>
+                </tr>
+                <tr>
+                  <td>和值命中率</td>
+                  <td className="mono">{compare.a1.sumRate}%</td>
+                  <td className="mono"><b>{compare.a2.sumRate}%</b></td>
+                  <td className="muted">—</td>
+                </tr>
+                <tr>
+                  <td>奇偶命中率</td>
+                  <td className="mono">{compare.a1.oddRate}%</td>
+                  <td className="mono">{compare.a2.oddRate}%</td>
+                  <td className="muted">—</td>
+                </tr>
+                <tr>
+                  <td>形态命中率</td>
+                  <td className="mono">{compare.a1.formRate}%</td>
+                  <td className="mono">{compare.a2.formRate}%</td>
+                  <td className="muted">—</td>
+                </tr>
+              </tbody>
+            </table>
+          </div>
+          <Note>
+            v2 在跨度/和值区间估计上更准（用正态分布 ±1σ，覆盖约 68% 样本），
+            但<b>数字平均命中仍在 1.8 附近</b>，与机选基准几乎重合——这正是独立随机事件的诚实结论。
+          </Note>
+        </Card>
+      )}
 
       {/* 回滚验证 */}
       {rollback && (

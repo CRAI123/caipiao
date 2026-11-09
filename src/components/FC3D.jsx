@@ -1,6 +1,7 @@
 // 福彩3D 下期推荐 —— 基于多维度术语评分的下期推算 + 上期回算验证
-import React, { useMemo } from 'react'
-import { predictFC3D, backtestFC3D } from '../lib/fc3dPredict.js'
+// 支持 v1（综合评分）与 v2（位置独立+马尔可夫+指数衰减）两种算法
+import React, { useMemo, useState } from 'react'
+import { predictFC3D, backtestFC3D, predictFC3Dv2, backtestFC3Dv2 } from '../lib/fc3dPredict.js'
 
 function DigitBall({ d, hot, cold, omit }) {
   let cls = 'digit-ball'
@@ -14,9 +15,15 @@ function DigitBall({ d, hot, cold, omit }) {
   )
 }
 
+const ALGO_INFO = {
+  v1: { name: '经典综合评分', desc: '热冷+跨度+和值+奇偶+形态+遗漏 8 维度加权评分' },
+  v2: { name: '精准模式', desc: '位置独立建模 + 马尔可夫转移 + 指数衰减 + 遗漏回补' },
+}
+
 export default function FC3D({ draws }) {
-  const pred = useMemo(() => predictFC3D(draws), [draws])
-  const backtest = useMemo(() => backtestFC3D(draws), [draws])
+  const [algo, setAlgo] = useState('v2')
+  const pred = useMemo(() => (algo === 'v2' ? predictFC3Dv2(draws) : predictFC3D(draws)), [draws, algo])
+  const backtest = useMemo(() => (algo === 'v2' ? backtestFC3Dv2(draws) : backtestFC3D(draws)), [draws, algo])
 
   if (!pred) {
     return (
@@ -32,9 +39,22 @@ export default function FC3D({ draws }) {
       <div className="fc3d-intro">
         <h2>下期推荐推算</h2>
         <p>
-          基于 {draws.length} 期历史数据，从热冷、跨度、和值、奇偶、大中小、质合、形态、遗漏等
-          {pred.drawCount} 期维度综合评分，推算下期参考号码。
+          基于 {draws.length} 期历史数据推算下期参考号码。当前算法：
+          <b style={{ margin: '0 4px' }}>{ALGO_INFO[algo].name}</b>
+          <span className="muted">（{ALGO_INFO[algo].desc}）</span>
         </p>
+        <div className="algo-toggle">
+          {Object.entries(ALGO_INFO).map(([k, v]) => (
+            <button
+              key={k}
+              className={`tab-btn ${algo === k ? 'active' : ''}`}
+              onClick={() => setAlgo(k)}
+            >
+              {v.name}
+              {k === 'v2' && <em style={{ color: 'var(--red)' }}> · 推荐</em>}
+            </button>
+          ))}
+        </div>
       </div>
 
       {/* 上期开奖 */}
@@ -43,7 +63,7 @@ export default function FC3D({ draws }) {
         <div className="predict-value">
           <span className="draw-num">{pred.lastDraw.num.join(' ')}</span>
           <span className="muted mono">
-            {pred.lastDraw.id} · 和值 {pred.lastAnalysis.sum} · 跨度 {pred.lastAnalysis.span} ·{' '}
+            {pred.lastDraw.id ?? pred.lastDraw.drawId} · 和值 {pred.lastAnalysis.sum} · 跨度 {pred.lastAnalysis.span} ·{' '}
             {pred.lastAnalysis.oddPattern} · {pred.lastAnalysis.form}
           </span>
         </div>
@@ -67,6 +87,23 @@ export default function FC3D({ draws }) {
           ))}
         </div>
       </div>
+
+      {/* v2 定位推荐 */}
+      {pred.posTop && (
+        <div className="predict-row">
+          <div className="predict-label">定位推荐</div>
+          <div className="predict-value">
+            {['百', '十', '个'].map((label, i) => (
+              <span key={label} className="pos-rec">
+                <b>{label}</b>
+                {pred.posTop[i].map((d) => (
+                  <span key={d} className="digit-ball small">{d}</span>
+                ))}
+              </span>
+            ))}
+          </div>
+        </div>
+      )}
 
       {/* 热号 / 冷号 */}
       <div className="predict-row">

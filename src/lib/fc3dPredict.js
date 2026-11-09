@@ -272,3 +272,243 @@ export function walkForwardAuditFC3D(draws, { periods = 50, minTrain = 20 } = {}
 
   return { periods: total, rows, dist, avgHits, baseline, spanRate, sumRate, oddRate, formRate }
 }
+
+// ============================================================
+// v2 精准模式：位置独立建模 + 马尔可夫转移 + 指数衰减 + 遗漏回补
+// ⚠️ 开奖为独立随机事件，以下方法仅为更精细的历史描述，不改变中奖概率。
+// ============================================================
+
+/** 指数衰减权重：越近的期权重越高。half-life ≈ ln2/lambda 期 */
+function decayWeights(n, lambda = 0.03) {
+  const w = []
+  for (let i = 0; i < n; i++) w.push(Math.exp(-lambda * i))
+  const sum = w.reduce((s, v) => s + v, 0)
+  return w.map((v) => v / sum)
+}
+
+/** 位置独立加权频率（draws 最新在前） */
+function weightedPosFreq(draws, pos, lambda = 0.03) {
+  const freq = Array(10).fill(0)
+  const w = decayWeights(draws.length, lambda)
+  for (let i = 0; i < draws.length; i++) {
+    freq[draws[i].num[pos]] += w[i]
+  }
+  return freq
+}
+
+/** 一阶马尔可夫转移矩阵：P(下期该位置=j | 上期该位置=i) */
+function transitionMatrix(draws, pos) {
+  const M = Array.from({ length: 10 }, () => Array(10).fill(0))
+  const rowSum = Array(10).fill(0)
+  // draws 最新在前，相邻期对：(draws[i+1] → draws[i])，即上期→下期
+  for (let i = 0; i < draws.length - 1; i++) {
+    const prev = draws[i + 1].num[pos] // 上期（更旧）
+    const curr = draws[i].num[pos] // 下期（更新）
+    M[prev][curr]++
+    rowSum[prev]++
+  }
+  // 转为概率，未出现的行用均匀分布兜底
+  for (let i = 0; i < 10; i++) {
+    if (rowSum[i] === 0) {
+      for (let j = 0; j < 10; j++) M[i][j] = 0.1
+    } else {
+      for (let j = 0; j < 10; j++) M[i][j] /= rowSum[i]
+    }
+  }
+  return M
+}
+
+/** 位置遗漏（draws 最新在前）：每个数字在该位置距上次出现的期数 */
+function posOmission(draws, pos) {
+  const omit = Array(10).fill(draws.length)
+  for (let d = 0; d < 10; d++) {
+    for (let i = 0; i < draws.length; i++) {
+      if (draws[i].num[pos] === d) {
+        omit[d] = i
+        break
+      }
+    }
+  }
+  return omit
+}
+
+/** 均值与标准差 */
+function meanStd(arr) {
+  const m = arr.reduce((s, v) => s + v, 0) / arr.length
+  const v = arr.reduce((s, x) => s + (x - m) ** 2, 0) / arr.length
+  return { mean: +m.toFixed(1), std: +Math.sqrt(v).toFixed(1) }
+}
+
+/**
+ * v2 预测引擎：
+ * - 百/十/个 位置独立评分（加权频率 + 马尔可夫转移 + 遗漏回补）
+ * - 综合评分选出胆码/拖码
+ * - 和值/跨度用正态区间（均值±1σ）
+ */
+export function predictFC3Dv2(draws) {
+  if (draws.length < 10) return null
+  const last = draws[0]
+  const lastAnalysis = analyzeDraw(last.num)
+  const recentN = Math.min(50, draws.length)
+  const recentDraws = draws.slice(0, recentN)
+
+  // --- 每个位置的综合评分 ---
+  const posScores = [] // [百, 十, 个]，每个是 Array(10) 的分数
+  for (let pos = 0; pos < 3; pos++) {
+    const freq = weightedPosFreq(recentDraws, pos, 0.03)
+    const M = transitionMatrix(draws, pos)
+    const omit = posOmission(draws, pos)
+    const lastDigit = last.num[pos]
+
+    // 归一化频率到 [0,1]
+    const maxFreq = Math.max(...freq, 0.001)
+    const scores = Array(10).fill(0)
+    for (let d = 0; d < 10; d++) {
+      // 1. 加权频率分（40%）
+      scores[d] += (freq[d] / maxFreq) * 40
+      // 2. 马尔可夫转移分（30%）：基于上期该位置号码的转移概率
+      const transProb = M[lastDigit][d]
+      const maxTrans = Math.max(...M[lastDigit], 0.001)
+      scores[d] += (transProb / maxTrans) * 30
+      // 3. 遗漏回补分（20%）：遗漏越久回补倾向越强（几何分布近似）
+      const omitBonus = Math.min(omit[d], 20) / 20
+      scores[d] += omitBonus * 20
+      // 4. 上期未出回补（10%）
+      if (lastDigit !== d) scores[d] += 10
+    }
+    posScores.push(scores)
+  }
+
+  // --- 综合 0-9 评分（取三个位置的平均） ---
+  const totalScores = Array(10).fill(0)
+  for (let d = 0; d < 10; d++) {
+    totalScores[d] = (posScores[0][d] + posScores[1][d] + posScores[2][d]) / 3
+  }
+  const ranked = totalScores
+    .map((s, i) => ({ digit: i, score: Math.round(s * 100) / 100 }))
+    .sort((a, b) => b.score - a.score)
+
+  const hot = ranked.slice(0, 3).map((r) => r.digit)
+  const cold = ranked.slice(-3).map((r) => r.digit)
+  const dan = ranked.slice(0, 2).map((r) => r.digit)
+  const tuo = ranked.slice(2, 6).map((r) => r.digit)
+
+  // --- 各位置推荐号码（Top2） ---
+  const posTop = posScores.map((s) =>
+    s.map((v, d) => ({ d, v })).sort((a, b) => b.v - a.v).slice(0, 2).map((x) => x.d),
+  )
+
+  // --- 和值/跨度：正态区间（均值±1σ） ---
+  const sums = recentDraws.map((d) => analyzeDraw(d.num).sum)
+  const spans = recentDraws.map((d) => analyzeDraw(d.num).span)
+  const sumStat = meanStd(sums)
+  const spanStat = meanStd(spans)
+  const sumRange = [Math.max(0, Math.round(sumStat.mean - sumStat.std)), Math.min(27, Math.round(sumStat.mean + sumStat.std))]
+  const spanRange = [Math.max(0, Math.round(spanStat.mean - spanStat.std)), Math.min(9, Math.round(spanStat.mean + spanStat.std))]
+
+  // --- 奇偶/形态推荐（近期 Top2） ---
+  const oddDist = {}
+  const formDist = {}
+  recentDraws.forEach((d) => {
+    const a = analyzeDraw(d.num)
+    oddDist[a.oddPattern] = (oddDist[a.oddPattern] || 0) + 1
+    formDist[a.form] = (formDist[a.form] || 0) + 1
+  })
+  const recommendedOdd = Object.entries(oddDist).sort((a, b) => b[1] - a[1]).slice(0, 3).map(([p]) => p)
+  const recommendedForms = Object.entries(formDist).sort((a, b) => b[1] - a[1]).slice(0, 2).map(([f]) => f)
+
+  // 总遗漏（不分位置）
+  const omit = Array(10).fill(0)
+  for (let d = 0; d < 10; d++) {
+    for (let i = 0; i < draws.length; i++) {
+      if (draws[i].num.includes(d)) break
+      omit[d]++
+    }
+  }
+
+  return {
+    drawCount: draws.length,
+    lastDraw: last,
+    lastAnalysis,
+    hot, cold, dan, tuo, ranked,
+    spanRange,
+    spanAvg: spanStat.mean,
+    sumRange,
+    sumAvg: sumStat.mean,
+    recommendedOdd,
+    recommendedForms,
+    omit,
+    posTop,
+    algorithm: 'v2',
+  }
+}
+
+/** v2 回算验证 */
+export function backtestFC3Dv2(draws) {
+  if (draws.length < 11) return null
+  const train = draws.slice(1)
+  const actual = draws[0]
+  const pred = predictFC3Dv2(train)
+  if (!pred) return null
+  const a = analyzeDraw(actual.num)
+  const danHits = pred.dan.filter((d) => actual.num.includes(d))
+  const tuoHits = pred.tuo.filter((d) => actual.num.includes(d))
+  const allRec = [...pred.dan, ...pred.tuo]
+  const hits = actual.num.filter((d) => allRec.includes(d))
+  const spanHit = a.span >= pred.spanRange[0] && a.span <= pred.spanRange[1]
+  const sumHit = a.sum >= pred.sumRange[0] && a.sum <= pred.sumRange[1]
+  const oddHit = pred.recommendedOdd.includes(a.oddPattern)
+  const formHit = pred.recommendedForms.includes(a.form)
+  return {
+    actualDraw: actual,
+    actualAnalysis: a,
+    prediction: pred,
+    danHits,
+    tuoHits,
+    digitHits: hits,
+    digitHitCount: hits.length,
+    spanHit, sumHit, oddHit, formHit,
+    score:
+      (hits.length === 3 ? 40 : hits.length === 2 ? 20 : hits.length === 1 ? 8 : 0) +
+      (spanHit ? 15 : 0) + (sumHit ? 15 : 0) + (oddHit ? 15 : 0) + (formHit ? 15 : 0),
+  }
+}
+
+/** v2 滚动回测 */
+export function walkForwardAuditFC3Dv2(draws, { periods = 50, minTrain = 20 } = {}) {
+  const n = Math.min(periods, draws.length - minTrain)
+  if (n <= 0) {
+    return { periods: 0, rows: [], dist: [], avgHits: 0, baseline: 0, spanRate: 0, sumRate: 0, oddRate: 0, formRate: 0 }
+  }
+  const rows = []
+  for (let i = 0; i < n; i++) {
+    const actual = draws[i]
+    const train = draws.slice(i + 1)
+    if (train.length < minTrain) break
+    const pred = predictFC3Dv2(train)
+    if (!pred) continue
+    const a = analyzeDraw(actual.num)
+    const allRec = [...pred.dan, ...pred.tuo]
+    const hits = actual.num.filter((d) => allRec.includes(d))
+    const danHits = pred.dan.filter((d) => actual.num.includes(d))
+    const spanHit = a.span >= pred.spanRange[0] && a.span <= pred.spanRange[1]
+    const sumHit = a.sum >= pred.sumRange[0] && a.sum <= pred.sumRange[1]
+    const oddHit = pred.recommendedOdd.includes(a.oddPattern)
+    const formHit = pred.recommendedForms.includes(a.form)
+    const score =
+      (hits.length === 3 ? 40 : hits.length === 2 ? 20 : hits.length === 1 ? 8 : 0) +
+      (spanHit ? 15 : 0) + (sumHit ? 15 : 0) + (oddHit ? 15 : 0) + (formHit ? 15 : 0)
+    rows.push({
+      draw: actual, prediction: pred, hits: hits.length, hitNums: hits,
+      danHits: danHits.length, spanHit, sumHit, oddHit, formHit, score,
+    })
+  }
+  const total = rows.length
+  const dist = [0, 1, 2, 3].map((k) => ({ k, count: rows.filter((r) => r.hits === k).length }))
+  const avgHits = total ? +(rows.reduce((s, r) => s + r.hits, 0) / total).toFixed(2) : 0
+  const spanRate = total ? +(rows.filter((r) => r.spanHit).length / total * 100).toFixed(0) : 0
+  const sumRate = total ? +(rows.filter((r) => r.sumHit).length / total * 100).toFixed(0) : 0
+  const oddRate = total ? +(rows.filter((r) => r.oddHit).length / total * 100).toFixed(0) : 0
+  const formRate = total ? +(rows.filter((r) => r.formHit).length / total * 100).toFixed(0) : 0
+  return { periods: total, rows, dist, avgHits, baseline: 1.8, spanRate, sumRate, oddRate, formRate }
+}
