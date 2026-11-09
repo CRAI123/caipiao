@@ -8,6 +8,9 @@ import {
   upsertRecord,
   removeRecord,
   journalStats,
+  fc3dStats,
+  lotteryOf,
+  LOTTERY_LABEL,
   exportJson,
 } from '../lib/journal.js'
 import { loadSettings, isNeonReady, isLlmReady } from '../lib/settings.js'
@@ -24,6 +27,7 @@ export default function Journal({ draws }) {
   const [larkReady, setLarkReady] = useState(false)
   const [larkCfg, setLarkCfg] = useState(null)
   const [reviews, setReviews] = useState([])
+  const [lotFilter, setLotFilter] = useState('all') // all | kl8 | fc3d
 
   // 检查飞书配置是否就绪（含管理员共享配置）
   useEffect(() => {
@@ -52,8 +56,28 @@ export default function Journal({ draws }) {
   }, [])
 
   const stats = useMemo(() => journalStats(list), [list])
+  const fstats = useMemo(() => fc3dStats(list), [list])
+  const filtered = useMemo(
+    () => (lotFilter === 'all' ? list : list.filter((r) => lotteryOf(r) === lotFilter)),
+    [list, lotFilter],
+  )
+  // 顶部统计卡覆盖当前筛选范围（两种彩票的投入 / 奖金口径可相加）
+  const totals = useMemo(() => {
+    const bought = filtered.filter((r) => r.bought)
+    const spend = bought.reduce((s, r) => s + (Number(r.spend) || 0), 0)
+    const prize = bought.reduce((s, r) => s + (Number(r.prize) || 0), 0)
+    return {
+      days: filtered.length,
+      boughtDays: bought.length,
+      spend,
+      prize,
+      net: prize - spend,
+      roi: spend ? prize / spend : 0,
+      avgSpend: bought.length ? spend / bought.length : 0,
+    }
+  }, [filtered])
   const settings = loadSettings()
-  const recordedDates = new Set(list.map((r) => r.date))
+  const recordedDates = new Set(list.filter((r) => lotteryOf(r) === 'kl8').map((r) => r.date))
   const backfillDraws = useMemo(
     () => draws.filter((d) => d.date && !recordedDates.has(d.date)).slice(0, 20),
     [draws, recordedDates],
@@ -147,20 +171,30 @@ export default function Journal({ draws }) {
       </Note>
 
       <div className="stat-grid">
-        <StatCard label="打卡天数" value={stats.days} note={`购买 ${stats.boughtDays} 天 · 未购 ${stats.noBuyDays} 天`} />
-        <StatCard label="累计投入" value={stats.spend} unit="元" note={`购买日均 ${stats.avgSpend.toFixed(1)} 元`} />
-        <StatCard label="累计奖金" value={stats.prize} unit="元" tone="blue" note={stats.best?.prize ? `最高一天 ${stats.best.date}` : '暂无中奖记录'} />
+        <StatCard
+          label="打卡天数"
+          value={totals.days}
+          note={`购买 ${totals.boughtDays} 天 · 未购 ${totals.days - totals.boughtDays} 天`}
+        />
+        <StatCard label="累计投入" value={totals.spend} unit="元" note={`购买日均 ${totals.avgSpend.toFixed(1)} 元`} />
+        <StatCard
+          label="累计奖金"
+          value={totals.prize}
+          unit="元"
+          tone="blue"
+          note={stats.best?.prize ? `快乐8 最高一天 ${stats.best.date}` : '暂无中奖记录'}
+        />
         <StatCard
           label="净盈亏"
-          value={`${stats.net >= 0 ? '+' : ''}${stats.net}`}
+          value={`${totals.net >= 0 ? '+' : ''}${totals.net}`}
           unit="元"
-          tone={stats.net >= 0 ? 'blue' : 'red'}
-          note={`回报率 ${(stats.roi * 100).toFixed(1)}%`}
+          tone={totals.net >= 0 ? 'blue' : 'red'}
+          note={`回报率 ${(totals.roi * 100).toFixed(1)}%`}
         />
       </div>
 
       <div className="grid-2">
-        <Card title="命中分布对照" tag="实际天数 vs 理论期望">
+        <Card title="命中分布对照" tag="快乐8 · 实际天数 vs 理论期望">
           <div className="table-scroll">
             <table className="ledger-table">
               <thead>
@@ -193,7 +227,7 @@ export default function Journal({ draws }) {
           </Note>
         </Card>
 
-        <Card title="按玩法统计" tag={`${stats.playRows.length} 种玩法`}>
+        <Card title="按玩法统计" tag="快乐8 · 命中口径为号码个数">
           <div className="table-scroll">
             <table className="ledger-table">
               <thead>
@@ -232,7 +266,43 @@ export default function Journal({ draws }) {
         </Card>
       </div>
 
+      {fstats.days > 0 && (
+        <Card title="福彩3D 账本汇总" tag={`${fstats.days} 天 · ${fstats.bets} 注`}>
+          <div className="stat-grid">
+            <StatCard label="中奖注数" value={fstats.wins} unit="注" tone="red" note={`共投 ${fstats.bets} 注`} />
+            <StatCard label="累计投入" value={fstats.spend} unit="元" note={`单注 2 元`} />
+            <StatCard label="累计奖金" value={fstats.prize} unit="元" tone="blue" note={fstats.wins ? `命中 ${fstats.wins} 注` : '未中奖'} />
+            <StatCard
+              label="净盈亏"
+              value={`${fstats.net >= 0 ? '+' : ''}${fstats.net}`}
+              unit="元"
+              tone={fstats.net >= 0 ? 'blue' : 'red'}
+              note={`回报率 ${(fstats.roi * 100).toFixed(1)}%`}
+            />
+          </div>
+          <Note>
+            3D 按「注」判定中奖（直选 1040 元 / 组选3 346 元 / 组选6 173 元），与快乐8 的「命中几个号」口径不同。
+            记录来自「福彩3D → 中奖计算 → 记入本期账本」。
+          </Note>
+        </Card>
+      )}
+
       <Card title="账本工具" tag="云数据库 / 飞书多维表格">
+        <div className="toolbar">
+          <span className="toolbar-label">彩种筛选</span>
+          {[['all', '全部'], ['kl8', LOTTERY_LABEL.kl8], ['fc3d', LOTTERY_LABEL.fc3d]].map(([k, label]) => (
+            <button
+              key={k}
+              className={`mode-btn ${lotFilter === k ? 'active' : ''}`}
+              onClick={() => setLotFilter(k)}
+            >
+              {label}
+            </button>
+          ))}
+          <span className="toolbar-note">
+            共 {list.length} 条 · 当前显示 {filtered.length} 条
+          </span>
+        </div>
         <div className="row-actions">
           <button className="btn-primary" onClick={doSyncAll} disabled={busy || !list.length || !isNeonReady(settings)}>
             同步全部到云数据库
@@ -252,8 +322,8 @@ export default function Journal({ draws }) {
           </span>
         </div>
         <Note>
-          账本会同步到你在「设置」页绑定的飞书多维表格，按「日期」自动更新或新建记录；未绑定时回退使用管理员配置的默认表格。
-          你也可以点「打开飞书表格」直接在飞书里查看或手动填写数据，两种方式互通。
+          账本会同步到你在「设置」页绑定的飞书多维表格，按「日期 + 彩种」自动更新或新建记录，两种彩票写在不同行；
+          未绑定时回退使用管理员配置的默认表格。你也可以点「打开飞书表格」直接在飞书里查看或手动填写数据，两种方式互通。
         </Note>
         {msg && <Note tone={msg.tone === 'warn' ? 'warn' : 'info'}>{msg.text}</Note>}
       </Card>
@@ -280,16 +350,17 @@ export default function Journal({ draws }) {
         </Card>
       )}
 
-      <Card title="打卡记录" tag={`${list.length} 条 · 最新在前`}>
+      <Card title="打卡记录" tag={`${filtered.length} 条 · 最新在前`}>
         <div className="table-scroll tall">
           <table className="ledger-table">
             <thead>
               <tr>
                 <th>日期</th>
+                <th>彩种</th>
                 <th>期号</th>
                 <th>购买</th>
                 <th>号码（金圈=命中）</th>
-                <th>命中</th>
+                <th>命中 / 中奖</th>
                 <th>花费</th>
                 <th>奖金</th>
                 <th>盈亏</th>
@@ -299,24 +370,31 @@ export default function Journal({ draws }) {
               </tr>
             </thead>
             <tbody>
-              {list.length === 0 && (
+              {filtered.length === 0 && (
                 <tr>
-                  <td colSpan={11} className="muted">
-                    还没有记录。开奖后到「每日打卡」页记录是否购买、中几个、花多少、赢多少。
+                  <td colSpan={12} className="muted">
+                    还没有记录。快乐8 到「每日打卡」记录，福彩3D 到「中奖计算 → 记入本期账本」。
                   </td>
                 </tr>
               )}
-              {list.map((r) => {
+              {filtered.map((r) => {
+                const isFc3d = lotteryOf(r) === 'fc3d'
                 const draw = draws.find((d) => d.date === r.date)
                 const hitSet = new Set(draw?.nums || [])
                 const profit = (r.prize || 0) - (r.spend || 0)
                 return (
-                  <tr key={r.date}>
+                  <tr key={`${r.lottery}-${r.date}`}>
                     <td className="mono">{r.date}</td>
+                    <td className="small">{LOTTERY_LABEL[lotteryOf(r)]}</td>
                     <td className="mono muted">{r.drawId ?? '—'}</td>
                     <td>{r.bought ? '买了' : '没买'}</td>
                     <td>
-                      {r.bought && r.picks?.length ? (
+                      {r.bought && isFc3d ? (
+                        <span className="mono small">
+                          {(r.bets || []).map((b) => b.join('')).join(' / ')}
+                          {r.playLabel ? ` · ${r.playLabel}` : ''}
+                        </span>
+                      ) : r.bought && r.picks?.length ? (
                         <span className="cell-balls wrap">
                           {r.picks.map((n) => (
                             <Ball key={n} n={n} size="xs" kind="auto" className={hitSet.has(n) ? 'ball-hit' : ''} />
@@ -326,7 +404,7 @@ export default function Journal({ draws }) {
                         <span className="muted">—</span>
                       )}
                     </td>
-                    <td className="mono">{r.bought ? (r.hits ?? '?') : '—'}</td>
+                    <td className="mono">{r.bought ? (isFc3d ? `${r.hits ?? 0} 注` : r.hits ?? '?') : '—'}</td>
                     <td className="mono">{r.bought ? yuan(r.spend || 0) : '—'}</td>
                     <td className="mono">{r.bought ? yuan(r.prize || 0) : '—'}</td>
                     <td className="mono" style={{ color: r.bought ? (profit >= 0 ? 'var(--blue)' : 'var(--red)') : undefined }}>
@@ -339,12 +417,16 @@ export default function Journal({ draws }) {
                     </td>
                     <td>
                       <div className="record-actions">
-                        <button className="tab-btn" onClick={() => doRowAi(r)} disabled={busy}>AI</button>
+                        {!isFc3d && (
+                          <button className="tab-btn" onClick={() => doRowAi(r)} disabled={busy}>AI</button>
+                        )}
                         <button className="tab-btn" onClick={() => doRowSync(r)} disabled={busy || !isNeonReady(settings)}>同步</button>
                         <button
                           className="tab-btn"
                           onClick={() => {
-                            if (confirm(`删除 ${r.date} 的记录？`)) update(removeRecord(list, r.date))
+                            if (confirm(`删除 ${r.date} 的${LOTTERY_LABEL[lotteryOf(r)]}记录？`)) {
+                              update(removeRecord(list, r.date, lotteryOf(r)))
+                            }
                           }}
                         >
                           删除
@@ -362,9 +444,9 @@ export default function Journal({ draws }) {
       {aiReports.length > 0 && (
         <Card title="AI 分析报告历史" tag={`${aiReports.length} 份`}>
           {aiReports.map((r) => (
-            <div key={r.date} className="ai-report">
+            <div key={`${r.lottery}-${r.date}`} className="ai-report">
               <div className="ai-report-head">
-                {r.date}（第 {r.drawId ?? '?'} 期） · {r.aiReport.model} ·{' '}
+                {r.date}（{LOTTERY_LABEL[lotteryOf(r)]} · 第 {r.drawId ?? '?'} 期） · {r.aiReport.model} ·{' '}
                 {new Date(r.aiReport.at).toLocaleString('zh-CN')}
               </div>
               <div className="ai-report-body">{r.aiReport.text}</div>

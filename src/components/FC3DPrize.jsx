@@ -2,6 +2,9 @@
 // 玩法与单注奖金（每注 2 元）：直选 1040 元 / 组选3 346 元 / 组选6 173 元
 import React, { useMemo, useState } from 'react'
 import { Card, Note, StatCard, yuan } from './common.jsx'
+import { loadJournal, persistJournal, upsertRecord, getRecord, buildFc3dRecord } from '../lib/journal.js'
+import { loadSettings, isNeonReady } from '../lib/settings.js'
+import { syncRecordToNeon } from '../lib/sync.js'
 
 const PLAYS = [
   { id: 'direct', name: '直选', amount: 1040, desc: '三位号码与开奖完全相同（位置一致）' },
@@ -74,6 +77,9 @@ export default function FC3DPrize({ draws }) {
   const [drawIdx, setDrawIdx] = useState(0)
   const [text, setText] = useState('')
   const [play, setPlay] = useState('')
+  const [saving, setSaving] = useState(false)
+  const [savedTick, setSavedTick] = useState(0)
+  const [ledgerMsg, setLedgerMsg] = useState(null)
 
   const draw = draws[Math.min(drawIdx, draws.length - 1)] || draws[0]
   const drawLabel = draw ? (draw.drawId ?? draw.id) : '—'
@@ -96,6 +102,51 @@ export default function FC3DPrize({ draws }) {
   const net = prize - cost
 
   const askPlay = rows.length > 0 && !play
+
+  // 本期是否已经有 3D 账本记录（同一天只保留一条）
+  const existingRec = useMemo(
+    () => (draw ? getRecord(loadJournal(), draw.date, 'fc3d') : null),
+    [draw, savedTick],
+  )
+
+  async function saveToLedger() {
+    if (!draw || !play || valid.length === 0) {
+      return setLedgerMsg({ tone: 'warn', text: '请先填写号码并选择玩法' })
+    }
+    setSaving(true)
+    try {
+      const rec = buildFc3dRecord(
+        {
+          draw,
+          playId: play,
+          playName: playDef.name,
+          bets: valid.map((r) => r.digits),
+          spend: cost,
+          wins: wins.length,
+          prize,
+        },
+        existingRec,
+      )
+      let next = upsertRecord(loadJournal(), rec)
+      persistJournal(next)
+      if (isNeonReady(loadSettings())) {
+        try {
+          const synced = await syncRecordToNeon(rec)
+          next = upsertRecord(next, synced)
+          persistJournal(next)
+        } catch {
+          /* 云端同步失败不影响本地记录 */
+        }
+      }
+      setSavedTick((t) => t + 1)
+      setLedgerMsg({
+        tone: 'info',
+        text: `${draw.date} 已记入账本：${valid.length} 注 · 投入 ${cost} 元 · 奖金 ${prize} 元`,
+      })
+    } finally {
+      setSaving(false)
+    }
+  }
 
   return (
     <div className="page">
@@ -211,6 +262,21 @@ export default function FC3DPrize({ draws }) {
               有 {invalid.length} 注号码形态与所选玩法不符（如组选3 却填了三位不同号），已不计入投注与奖金。
             </Note>
           )}
+
+          <Card
+            title="记入购彩账本"
+            tag={existingRec ? `本期已记录 · ${existingRec.betCount ?? 0} 注` : '一天一条 · 日期 + 彩种'}
+          >
+            <div className="row-actions">
+              <button className="btn-primary" onClick={saveToLedger} disabled={saving || valid.length === 0}>
+                {saving ? '保存中…' : existingRec ? '更新本期账本记录' : '记入本期账本'}
+              </button>
+              <span className="muted small">
+                记入后到「快乐8 → 购彩账本」筛选「福彩3D」可查看，并一起同步到飞书
+              </span>
+            </div>
+            {ledgerMsg && <Note tone={ledgerMsg.tone === 'warn' ? 'warn' : 'info'}>{ledgerMsg.text}</Note>}
+          </Card>
 
           <Card title="逐注判定" tag={`对照第 ${drawLabel} 期开奖 ${draw.num.join(' ')}`}>
             <div className="table-scroll">

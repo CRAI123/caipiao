@@ -1,11 +1,13 @@
 // ============================================================
-// 购彩账本 —— 每日打卡：买了吗 / 选的什么号 / 花多少 / 中几个 / 中多少
-// 记录结构（一行一天，主键为开奖日期）：
+// 购彩账本 —— 每日打卡：买了吗 / 选的什么号 / 花多少 / 中多少
+// 记录结构（一天 × 一个彩种一条，主键为「日期 + 彩种」）：
 // {
-//   date: '2026-11-07', drawId: 2026296, bought: true,
-//   tickets: [[1,5,12,...], ...],   // 每张票一行（选几就是几）
+//   date: '2026-11-07', lottery: 'kl8' | 'fc3d', drawId: 2026296, bought: true,
+//   快乐8：tickets: [[1,5,12,...], ...]  每张票一行（选几就是几）
+//   福彩3D：bets: [[1,2,3], ...]        每注一行（百十个位）
 //   picks: [...],                   // 全部票合并去重（便于展示）
-//   spend: 20, hits: 3, prize: 0,   // 花费 / 命中个数（默认按开奖号自动算，可手改）/ 奖金
+//   play: 10 | 'direct', playLabel, betCount,
+//   spend: 20, hits: 3, prize: 0,   // 花费 / 命中（快乐8=命中个数，3D=中奖注数）/ 奖金
 //   note: '', aiReport: null, synced: { neon: null, lark: null },
 //   createdAt, updatedAt
 // }
@@ -13,7 +15,14 @@
 
 import { comb } from './stats.js'
 
-const KEY = 'kl8_journal_v1'
+const KEY = 'kl8_journal_v1' // 保留原 key，历史记录读取时补上 lottery='kl8'
+
+export const LOTTERY_LABEL = { kl8: '快乐8', fc3d: '福彩3D' }
+
+/** 记录所属彩种（旧记录没有该字段，默认按快乐8处理） */
+export function lotteryOf(rec) {
+  return rec?.lottery === 'fc3d' ? 'fc3d' : 'kl8'
+}
 
 let memoryStore = null
 function storage() {
@@ -35,12 +44,17 @@ const todayStr = () => {
   return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`
 }
 
-/** 读取全部记录，按日期倒序（最新在前） */
+/** 读取全部记录，按日期倒序（最新在前）；旧记录自动补上 lottery='kl8' */
 export function loadJournal() {
   try {
     const raw = storage().getItem(KEY)
     const list = raw ? JSON.parse(raw) : []
-    return Array.isArray(list) ? list.filter(Boolean).sort((a, b) => (a.date < b.date ? 1 : -1)) : []
+    return Array.isArray(list)
+      ? list
+          .filter(Boolean)
+          .map((r) => ({ ...r, lottery: lotteryOf(r) }))
+          .sort((a, b) => (a.date < b.date ? 1 : -1))
+      : []
   } catch {
     return []
   }
@@ -51,21 +65,22 @@ export function persistJournal(list) {
   return list
 }
 
-export function getRecord(list, date) {
-  return list.find((r) => r.date === date) || null
+export function getRecord(list, date, lottery = 'kl8') {
+  return list.find((r) => r.date === date && lotteryOf(r) === lottery) || null
 }
 
-/** 按日期 upsert，返回新数组（不改原数组） */
+/** 按「日期 + 彩种」upsert，返回新数组（不改原数组） */
 export function upsertRecord(list, rec) {
-  const idx = list.findIndex((r) => r.date === rec.date)
+  const lot = lotteryOf(rec)
+  const idx = list.findIndex((r) => r.date === rec.date && lotteryOf(r) === lot)
   const next = [...list]
   if (idx >= 0) next[idx] = { ...next[idx], ...rec }
   else next.unshift(rec)
   return next.sort((a, b) => (a.date < b.date ? 1 : -1))
 }
 
-export function removeRecord(list, date) {
-  return list.filter((r) => r.date !== date)
+export function removeRecord(list, date, lottery = 'kl8') {
+  return list.filter((r) => !(r.date === date && lotteryOf(r) === lottery))
 }
 
 /** 解析票面文本：每行一注，号码用空格/逗号/制表符分隔 */
@@ -118,11 +133,14 @@ export function normalizeRecord(draft, draw, existing = null) {
   const hits = draft.hits === '' || draft.hits == null ? auto : Math.max(0, num(draft.hits, auto))
   return {
     date: draft.date,
+    lottery: 'kl8',
     drawId: draft.drawId ?? draw?.id ?? null,
     bought: !!draft.bought,
     tickets,
     picks,
     play: tickets.reduce((m, t) => Math.max(m, t.length), 0),
+    playLabel: '',
+    betCount: tickets.length,
     spend: draft.bought ? Math.max(0, num(draft.spend, 0)) : 0,
     hits: draft.bought ? hits : null,
     prize: draft.bought ? Math.max(0, num(draft.prize, 0)) : 0,
@@ -135,11 +153,44 @@ export function normalizeRecord(draft, draw, existing = null) {
 }
 
 /**
- * 账本统计聚合。
+ * 把福彩3D的一期中奖计算结果写成账本记录（一天一条，主键「日期 + fc3d」）。
+ * bets 是每注的百十个位；hits 记录中奖注数。
+ */
+export function buildFc3dRecord(
+  { draw, playId, playName, bets, spend, wins, prize, note = '' },
+  existing = null,
+) {
+  const now = new Date().toISOString()
+  const list = Array.isArray(bets) ? bets : []
+  return {
+    date: draw?.date || '',
+    lottery: 'fc3d',
+    drawId: draw?.drawId ?? draw?.id ?? null,
+    bought: true,
+    tickets: list,
+    bets: list,
+    picks: [...new Set(list.flat())].sort((a, b) => a - b),
+    play: playId,
+    playLabel: playName,
+    betCount: list.length,
+    spend: Math.max(0, num(spend, 0)),
+    hits: Math.max(0, num(wins, 0)),
+    prize: Math.max(0, num(prize, 0)),
+    note: String(note || '').slice(0, 200),
+    aiReport: existing?.aiReport || null,
+    synced: existing?.synced || { neon: null, lark: null },
+    createdAt: existing?.createdAt || now,
+    updatedAt: now,
+  }
+}
+
+/**
+ * 快乐8账本统计聚合（自动忽略福彩3D记录）。
  * hitRows：实际命中天数 vs 理论期望天数（按每期实际玩法概率加权）。
  */
 export function journalStats(list) {
-  const bought = list.filter((r) => r.bought)
+  const rows = list.filter((r) => lotteryOf(r) === 'kl8')
+  const bought = rows.filter((r) => r.bought)
   const spend = bought.reduce((s, r) => s + num(r.spend), 0)
   const prize = bought.reduce((s, r) => s + num(r.prize), 0)
 
@@ -176,9 +227,9 @@ export function journalStats(list) {
   )
 
   return {
-    days: list.length,
+    days: rows.length,
     boughtDays: bought.length,
-    noBuyDays: list.length - bought.length,
+    noBuyDays: rows.length - bought.length,
     spend,
     prize,
     net: prize - spend,
@@ -187,8 +238,27 @@ export function journalStats(list) {
     hitRows,
     playRows,
     best: best ? { date: best.date, prize: num(best.prize) } : null,
-    lastCheckin: list[0]?.date || null,
+    lastCheckin: rows[0]?.date || null,
     theory10: hitTheory(10), // 选十理论分布（对照基准）
+  }
+}
+
+/** 福彩3D账本汇总（按注统计，与快乐8的「命中个数」口径不同） */
+export function fc3dStats(list) {
+  const bought = list.filter((r) => lotteryOf(r) === 'fc3d' && r.bought)
+  const sum = (fn) => bought.reduce((s, r) => s + num(fn(r)), 0)
+  const spend = sum((r) => r.spend)
+  const prize = sum((r) => r.prize)
+  const bets = sum((r) => r.betCount ?? (r.bets?.length || 0))
+  const wins = sum((r) => r.hits)
+  return {
+    days: bought.length,
+    bets,
+    wins,
+    spend,
+    prize,
+    net: prize - spend,
+    roi: spend ? prize / spend : 0,
   }
 }
 
@@ -212,6 +282,6 @@ export function importJson(text) {
   if (!Array.isArray(records)) throw new Error('文件格式不正确：应为记录数组或 { records: [...] }')
   return records
     .filter((r) => r && typeof r.date === 'string')
-    .map((r) => ({ ...r }))
+    .map((r) => ({ ...r, lottery: lotteryOf(r) }))
     .sort((a, b) => (a.date < b.date ? 1 : -1))
 }

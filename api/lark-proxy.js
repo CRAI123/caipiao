@@ -9,35 +9,57 @@ const LARK_API = 'https://open.feishu.cn/open-apis'
 // 账本字段定义（名称, 飞书字段类型：1=文本 2=数字）
 const FIELD_DEFS = [
   ['日期', 1],
+  ['彩种', 1],
   ['期号', 1],
   ['是否购买', 1],
+  ['玩法', 1],
   ['号码', 1],
+  ['注数', 2],
   ['花费', 2],
   ['命中', 2],
   ['奖金', 2],
+  ['盈亏', 2],
   ['备注', 1],
   ['AI分析', 1],
   ['同步时间', 1],
 ]
 
-/** 把一条账本记录转成飞书字段 */
+/** 把一条账本记录转成飞书字段（快乐8 与 福彩3D 共用一套列） */
 function recToFields(r) {
+  const isFc3d = r?.lottery === 'fc3d'
   const bought = !!r?.bought
   const picks = Array.isArray(r?.picks)
     ? r.picks.filter((n) => Number.isInteger(n)).map((n) => String(n).padStart(2, '0'))
     : []
+  const bets = Array.isArray(r?.bets) ? r.bets : []
+  // 快乐8 号码是 10 选；3D 号码按每注三位连写，多注用「 / 」分隔
+  const numbers = isFc3d
+    ? bets.map((b) => (Array.isArray(b) ? b.join('') : String(b))).join(' / ')
+    : picks.join(' ')
+  const playLabel = isFc3d ? r?.playLabel || '' : r?.play ? `选${r.play}` : ''
+  const betCount = isFc3d
+    ? Number(r?.betCount ?? bets.length) || 0
+    : Array.isArray(r?.tickets)
+      ? r.tickets.length
+      : 0
+  const spend = Number(r?.spend) || 0
+  const prize = Number(r?.prize) || 0
   const ai =
     r?.aiReport && typeof r.aiReport === 'object'
       ? `${r.aiReport.text || ''}\n\n（${r.aiReport.model || ''} · ${r.aiReport.at || ''}）`
       : ''
   return {
     日期: r?.date || '',
+    彩种: isFc3d ? '福彩3D' : '快乐8',
     期号: r?.drawId != null ? String(r.drawId) : '',
     是否购买: bought ? '买了' : '没买',
-    号码: picks.join(' '),
-    花费: Number(r?.spend) || 0,
+    玩法: playLabel,
+    号码: numbers,
+    注数: betCount,
+    花费: spend,
     命中: bought ? Number(r?.hits) || 0 : 0,
-    奖金: Number(r?.prize) || 0,
+    奖金: prize,
+    盈亏: prize - spend,
     备注: r?.note || '',
     AI分析: ai,
     同步时间: new Date().toISOString(),
@@ -121,8 +143,8 @@ export default async function handler(req, res) {
       })
     }
 
-    // 3. 拉取已有记录，按「日期」建映射
-    const existingByDate = new Map()
+    // 3. 拉取已有记录，按「日期 + 彩种」建映射（旧记录没有彩种列，按快乐8处理）
+    const existingByKey = new Map()
     let pageToken = ''
     do {
       const url = `${LARK_API}/bitable/v1/apps/${appToken}/tables/${tableId}/records?page_size=100${
@@ -131,8 +153,11 @@ export default async function handler(req, res) {
       const d = await larkFetch(token, url)
       for (const item of d.data?.items || []) {
         const date = item.fields?.日期
+        const lot = item.fields?.彩种
         const recId = item.record_id
-        if (typeof date === 'string' && recId) existingByDate.set(date, recId)
+        if (typeof date === 'string' && recId) {
+          existingByKey.set(`${date}|${typeof lot === 'string' ? lot : '快乐8'}`, recId)
+        }
       }
       pageToken = d.data?.page_token || ''
     } while (pageToken)
@@ -144,8 +169,9 @@ export default async function handler(req, res) {
       const date = r?.date
       if (!date) continue
       const fields = recToFields(r)
-      if (existingByDate.has(date)) {
-        toUpdate.push({ record_id: existingByDate.get(date), fields })
+      const key = `${date}|${fields.彩种}`
+      if (existingByKey.has(key)) {
+        toUpdate.push({ record_id: existingByKey.get(key), fields })
       } else {
         toCreate.push({ fields })
       }
