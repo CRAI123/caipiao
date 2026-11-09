@@ -30,6 +30,164 @@ export function analyzeDraw(num) {
   return { sum, span, sumTail, oddCount, oddPattern, smallCount, midCount, bigCount, primeCount, form }
 }
 
+// ============================================================
+// 奇偶专项模型
+// 常见 3D 奇偶玩法：形态遗漏回补、位置奇偶节奏（连出变盘）、
+// 两奇一偶/两偶一奇高概率形态追踪。理论概率：全奇/全偶各 12.5%，
+// 两奇一偶/两偶一奇各 37.5%（对应理论周期 8 期 / 2.67 期）。
+// ============================================================
+const ODD_DIGITS = new Set([1, 3, 5, 7, 9])
+const MACRO_PROB = { 全奇: 0.125, 全偶: 0.125, 两奇一偶: 0.375, 两偶一奇: 0.375 }
+const MACRO_PATTERN_COUNT = { 全奇: 1, 全偶: 1, 两奇一偶: 3, 两偶一奇: 3 }
+
+function bitsOfNum(num) {
+  return num.map((d) => (ODD_DIGITS.has(d) ? 1 : 0))
+}
+function patternOfBits(bits) {
+  return bits.map((b) => (b ? '奇' : '偶')).join('')
+}
+function macroOfBits(bits) {
+  const k = bits[0] + bits[1] + bits[2]
+  return k === 3 ? '全奇' : k === 0 ? '全偶' : k === 2 ? '两奇一偶' : '两偶一奇'
+}
+
+// 8 种精确奇偶形态（百十个顺序）
+const ALL_OE = []
+for (let m = 0; m < 8; m++) {
+  const bits = [(m >> 2) & 1, (m >> 1) & 1, m & 1]
+  ALL_OE.push({ bits, pattern: patternOfBits(bits), macro: macroOfBits(bits) })
+}
+
+/**
+ * 奇偶评测：对下期给出
+ * - perPos：每个位置的奇偶倾向（连出变盘 / 近期多数）与理由
+ * - ranked：8 种精确形态综合评分（频率 25 + 遗漏回补 40 + 位置匹配 25 - 连出抑制）
+ * - macro：4 种宏观形态的计数、理论概率、遗漏
+ * - recommendedPatterns / recommendedMacro：推荐结论
+ */
+export function buildOddEven(draws, windowN = 50) {
+  if (!draws.length) return null
+  const N = Math.min(windowN, draws.length)
+  const recent = draws.slice(0, N)
+
+  // 8 形态近期计数
+  const count = {}
+  ALL_OE.forEach((p) => (count[p.pattern] = 0))
+  recent.forEach((d) => {
+    count[patternOfBits(bitsOfNum(d.num))]++
+  })
+
+  // 8 形态遗漏（从最新往旧，第一次出现的序号即遗漏期数）
+  const omit = {}
+  ALL_OE.forEach((p) => (omit[p.pattern] = draws.length))
+  for (let i = 0; i < draws.length; i++) {
+    const p = patternOfBits(bitsOfNum(draws[i].num))
+    if (omit[p] === draws.length) omit[p] = i
+  }
+
+  const lastP = patternOfBits(bitsOfNum(draws[0].num))
+  const prevP = draws[1] ? patternOfBits(bitsOfNum(draws[1].num)) : null
+
+  // 位置奇偶节奏：连出 >=2 期看反转，否则取近期多数
+  const perPos = [0, 1, 2].map((pos) => {
+    const oddRecent = recent.filter((d) => ODD_DIGITS.has(d.num[pos])).length
+    const evenRecent = N - oddRecent
+    const firstOdd = ODD_DIGITS.has(draws[0].num[pos])
+    let streak = 0
+    for (let i = 0; i < draws.length; i++) {
+      if (ODD_DIGITS.has(draws[i].num[pos]) === firstOdd) streak++
+      else break
+    }
+    let recommendBit
+    let reason
+    if (firstOdd && streak >= 2) {
+      recommendBit = 0
+      reason = `连奇 ${streak} 期，看偶回补`
+    } else if (!firstOdd && streak >= 2) {
+      recommendBit = 1
+      reason = `连偶 ${streak} 期，看奇回补`
+    } else if (oddRecent > evenRecent) {
+      recommendBit = 1
+      reason = `近${N}期奇 ${oddRecent} 次偏多`
+    } else if (oddRecent < evenRecent) {
+      recommendBit = 0
+      reason = `近${N}期偶 ${evenRecent} 次偏多`
+    } else {
+      recommendBit = firstOdd ? 0 : 1
+      reason = '奇偶均衡，看反转'
+    }
+    return {
+      pos,
+      label: ['百', '十', '个'][pos],
+      oddRecent,
+      evenRecent,
+      streak,
+      current: firstOdd ? '奇' : '偶',
+      recommendBit,
+      recommend: recommendBit ? '奇' : '偶',
+      reason,
+    }
+  })
+  const recBits = perPos.map((p) => p.recommendBit)
+
+  // 8 形态综合评分
+  const ranked = ALL_OE.map((p) => {
+    const cnt = count[p.pattern] || 0
+    const om = omit[p.pattern]
+    let score = 0
+    // 1. 近期频率（相对均匀 1/8），25 分
+    score += (cnt / Math.max(N, 1)) / (1 / 8) * 25
+    // 2. 遗漏回补（理论周期 8 期，4 倍封顶），40 分
+    score += (Math.min(om / 8, 4) / 4) * 40
+    // 3. 位置奇偶节奏匹配，25 分
+    let match = 0
+    for (let i = 0; i < 3; i++) if (p.bits[i] === recBits[i]) match++
+    score += (match / 3) * 25
+    // 4. 连出抑制：刚出过则降权（变盘思路）
+    if (p.pattern === lastP) score -= 18
+    if (p.pattern === prevP) score -= 8
+    return { ...p, count: cnt, omit: om, score: Math.round(score * 10) / 10 }
+  }).sort((a, b) => b.score - a.score)
+
+  // 4 种宏观形态
+  const macroKeys = ['两奇一偶', '两偶一奇', '全奇', '全偶']
+  const macroCount = {}
+  macroKeys.forEach((k) => (macroCount[k] = 0))
+  recent.forEach((d) => {
+    macroCount[macroOfBits(bitsOfNum(d.num))]++
+  })
+  const macroOmit = {}
+  macroKeys.forEach((k) => (macroOmit[k] = draws.length))
+  for (let i = 0; i < draws.length; i++) {
+    const mk = macroOfBits(bitsOfNum(draws[i].num))
+    if (macroOmit[mk] === draws.length) macroOmit[mk] = i
+  }
+  const macroScoreSum = {}
+  macroKeys.forEach((k) => (macroScoreSum[k] = 0))
+  ranked.forEach((p) => (macroScoreSum[p.macro] += p.score))
+  const macroRanked = macroKeys
+    .map((k) => ({
+      macro: k,
+      count: macroCount[k],
+      prob: MACRO_PROB[k],
+      cycle: +(1 / MACRO_PROB[k]).toFixed(2),
+      omit: macroOmit[k],
+      score: Math.round((macroScoreSum[k] / MACRO_PATTERN_COUNT[k]) * 10) / 10,
+    }))
+    .sort((a, b) => b.score - a.score)
+
+  return {
+    recentN: N,
+    perPos,
+    ranked,
+    recommendedPatterns: ranked.slice(0, 3).map((p) => p.pattern),
+    recommendedBits: ranked[0].bits,
+    macro: macroRanked,
+    recommendedMacro: macroRanked[0].macro,
+    lastPattern: lastP,
+  }
+}
+
 /** 频率统计：每个数字 0-9 出现次数 */
 function digitFrequency(draws) {
   const freq = Array(10).fill(0)
@@ -81,9 +239,8 @@ export function predictFC3D(draws) {
   const sumAvg = sums.reduce((s, v) => s + v, 0) / sums.length
   const sumMode = mode(sums)
 
-  // --- 5. 奇偶分布 ---
-  const oddCounts = recent(all, Math.min(30, all.length)).map((d) => analyzeDraw(d.num).oddCount)
-  const oddMode = mode(oddCounts) // 0,1,2,3
+  // --- 5. 奇偶专项模型 ---
+  const oddEven = buildOddEven(all, 50)
 
   // --- 6. 形态分布 ---
   const forms = recent(all, Math.min(50, all.length)).map((d) => analyzeDraw(d.num).form)
@@ -117,12 +274,8 @@ export function predictFC3D(draws) {
   // --- 推荐和值范围 ---
   const sumRange = [Math.round(sumAvg - 3), Math.round(sumAvg + 3)]
 
-  // --- 推荐奇偶形态 ---
-  const oddLabels = ['偶偶偶', '奇奇偶', '奇偶奇', '奇偶偶', '偶奇奇', '偶奇偶', '偶偶奇', '奇奇奇']
-  const recommendedOdd = oddLabels.filter((_, idx) => {
-    const cnt = idx.toString(2).padStart(3, '0').split('').reduce((s, c) => s + Number(c), 0)
-    return cnt === oddMode || cnt === Math.min(3, oddMode + 1) || cnt === Math.max(0, oddMode - 1)
-  }).slice(0, 3)
+  // --- 推荐奇偶形态（奇偶专项模型） ---
+  const recommendedOdd = oddEven.recommendedPatterns
 
   // --- 推荐形态 ---
   const formRanked = Object.entries(formFreq).sort((a, b) => b[1] - a[1])
@@ -145,6 +298,7 @@ export function predictFC3D(draws) {
     sumMode,
     recommendedOdd,
     recommendedForms,
+    oddEven,
     omit,
     freq10,
   }
@@ -406,15 +560,16 @@ export function predictFC3Dv2(draws) {
   const sumRange = [Math.max(0, Math.round(sumStat.mean - sumStat.std)), Math.min(27, Math.round(sumStat.mean + sumStat.std))]
   const spanRange = [Math.max(0, Math.round(spanStat.mean - spanStat.std)), Math.min(9, Math.round(spanStat.mean + spanStat.std))]
 
-  // --- 奇偶/形态推荐（近期 Top2） ---
-  const oddDist = {}
+  // --- 奇偶专项模型 ---
+  const oddEven = buildOddEven(draws, 50)
+  const recommendedOdd = oddEven.recommendedPatterns
+
+  // --- 形态推荐（近期 Top2） ---
   const formDist = {}
   recentDraws.forEach((d) => {
     const a = analyzeDraw(d.num)
-    oddDist[a.oddPattern] = (oddDist[a.oddPattern] || 0) + 1
     formDist[a.form] = (formDist[a.form] || 0) + 1
   })
-  const recommendedOdd = Object.entries(oddDist).sort((a, b) => b[1] - a[1]).slice(0, 3).map(([p]) => p)
   const recommendedForms = Object.entries(formDist).sort((a, b) => b[1] - a[1]).slice(0, 2).map(([f]) => f)
 
   // 总遗漏（不分位置）
@@ -437,6 +592,7 @@ export function predictFC3Dv2(draws) {
     sumAvg: sumStat.mean,
     recommendedOdd,
     recommendedForms,
+    oddEven,
     omit,
     posTop,
     algorithm: 'v2',

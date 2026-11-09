@@ -142,8 +142,8 @@ export default function FC3D({ draws }) {
         </div>
         <div className="metric-card">
           <div className="metric-name">奇偶形态</div>
-          <div className="metric-value">{pred.recommendedOdd.join(' / ')}</div>
-          <div className="metric-sub">近30期主形态</div>
+          <div className="metric-value">{pred.recommendedOdd.slice(0, 2).join(' / ')}</div>
+          <div className="metric-sub">主推 {pred.oddEven?.recommendedMacro || '—'} · 位置节奏加权</div>
         </div>
         <div className="metric-card">
           <div className="metric-name">推荐形态</div>
@@ -151,6 +151,75 @@ export default function FC3D({ draws }) {
           <div className="metric-sub">近50期出现频率</div>
         </div>
       </div>
+
+      {/* 奇偶专项 */}
+      {pred.oddEven && (
+        <div className="odd-card">
+          <div className="odd-card-head">
+            <h3>奇偶专项</h3>
+            <span className="muted small">形态遗漏回补 · 位置奇偶节奏 · 连出变盘</span>
+          </div>
+
+          {/* 位置奇偶节奏 */}
+          <div className="odd-pos-row">
+            {pred.oddEven.perPos.map((p) => (
+              <div key={p.pos} className="odd-pos">
+                <div className="odd-pos-label">{p.label}位倾向</div>
+                <span className={`odd-bit ${p.recommend === '奇' ? 'odd' : 'even'}`}>{p.recommend}</span>
+                <div className="odd-pos-sub">
+                  当前{p.current} · 连 {p.streak} 期
+                </div>
+                <div className="odd-pos-reason">{p.reason}</div>
+              </div>
+            ))}
+          </div>
+
+          {/* 8 形态评分 */}
+          <div className="odd-pattern-list">
+            {pred.oddEven.ranked.map((p, i) => (
+              <div key={p.pattern} className={`odd-pattern ${i < 3 ? 'top' : ''}`}>
+                <span className="op-name">{p.pattern}</span>
+                <span className="op-macro">{p.macro}</span>
+                <span className="op-omit">漏 {p.omit}</span>
+                <span className="op-score">{p.score}</span>
+              </div>
+            ))}
+          </div>
+
+          {/* 宏观形态分布 */}
+          <div className="table-scroll">
+            <table className="ledger-table">
+              <thead>
+                <tr>
+                  <th>宏观形态</th>
+                  <th>近期次数</th>
+                  <th>理论概率</th>
+                  <th>遗漏</th>
+                  <th>理论周期</th>
+                  <th>评分</th>
+                </tr>
+              </thead>
+              <tbody>
+                {pred.oddEven.macro.map((m) => (
+                  <tr key={m.macro}>
+                    <td>{m.macro}</td>
+                    <td className="mono">{m.count}</td>
+                    <td className="mono">{(m.prob * 100).toFixed(1)}%</td>
+                    <td className="mono">{m.omit}</td>
+                    <td className="mono">{m.cycle}</td>
+                    <td className="mono">{m.score}</td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+
+          <div className="note note-info" style={{ marginTop: 12 }}>
+            两奇一偶 / 两偶一奇合计占 75%（理论周期 2.67 期），全奇 / 全偶合计 25%（理论周期 8 期）。
+            遗漏越久标记回补关注，但开奖独立随机，形态不会“强制平衡”。
+          </div>
+        </div>
+      )}
 
       {/* 全部数字评分 */}
       <div className="digit-scores">

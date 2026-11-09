@@ -1211,3 +1211,48 @@ code {
 .prize-badge-win { background: rgba(193, 39, 45, 0.12); color: var(--red-deep); }
 .prize-badge-lose { background: var(--ink-10); color: var(--ink-50); }
 .prize-badge-invalid { background: rgba(230, 160, 0, 0.15); color: #a87000; }
+
+/* ---------- 福彩3D 奇偶专项 ---------- */
+.odd-card {
+  margin-top: 16px; padding: 16px 18px;
+  border: 1px solid var(--ink-20); border-radius: 8px; background: var(--card);
+}
+.odd-card-head {
+  display: flex; align-items: baseline; gap: 10px; margin-bottom: 14px;
+}
+.odd-card-head h3 { margin: 0; font-size: 16px; color: var(--ink); }
+.odd-pos-row {
+  display: grid; grid-template-columns: repeat(3, 1fr); gap: 12px; margin-bottom: 16px;
+}
+.odd-pos {
+  display: flex; flex-direction: column; align-items: center; gap: 6px;
+  padding: 12px 8px; border-radius: 6px; background: var(--ink-05, #f7f7f8);
+}
+.odd-pos-label { font-size: 12.5px; color: var(--ink-50); }
+.odd-bit {
+  display: inline-flex; align-items: center; justify-content: center;
+  width: 42px; height: 42px; border-radius: 50%;
+  font-size: 22px; font-weight: 800;
+}
+.odd-bit.odd { background: rgba(193, 39, 45, 0.12); color: var(--red-deep); }
+.odd-bit.even { background: rgba(31, 111, 191, 0.12); color: var(--blue); }
+.odd-pos-sub { font-size: 12px; color: var(--ink-60); }
+.odd-pos-reason { font-size: 11.5px; color: var(--ink-45, #888); text-align: center; line-height: 1.4; }
+
+.odd-pattern-list { display: flex; flex-wrap: wrap; gap: 8px; margin-bottom: 16px; }
+.odd-pattern {
+  display: flex; align-items: center; gap: 8px;
+  padding: 6px 10px; border-radius: 5px;
+  border: 1px solid var(--ink-15, #e5e5e8); background: var(--card);
+  font-size: 13px;
+}
+.odd-pattern.top {
+  border-color: var(--red); background: rgba(193, 39, 45, 0.06);
+}
+.op-name { font-weight: 700; letter-spacing: 1px; color: var(--ink); }
+.op-macro { font-size: 11px; color: var(--ink-45, #888); }
+.op-omit { font-size: 11px; color: var(--ink-50); }
+.op-score { font-weight: 700; color: var(--red-deep); font-variant-numeric: tabular-nums; }
+@media (max-width: 640px) {
+  .odd-pos-row { grid-template-columns: 1fr; }
+}
