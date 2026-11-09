@@ -19,18 +19,32 @@ export default async function handler(req, res) {
     }
 
     const url = `${CWL_BASE}${path}`
-    const upstream = await fetch(url, {
-      headers: {
-        Referer: 'https://www.cwl.gov.cn/ygkj/wqkjgg/kl8/',
-        Accept: 'application/json, text/javascript, */*; q=0.01',
-        'Accept-Language': 'zh-CN,zh;q=0.9,en;q=0.8',
-        'User-Agent':
-          'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
-        X-Requested-With: 'XMLHttpRequest',
-      },
-    })
-    const text = await upstream.text()
-    res.statusCode = upstream.status
+    const controller = new AbortController()
+    const timer = setTimeout(() => controller.abort(), 8000)
+    let text = ''
+    let status = 502
+    try {
+      const upstream = await fetch(url, {
+        signal: controller.signal,
+        headers: {
+          Referer: 'https://www.cwl.gov.cn/ygkj/wqkjgg/kl8/',
+          Accept: 'application/json, text/javascript, */*; q=0.01',
+          'Accept-Language': 'zh-CN,zh;q=0.9,en;q=0.8',
+          'User-Agent':
+            'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
+          X-Requested-With: 'XMLHttpRequest',
+        },
+      })
+      status = upstream.status
+      text = await upstream.text()
+    } catch (e) {
+      clearTimeout(timer)
+      return res
+        .status(504)
+        .json({ error: `福彩官网请求失败（${e.name === 'AbortError' ? '超时' : e.message}），海外服务器可能被官网 WAF 拦截，请使用桌面端抓取。` })
+    }
+    clearTimeout(timer)
+    res.statusCode = status
     res.setHeader('Content-Type', 'application/json; charset=utf-8')
     res.setHeader('Cache-Control', 's-maxage=60, stale-while-revalidate=300')
     res.end(text)
