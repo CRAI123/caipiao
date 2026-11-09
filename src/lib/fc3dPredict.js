@@ -209,3 +209,66 @@ function mode(arr) {
   arr.forEach((v) => (freq[v] = (freq[v] || 0) + 1))
   return Number(Object.entries(freq).sort((a, b) => b[1] - a[1])[0][0])
 }
+
+/**
+ * 滚动回测：对最近 periods 期，每期只用「它之前」的数据做预测，再与真实开奖对比。
+ * 这样预测时看不到未来，结果才是对方法本身的公平检验。
+ * draws 约定：最新在前。
+ */
+export function walkForwardAuditFC3D(draws, { periods = 50, minTrain = 20 } = {}) {
+  const n = Math.min(periods, draws.length - minTrain)
+  if (n <= 0) {
+    return { periods: 0, rows: [], dist: [], avgHits: 0, baseline: 0, spanRate: 0, sumRate: 0, oddRate: 0, formRate: 0 }
+  }
+  const rows = []
+  // draws 最新在前，我们从旧到新滚动：取 [minTrain, minTrain+n) 作为测试期
+  for (let i = 0; i < n; i++) {
+    const testIdx = draws.length - 1 - i // 从最旧的测试期开始
+    const actual = draws[testIdx]
+    const train = draws.slice(testIdx + 1) // 仅用之后（更旧）的数据
+    if (train.length < minTrain) break
+    const pred = predictFC3D(train)
+    if (!pred) continue
+    const a = analyzeDraw(actual.num)
+    const allRec = [...pred.dan, ...pred.tuo]
+    const hits = actual.num.filter((d) => allRec.includes(d))
+    const danHits = pred.dan.filter((d) => actual.num.includes(d))
+    const spanHit = a.span >= pred.spanRange[0] && a.span <= pred.spanRange[1]
+    const sumHit = a.sum >= pred.sumRange[0] && a.sum <= pred.sumRange[1]
+    const oddHit = pred.recommendedOdd.includes(a.oddPattern)
+    const formHit = pred.recommendedForms.includes(a.form)
+    const score =
+      (hits.length === 3 ? 40 : hits.length === 2 ? 20 : hits.length === 1 ? 8 : 0) +
+      (spanHit ? 15 : 0) + (sumHit ? 15 : 0) + (oddHit ? 15 : 0) + (formHit ? 15 : 0)
+    rows.push({
+      draw: actual,
+      prediction: pred,
+      hits: hits.length,
+      hitNums: hits,
+      danHits: danHits.length,
+      spanHit,
+      sumHit,
+      oddHit,
+      formHit,
+      score,
+    })
+  }
+  // 按最新在前排序（rows 当前是从旧到新加入的）
+  rows.reverse()
+
+  const total = rows.length
+  const dist = [0, 1, 2, 3].map((k) => ({
+    k,
+    count: rows.filter((r) => r.hits === k).length,
+  }))
+  const avgHits = total ? +(rows.reduce((s, r) => s + r.hits, 0) / total).toFixed(2) : 0
+  const spanRate = total ? +(rows.filter((r) => r.spanHit).length / total * 100).toFixed(0) : 0
+  const sumRate = total ? +(rows.filter((r) => r.sumHit).length / total * 100).toFixed(0) : 0
+  const oddRate = total ? +(rows.filter((r) => r.oddHit).length / total * 100).toFixed(0) : 0
+  const formRate = total ? +(rows.filter((r) => r.formHit).length / total * 100).toFixed(0) : 0
+  // 机选基准：从 10 个数字中随机选 6 个，命中 3 个的概率 = C(3,3)*C(7,3)/C(10,6) = 35/210 = 1/6
+  // 平均命中数 = 3 * 6/10 = 1.8
+  const baseline = 1.8
+
+  return { periods: total, rows, dist, avgHits, baseline, spanRate, sumRate, oddRate, formRate }
+}

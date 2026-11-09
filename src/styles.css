@@ -1039,3 +1039,118 @@ code {
 }
 .tab-dot-blue { background: var(--blue); }
 .badge-muted { color: var(--ink-40); border-color: var(--ink-20); background: transparent; }
+
+/* ---------- 福彩3D 组件样式 ---------- */
+.fc3d-digits { display: flex; flex-wrap: wrap; gap: 8px; align-items: center; }
+
+/* 总览 */
+.fc3d-latest { display: flex; justify-content: center; gap: 20px; margin: 8px 0 16px; }
+.fc3d-pos-col { text-align: center; }
+.fc3d-pos-label { font-size: 13px; color: var(--ink-60); margin-bottom: 6px; letter-spacing: 2px; }
+.fc3d-latest-ball {
+  width: 56px; height: 56px; line-height: 56px;
+  border-radius: 50%;
+  background: linear-gradient(135deg, var(--red), var(--red-deep));
+  color: #fff; font-size: 28px; font-weight: 700;
+  box-shadow: 0 3px 10px rgba(193,39,45,0.35);
+}
+.fc3d-latest-meta {
+  display: flex; flex-wrap: wrap; gap: 14px; justify-content: center;
+  font-size: 13px; color: var(--ink-70); margin-top: 8px;
+}
+
+/* 近期开奖列表 */
+.fc3d-recent-list { display: flex; flex-direction: column; gap: 4px; }
+.fc3d-recent-row {
+  display: grid; grid-template-columns: 56px 80px 50px 50px 60px;
+  gap: 10px; align-items: center; padding: 6px 10px; border-radius: 4px;
+  font-size: 13px;
+}
+.fc3d-recent-row:hover { background: var(--ink-10); }
+.fc3d-recent-num { font-weight: 700; color: var(--red-deep); letter-spacing: 2px; }
+
+/* 分位频次网格 */
+.fc3d-pos-grid { display: flex; flex-direction: column; gap: 2px; overflow-x: auto; }
+.fc3d-pos-head, .fc3d-pos-row { display: grid; grid-template-columns: 50px repeat(10, 1fr); gap: 2px; }
+.fc3d-pos-head { font-size: 12px; color: var(--ink-60); margin-bottom: 4px; }
+.fc3d-pos-corner, .fc3d-pos-name {
+  display: flex; align-items: center; justify-content: center;
+  font-weight: 700; color: var(--ink-60); font-size: 13px;
+}
+.fc3d-pos-digit-head { text-align: center; font-weight: 600; }
+.fc3d-pos-cell {
+  display: flex; flex-direction: column; align-items: center; justify-content: center;
+  border-radius: 4px; padding: 6px 2px; min-height: 44px;
+}
+.fc3d-pos-freq { font-size: 14px; font-weight: 700; color: var(--red-deep); }
+.fc3d-pos-omit { font-size: 10px; color: var(--ink-50); }
+
+/* 遗漏走势 */
+.fc3d-trend-grid { display: flex; flex-direction: column; gap: 1px; overflow-x: auto; }
+.fc3d-trend-head, .fc3d-trend-row { display: grid; grid-template-columns: 60px repeat(10, 1fr); gap: 1px; }
+.fc3d-trend-head { font-size: 11px; color: var(--ink-50); margin-bottom: 3px; }
+.fc3d-trend-id { text-align: center; font-size: 11px; color: var(--ink-50); }
+.fc3d-trend-digit { text-align: center; font-weight: 600; }
+.fc3d-trend-cell {
+  height: 26px; display: flex; align-items: center; justify-content: center;
+  background: var(--ink-10); border-radius: 3px; font-size: 14px;
+}
+.fc3d-trend-cell.hit {
+  background: linear-gradient(135deg, var(--red), var(--red-deep));
+  color: #fff; font-weight: 700;
+}
+
+/* 分布条 */
+.fc3d-sum-bars { display: flex; flex-direction: column; gap: 2px; max-height: 320px; overflow-y: auto; }
+.fc3d-size-dist { display: flex; flex-direction: column; gap: 12px; }
+.fc3d-size-item { display: flex; align-items: center; gap: 10px; }
+.fc3d-size-name { width: 110px; font-size: 13px; color: var(--ink-70); flex-shrink: 0; }
+.fc3d-size-bar {
+  flex: 1; height: 18px; background: var(--ink-10); border-radius: 3px; overflow: hidden;
+}
+.fc3d-size-bar > div { height: 100%; background: var(--red); border-radius: 3px; transition: width .3s; }
+.fc3d-size-val { width: 50px; text-align: right; font-size: 13px; font-weight: 700; color: var(--ink-70); }
+
+/* 形态走势列表 */
+.fc3d-pattern-list { display: flex; flex-direction: column; gap: 3px; }
+.fc3d-pattern-row {
+  display: flex; gap: 10px; align-items: center; padding: 5px 10px; border-radius: 4px;
+  font-size: 13px;
+}
+.fc3d-pattern-row:hover { background: var(--ink-10); }
+.fc3d-pattern-num { font-weight: 700; color: var(--ink); letter-spacing: 1px; }
+.fc3d-tag {
+  display: inline-block; padding: 1px 7px; border-radius: 3px;
+  background: var(--ink-10); color: var(--ink-70); font-size: 11px;
+}
+
+/* 重号 */
+.fc3d-repeat-list { display: flex; flex-direction: column; gap: 4px; }
+.fc3d-repeat-row {
+  display: flex; gap: 10px; align-items: center; padding: 6px 10px; border-radius: 4px;
+  font-size: 13px; flex-wrap: wrap;
+}
+.fc3d-repeat-row:hover { background: var(--ink-10); }
+.fc3d-repeat-num { font-weight: 700; letter-spacing: 2px; }
+.fc3d-repeat-arrow { color: var(--ink-40); }
+.fc3d-repeat-hit { color: var(--red-deep); font-weight: 700; }
+
+/* 胆拖 */
+.fc3d-dt-type { display: flex; gap: 8px; margin-bottom: 18px; flex-wrap: wrap; }
+.fc3d-dt-section { margin-bottom: 16px; }
+.fc3d-dt-label { font-size: 13px; font-weight: 700; color: var(--ink-70); margin-bottom: 8px; }
+.fc3d-dt-digits { display: flex; flex-wrap: wrap; gap: 8px; }
+.dt-ball {
+  width: 40px; height: 40px; border-radius: 50%; border: 2px solid var(--ink-30);
+  background: #fff; color: var(--ink); font-size: 16px; font-weight: 700;
+  cursor: pointer; transition: all .15s;
+}
+.dt-ball:hover:not(:disabled) { border-color: var(--red); }
+.dt-ball:disabled { opacity: 0.3; cursor: not-allowed; }
+.dt-ball.dan { background: linear-gradient(135deg, var(--red), var(--red-deep)); color: #fff; border-color: var(--red-deep); }
+.dt-ball.tuo { background: var(--blue-soft); color: var(--blue); border-color: var(--blue); }
+.fc3d-dt-result {
+  display: flex; gap: 16px; align-items: center; margin-top: 12px;
+  padding: 12px 16px; background: var(--paper); border-radius: 4px; font-size: 15px;
+}
+.fc3d-dt-result b { color: var(--red-deep); font-size: 18px; }

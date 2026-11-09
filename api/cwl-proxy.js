@@ -19,6 +19,9 @@ export default async function handler(req, res) {
     }
 
     const url = `${CWL_BASE}${path}`
+    const referer = (req.query?.referer && typeof req.query.referer === 'string' && req.query.referer.startsWith('https://www.cwl.gov.cn/'))
+      ? req.query.referer
+      : 'https://www.cwl.gov.cn/'
     const controller = new AbortController()
     const timer = setTimeout(() => controller.abort(), 8000)
     let text = ''
@@ -27,7 +30,7 @@ export default async function handler(req, res) {
       const upstream = await fetch(url, {
         signal: controller.signal,
         headers: {
-          Referer: 'https://www.cwl.gov.cn/ygkj/wqkjgg/kl8/',
+          Referer: referer,
           Accept: 'application/json, text/javascript, */*; q=0.01',
           'Accept-Language': 'zh-CN,zh;q=0.9,en;q=0.8',
           'User-Agent':

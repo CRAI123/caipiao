@@ -15,6 +15,15 @@ import Settings from './components/Settings.jsx'
 import AccessGate from './components/AccessGate.jsx'
 import Admin from './components/Admin.jsx'
 import FC3D from './components/FC3D.jsx'
+import FC3DOverview from './components/FC3DOverview.jsx'
+import FC3DHotCold from './components/FC3DHotCold.jsx'
+import FC3DPatterns from './components/FC3DPatterns.jsx'
+import FC3DRepeats from './components/FC3DRepeats.jsx'
+import FC3DDanTuo from './components/FC3DDanTuo.jsx'
+import FC3DAudit from './components/FC3DAudit.jsx'
+import FC3DTerms from './components/FC3DTerms.jsx'
+import FC3DDataManager from './components/FC3DDataManager.jsx'
+import { FC3D_DRAWS } from './data/fc3d.js'
 import { loadJournal, getRecord } from './lib/journal.js'
 import { loadSettings, isNeonReady } from './lib/settings.js'
 import { getSql } from './lib/neon.js'
@@ -36,12 +45,27 @@ const TABS = [
   { id: 'settings', label: '设置', en: 'SETTINGS' },
 ]
 
+const FC3D_TABS = [
+  { id: 'overview', label: '总览', en: 'OVERVIEW' },
+  { id: 'hotcold', label: '冷热遗漏', en: 'HOT & COLD' },
+  { id: 'patterns', label: '形态走势', en: 'PATTERNS' },
+  { id: 'repeats', label: '重号分析', en: 'REPEATS' },
+  { id: 'dantuo', label: '复式胆拖', en: 'BETS' },
+  { id: 'predict', label: '下期推荐', en: 'PREDICT' },
+  { id: 'audit', label: '方法体检', en: 'AUDIT' },
+  { id: 'terms', label: '术语大全', en: 'TERMS' },
+  { id: 'data', label: '数据管理', en: 'DATA' },
+]
+
 export default function App() {
   const [draws, setDraws] = useState(HISTORY_DRAWS.length ? HISTORY_DRAWS : SAMPLE_DRAWS)
   const [tab, setTab] = useState('overview')
   const [lottery, setLottery] = useState('kl8') // 'kl8' | 'fc3d'
+  const [fc3dDraws, setFc3dDraws] = useState(FC3D_DRAWS)
+  const [fc3dTab, setFc3dTab] = useState('overview')
   const [tick, setTick] = useState(0) // 账本变化后刷新「待打卡」标记
   const usingSample = draws[0]?.sample
+  const fc3dUsingSample = fc3dDraws[0]?.sample
 
   // ---------- 访问控制 ----------
   // gate: loading(检查中) | open(已授权/本地模式) | gated(未授权，渲染门禁)
@@ -170,7 +194,7 @@ export default function App() {
                 {lottery === 'kl8' ? (
                   <>福彩快乐8 · 数据研究档案 <i>KUAILE 8 RESEARCH LEDGER</i></>
                 ) : (
-                  <>福彩3D · 术语参考 <i>FC3D REFERENCE</i></>
+                  <>福彩3D · 数据研究档案 <i>FC3D RESEARCH LEDGER</i></>
                 )}
               </p>
             </div>
@@ -188,7 +212,9 @@ export default function App() {
               <>
                 <div>3 位数 · 000 – 999</div>
                 <div>直选概率 1 / 1,000</div>
-                <div className="meta-real">术语参考 · 理性购彩</div>
+                <div className={fc3dUsingSample ? 'meta-sample' : 'meta-real'}>
+                  数据源：{fc3dUsingSample ? '内置演示数据' : '真实开奖数据'}
+                </div>
               </>
             )}
             {/* 彩票类型滑块 */}
@@ -215,7 +241,7 @@ export default function App() {
         </div>
       </header>
 
-      {/* 导航 —— 仅快乐8 显示 */}
+      {/* 导航 */}
       {lottery === 'kl8' && (
         <nav className="tabs" aria-label="页面导航">
           {TABS.map((t) => (
@@ -232,10 +258,34 @@ export default function App() {
           ))}
         </nav>
       )}
+      {lottery === 'fc3d' && (
+        <nav className="tabs" aria-label="福彩3D 页面导航">
+          {FC3D_TABS.map((t) => (
+            <button
+              key={t.id}
+              className={`tab-btn ${fc3dTab === t.id ? 'active' : ''}`}
+              onClick={() => setFc3dTab(t.id)}
+            >
+              {t.label}
+              <i>{t.en}</i>
+            </button>
+          ))}
+        </nav>
+      )}
 
       <main className="main">
         {lottery === 'fc3d' ? (
-          <FC3D />
+          <>
+            {fc3dTab === 'overview' && <FC3DOverview draws={fc3dDraws} />}
+            {fc3dTab === 'hotcold' && <FC3DHotCold draws={fc3dDraws} />}
+            {fc3dTab === 'patterns' && <FC3DPatterns draws={fc3dDraws} />}
+            {fc3dTab === 'repeats' && <FC3DRepeats draws={fc3dDraws} />}
+            {fc3dTab === 'dantuo' && <FC3DDanTuo />}
+            {fc3dTab === 'predict' && <FC3D draws={fc3dDraws} />}
+            {fc3dTab === 'audit' && <FC3DAudit draws={fc3dDraws} />}
+            {fc3dTab === 'terms' && <FC3DTerms />}
+            {fc3dTab === 'data' && <FC3DDataManager draws={fc3dDraws} setDraws={setFc3dDraws} />}
+          </>
         ) : tab === 'admin' ? (
           <Admin
             deviceId={device?.id || ''}
