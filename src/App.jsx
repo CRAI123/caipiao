@@ -20,6 +20,7 @@ import FC3DHotCold from './components/FC3DHotCold.jsx'
 import FC3DPatterns from './components/FC3DPatterns.jsx'
 import FC3DRepeats from './components/FC3DRepeats.jsx'
 import FC3DDanTuo from './components/FC3DDanTuo.jsx'
+import FC3DPrize from './components/FC3DPrize.jsx'
 import FC3DAudit from './components/FC3DAudit.jsx'
 import FC3DTerms from './components/FC3DTerms.jsx'
 import FC3DDataManager from './components/FC3DDataManager.jsx'
@@ -51,6 +52,7 @@ const FC3D_TABS = [
   { id: 'patterns', label: '形态走势', en: 'PATTERNS' },
   { id: 'repeats', label: '重号分析', en: 'REPEATS' },
   { id: 'dantuo', label: '复式胆拖', en: 'BETS' },
+  { id: 'prize', label: '中奖计算', en: 'PRIZE' },
   { id: 'predict', label: '下期推荐', en: 'PREDICT' },
   { id: 'audit', label: '方法体检', en: 'AUDIT' },
   { id: 'terms', label: '术语大全', en: 'TERMS' },
@@ -281,6 +283,7 @@ export default function App() {
             {fc3dTab === 'patterns' && <FC3DPatterns draws={fc3dDraws} />}
             {fc3dTab === 'repeats' && <FC3DRepeats draws={fc3dDraws} />}
             {fc3dTab === 'dantuo' && <FC3DDanTuo />}
+            {fc3dTab === 'prize' && <FC3DPrize draws={fc3dDraws} />}
             {fc3dTab === 'predict' && <FC3D draws={fc3dDraws} />}
             {fc3dTab === 'audit' && <FC3DAudit draws={fc3dDraws} />}
             {fc3dTab === 'terms' && <FC3DTerms />}
