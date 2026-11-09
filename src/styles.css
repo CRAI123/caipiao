@@ -117,6 +117,136 @@ body {
 .meta-sample { color: var(--amber); font-weight: 700; }
 .meta-real { color: var(--blue); font-weight: 700; }
 
+/* ---------- 彩种滑块切换 ---------- */
+.lottery-switch {
+  position: relative;
+  display: inline-flex;
+  margin-top: 10px;
+  padding: 3px;
+  background: var(--paper-deep);
+  border: 1px solid var(--ink-20);
+  border-radius: 6px;
+  box-shadow: var(--shadow-hard);
+}
+.lottery-tab {
+  position: relative;
+  z-index: 1;
+  appearance: none;
+  background: transparent;
+  border: none;
+  padding: 6px 16px;
+  font-family: var(--font-serif);
+  font-size: 14px;
+  font-weight: 700;
+  color: var(--ink-60);
+  cursor: pointer;
+  transition: color 0.25s ease;
+  border-radius: 4px;
+}
+.lottery-tab.active { color: #fff; }
+.lottery-indicator {
+  position: absolute;
+  top: 3px;
+  bottom: 3px;
+  width: calc(50% - 3px);
+  background: var(--red);
+  border-radius: 4px;
+  transition: transform 0.3s cubic-bezier(0.4, 0, 0.2, 1);
+  z-index: 0;
+}
+.lottery-indicator.kl8 { transform: translateX(0); }
+.lottery-indicator.fc3d { transform: translateX(100%); }
+
+/* ---------- 福彩3D 板块 ---------- */
+.fc3d { max-width: 1180px; margin: 0 auto; padding: 0 24px 40px; }
+
+.fc3d-warn {
+  display: flex;
+  align-items: flex-start;
+  gap: 12px;
+  margin: 24px 0 20px;
+  padding: 16px 20px;
+  background: var(--red-soft);
+  border: 1px solid var(--red);
+  border-left: 5px solid var(--red);
+  border-radius: 4px;
+  box-shadow: var(--shadow-hard);
+  font-size: 14px;
+  line-height: 1.6;
+}
+.fc3d-warn-icon { font-size: 20px; flex-shrink: 0; line-height: 1.4; }
+.fc3d-warn strong { color: var(--red-deep); }
+
+.fc3d-intro {
+  background: var(--card);
+  border: 1px solid var(--ink-20);
+  border-radius: 4px;
+  padding: 20px 24px;
+  margin-bottom: 28px;
+  box-shadow: var(--shadow-hard);
+}
+.fc3d-intro h2 {
+  margin: 0 0 8px;
+  font-family: var(--font-serif);
+  font-size: 24px;
+  color: var(--red-deep);
+  letter-spacing: 3px;
+}
+.fc3d-intro p { margin: 0; color: var(--ink-80); }
+
+.fc3d-terms .section-title {
+  font-family: var(--font-serif);
+  font-size: 22px;
+  letter-spacing: 4px;
+  margin: 0 0 18px;
+  padding-bottom: 8px;
+  border-bottom: 2px solid var(--red);
+  display: inline-block;
+}
+
+.term-group { margin-bottom: 28px; }
+.term-group > h3 {
+  font-family: var(--font-serif);
+  font-size: 17px;
+  color: var(--ink);
+  margin: 0 0 12px;
+  padding-left: 10px;
+  border-left: 4px solid var(--red);
+}
+
+.term-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(240px, 1fr));
+  gap: 12px;
+}
+
+.term-card {
+  background: var(--card);
+  border: 1px solid var(--ink-20);
+  border-radius: 4px;
+  padding: 14px 16px;
+  box-shadow: var(--shadow-hard);
+  transition: transform 0.15s ease;
+}
+.term-card:hover { transform: translateY(-2px); }
+
+.term-name {
+  font-weight: 700;
+  font-size: 15px;
+  color: var(--red-deep);
+  margin-bottom: 4px;
+}
+.term-desc { font-size: 13.5px; color: var(--ink-80); line-height: 1.55; }
+.term-example {
+  font-family: var(--font-mono);
+  font-size: 12px;
+  color: var(--blue);
+  margin-top: 6px;
+  padding-top: 6px;
+  border-top: 1px dashed var(--ink-20);
+  word-break: break-all;
+}
+
 /* ---------- 导航 ---------- */
 .tabs {
   max-width: 1180px;

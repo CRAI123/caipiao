@@ -14,6 +14,7 @@ import DataManager from './components/DataManager.jsx'
 import Settings from './components/Settings.jsx'
 import AccessGate from './components/AccessGate.jsx'
 import Admin from './components/Admin.jsx'
+import FC3D from './components/FC3D.jsx'
 import { loadJournal, getRecord } from './lib/journal.js'
 import { loadSettings, isNeonReady } from './lib/settings.js'
 import { getSql } from './lib/neon.js'
@@ -38,6 +39,7 @@ const TABS = [
 export default function App() {
   const [draws, setDraws] = useState(HISTORY_DRAWS.length ? HISTORY_DRAWS : SAMPLE_DRAWS)
   const [tab, setTab] = useState('overview')
+  const [lottery, setLottery] = useState('kl8') // 'kl8' | 'fc3d'
   const [tick, setTick] = useState(0) // 账本变化后刷新「待打卡」标记
   const usingSample = draws[0]?.sample
 
@@ -165,38 +167,76 @@ export default function App() {
             <div>
               <h1>研彩室</h1>
               <p className="masthead-sub">
-                福彩快乐8 · 数据研究档案 <i>KUAILE 8 RESEARCH LEDGER</i>
+                {lottery === 'kl8' ? (
+                  <>福彩快乐8 · 数据研究档案 <i>KUAILE 8 RESEARCH LEDGER</i></>
+                ) : (
+                  <>福彩3D · 术语参考 <i>FC3D REFERENCE</i></>
+                )}
               </p>
             </div>
           </div>
           <div className="masthead-meta mono">
-            <div>80 选 20 · 每期开出 20 个号码</div>
-            <div>选十中十概率 1 / 8,911,711</div>
-            <div className={usingSample ? 'meta-sample' : 'meta-real'}>
-              数据源：{usingSample ? '内置演示数据' : '真实开奖数据'}
+            {lottery === 'kl8' ? (
+              <>
+                <div>80 选 20 · 每期开出 20 个号码</div>
+                <div>选十中十概率 1 / 8,911,711</div>
+                <div className={usingSample ? 'meta-sample' : 'meta-real'}>
+                  数据源：{usingSample ? '内置演示数据' : '真实开奖数据'}
+                </div>
+              </>
+            ) : (
+              <>
+                <div>3 位数 · 000 – 999</div>
+                <div>直选概率 1 / 1,000</div>
+                <div className="meta-real">术语参考 · 理性购彩</div>
+              </>
+            )}
+            {/* 彩票类型滑块 */}
+            <div className="lottery-switch" role="tablist" aria-label="彩种切换">
+              <button
+                role="tab"
+                aria-selected={lottery === 'kl8'}
+                className={`lottery-tab ${lottery === 'kl8' ? 'active' : ''}`}
+                onClick={() => setLottery('kl8')}
+              >
+                快乐8
+              </button>
+              <button
+                role="tab"
+                aria-selected={lottery === 'fc3d'}
+                className={`lottery-tab ${lottery === 'fc3d' ? 'active' : ''}`}
+                onClick={() => setLottery('fc3d')}
+              >
+                福彩3D
+              </button>
+              <span className={`lottery-indicator ${lottery}`} />
             </div>
           </div>
         </div>
       </header>
 
-      {/* 导航 */}
-      <nav className="tabs" aria-label="页面导航">
-        {TABS.map((t) => (
-          <button
-            key={t.id}
-            className={`tab-btn ${tab === t.id ? 'active' : ''}`}
-            onClick={() => setTab(t.id)}
-          >
-            {t.label}
-            {t.id === 'checkin' && pendingCheckin && <em className="tab-dot" title="最新一期还没打卡" />}
-            {t.id === 'admin' && isAdmin && <em className="tab-dot tab-dot-blue" title="管理员设备" />}
-            <i>{t.en}</i>
-          </button>
-        ))}
-      </nav>
+      {/* 导航 —— 仅快乐8 显示 */}
+      {lottery === 'kl8' && (
+        <nav className="tabs" aria-label="页面导航">
+          {TABS.map((t) => (
+            <button
+              key={t.id}
+              className={`tab-btn ${tab === t.id ? 'active' : ''}`}
+              onClick={() => setTab(t.id)}
+            >
+              {t.label}
+              {t.id === 'checkin' && pendingCheckin && <em className="tab-dot" title="最新一期还没打卡" />}
+              {t.id === 'admin' && isAdmin && <em className="tab-dot tab-dot-blue" title="管理员设备" />}
+              <i>{t.en}</i>
+            </button>
+          ))}
+        </nav>
+      )}
 
       <main className="main">
-        {tab === 'admin' ? (
+        {lottery === 'fc3d' ? (
+          <FC3D />
+        ) : tab === 'admin' ? (
           <Admin
             deviceId={device?.id || ''}
             isAdmin={isAdmin}
