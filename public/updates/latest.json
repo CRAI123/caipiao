@@ -1,0 +1,11 @@
+﻿{
+    "version":  "0.1.2",
+    "notes":  "研彩室 0.1.2",
+    "pub_date":  "2026-11-09T15:34:16Z",
+    "platforms":  {
+                      "windows-x86_64":  {
+                                             "signature":  "dW50cnVzdGVkIGNvbW1lbnQ6IHNpZ25hdHVyZSBmcm9tIHRhdXJpIHNlY3JldCBrZXkKUlVURjVRK0lCRk9IYVM1MjYzbDdFZEdxQnNnNGxHRk1POWg1WFVtMEhodEVudHdoNHZSTEVwWlQwVWRsZzBTa2htVkpJZFBOakFvaU16M0lwcTUvTTd1QVRHV1F4ZzU1NVF3PQp0cnVzdGVkIGNvbW1lbnQ6IHRpbWVzdGFtcDoxNzk0MjM4NDU1CWZpbGU656CU5b2p5a6kXzAuMS4yX3g2NC1zZXR1cC5leGUJdmVyc2lvbjowLjEuMgo5RllJQXQ4NHYveGdtTzc5WVhjSjFScC9mZGlOcjdJcUlwR2RxY0pjZWZlMFdDazljRXNRM0pjWTcwZGY3TWg2NWJOVDFqNmlnTFhwNjlldDJoSEZCQT09Cg==",
+                                             "url":  "https://cai.rayzo.cn/updates/yanchaishi_0.1.2_x64-setup.exe"
+                                         }
+                  }
+}
