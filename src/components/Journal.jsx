@@ -150,7 +150,7 @@ export default function Journal({ draws }) {
         setMsg({ tone: 'info', text: `飞书同步完成：更新 ${result.updated} 条，新建 ${result.created} 条` })
       }
     } catch (e) {
-      setMsg({ tone: 'warn', text: `飞书同步失败：${e.message}` })
+      setMsg({ tone: 'warn', text: `飞书同步失败：${e?.message || e || '未知错误'}` })
     } finally {
       setBusy(false)
     }

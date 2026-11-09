@@ -39,6 +39,23 @@ export function isTauri() {
 const pending = new Map()
 let bridgeReady = false
 
+/**
+ * 把 Tauri 抛回来的任意值统一成 Error。
+ * Rust 命令返回 Err(String) 时，invoke 的 reject 值就是一个纯字符串，
+ * 直接取 e.message 会得到 undefined，真正的错误就被吞掉了。
+ */
+function toError(e, fallback = '调用失败') {
+  if (e instanceof Error) return e
+  if (typeof e === 'string' && e.trim()) return new Error(e)
+  try {
+    const s = JSON.stringify(e)
+    if (s && s !== '{}' && s !== 'null' && s !== '""') return new Error(s)
+  } catch {
+    /* 无法序列化时走兜底文案 */
+  }
+  return new Error(fallback)
+}
+
 function ensureBridge() {
   if (bridgeReady || typeof window === 'undefined') return
   bridgeReady = true
@@ -48,7 +65,7 @@ function ensureBridge() {
     const p = pending.get(d.id)
     if (!p) return
     pending.delete(d.id)
-    if (d.error) p.reject(new Error(d.error))
+    if (d.error) p.reject(toError(d.error, '桌面端命令执行失败'))
     else p.resolve(d.result)
   })
 }
@@ -62,7 +79,13 @@ export async function invoke(cmd, args) {
 
   // 路径 A：能直接访问到 __TAURI_INTERNALS__
   const w = getDirectWindow()
-  if (w) return w.__TAURI_INTERNALS__.invoke(cmd, args || {})
+  if (w) {
+    try {
+      return await w.__TAURI_INTERNALS__.invoke(cmd, args || {})
+    } catch (e) {
+      throw toError(e, `桌面端命令 "${cmd}" 执行失败`)
+    }
+  }
 
   // 路径 B：postMessage 委托父窗口
   ensureBridge()
