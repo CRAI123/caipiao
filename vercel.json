@@ -1,14 +1,4 @@
 {
-  "rewrites": [
-    {
-      "source": "/cwl-api/:path*",
-      "destination": "https://www.cwl.gov.cn/:path*",
-      "headers": {
-        "Referer": "https://www.cwl.gov.cn/ygkj/wqkjgg/kl8/",
-        "Accept": "application/json"
-      }
-    }
-  ],
   "crons": [
     {
       "path": "/api/daily-review",

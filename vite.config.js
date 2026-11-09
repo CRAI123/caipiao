@@ -1,8 +1,21 @@
 import { defineConfig, loadEnv } from 'vite'
 import react from '@vitejs/plugin-react'
 
-// 福彩官网未开放 CORS，通过本地代理转发（dev / preview 均生效）
+// 福彩官网未开放 CORS，dev/preview 通过本地代理转发（线上走 /api/cwl-proxy serverless function）
 const cwlProxy = {
+  '/api/cwl-proxy': {
+    target: 'https://www.cwl.gov.cn',
+    changeOrigin: true,
+    // 把 /api/cwl-proxy?path=/xxx 重写为直接请求 https://www.cwl.gov.cn/xxx
+    rewrite: (path) => {
+      const u = new URL(path, 'http://x')
+      return u.searchParams.get('path') || path
+    },
+    headers: {
+      Referer: 'https://www.cwl.gov.cn/ygkj/wqkjgg/kl8/',
+    },
+  },
+  // 兼容旧路径
   '/cwl-api': {
     target: 'https://www.cwl.gov.cn',
     changeOrigin: true,

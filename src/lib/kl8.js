@@ -28,17 +28,17 @@ export async function fetchKl8Draws(count = 100) {
       throw new Error(`桌面端抓取失败：${e?.message || e}`)
     }
   } else {
-    const url = `/cwl-api${API_PATH}?${query}`
+    const url = `/api/cwl-proxy?path=${encodeURIComponent(`${API_PATH}?${query}`)}`
     let res
     try {
       res = await fetch(url, { headers: { Accept: 'application/json' } })
     } catch {
-      throw new Error('网络请求失败：请确认本站通过 npm run dev / npm run preview 启动，并检查网络。')
+      throw new Error('网络请求失败：请确认网络连接正常。')
     }
     if (!res.ok) {
       throw new Error(
         res.status === 404
-          ? '代理未生效（404）：请用 npm run dev / npm run preview 启动，静态托管模式下无法跨域抓取。'
+          ? '代理未生效（404）：线上请等待 Vercel 部署完成，本地请用 npm run dev 启动。'
           : `福彩官网接口返回 HTTP ${res.status}`,
       )
     }
