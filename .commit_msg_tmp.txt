@@ -1,4 +1,0 @@
-fix: 移除未使用的 Neon CLI 依赖，避免 Vercel 构建失败
-
-- 移除 @neon/config、@neon/env（源码未引用，属 Neon CLI 工具包，可能带原生依赖/脚本导致 Vercel install 失败）
-- 添加 engines 字段声明 Node >= 18
