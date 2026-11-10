@@ -1,11 +1,11 @@
 ﻿{
-    "version":  "0.1.8",
-    "notes":  "研彩室 0.1.8",
-    "pub_date":  "2026-11-10T12:35:39Z",
+    "version":  "0.1.9",
+    "notes":  "研彩室 0.1.9",
+    "pub_date":  "2026-11-10T14:46:16Z",
     "platforms":  {
                       "windows-x86_64":  {
-                                             "signature":  "dW50cnVzdGVkIGNvbW1lbnQ6IHNpZ25hdHVyZSBmcm9tIHRhdXJpIHNlY3JldCBrZXkKUlVURjVRK0lCRk9IYWU2SDZZeGZyVlY5cGRlZnQ4NG5ueHpuNDZyYVZGTlBUS0hrQnNZd20vTmJRU2FZTWh6RzVnckdmQmNaTnlTb28wTXYvNTl0b25tb1Q3UHB1TGptT1EwPQp0cnVzdGVkIGNvbW1lbnQ6IHRpbWVzdGFtcDoxNzk0MzE0MTM3CWZpbGU656CU5b2p5a6kXzAuMS44X3g2NC1zZXR1cC5leGUJdmVyc2lvbjowLjEuOApYbnlRV3RYZkp1VEgxTlpDWWw5UDJJMWlZcWs1Y1p0TkVrZXRWM3ZVQVJOWEg5TFNCTmNycUY1bHVxYXN2alNRTCsyTjZzL3c4ZG0yMzBlZFFQNjlEZz09Cg==",
-                                             "url":  "https://cai.rayzo.cn/updates/yanchaishi_0.1.8_x64-setup.exe"
+                                             "signature":  "dW50cnVzdGVkIGNvbW1lbnQ6IHNpZ25hdHVyZSBmcm9tIHRhdXJpIHNlY3JldCBrZXkKUlVURjVRK0lCRk9IYWF0RDRRaHd0cE5BeWZvRmRNdXlVK3pPUlc1MEdacUc4Vnh1YXVvZWFhZUFiZWVyL3UrS2V1WkNsem1yMUdnN1lKeU9TSy9SUStwaitFSGIvb3l4bXdJPQp0cnVzdGVkIGNvbW1lbnQ6IHRpbWVzdGFtcDoxNzk0MzIxOTc1CWZpbGU656CU5b2p5a6kXzAuMS45X3g2NC1zZXR1cC5leGUJdmVyc2lvbjowLjEuOQpObzVDUWc2QjZBVi9MVjF3U3lZcVRwaHdZYi9icTc1WVNmSU42NFdkR2s0YkM0ZnpRVk4xNzdkVjFBWWFQUXJ3bzJoUGE2RllSVnp1RXNEOGVMTmxCZz09Cg==",
+                                             "url":  "https://cai.rayzo.cn/updates/yanchaishi_0.1.9_x64-setup.exe"
                                          }
                   }
 }
