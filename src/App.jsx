@@ -25,6 +25,8 @@ import FC3DAudit from './components/FC3DAudit.jsx'
 import FC3DTerms from './components/FC3DTerms.jsx'
 import FC3DDataManager from './components/FC3DDataManager.jsx'
 import { FC3D_DRAWS } from './data/fc3d.js'
+import { PL3_DRAWS } from './data/pl3.js'
+import { fetchPl3Draws } from './lib/pl3.js'
 import { loadJournal, getRecord } from './lib/journal.js'
 import { loadSettings, isNeonReady } from './lib/settings.js'
 import { getSql } from './lib/neon.js'
@@ -62,12 +64,23 @@ const FC3D_TABS = [
 export default function App() {
   const [draws, setDraws] = useState(HISTORY_DRAWS.length ? HISTORY_DRAWS : SAMPLE_DRAWS)
   const [tab, setTab] = useState('overview')
-  const [lottery, setLottery] = useState('kl8') // 'kl8' | 'fc3d'
+  const [lottery, setLottery] = useState('kl8') // 'kl8' | 'fc3d' | 'pl3'
   const [fc3dDraws, setFc3dDraws] = useState(FC3D_DRAWS)
   const [fc3dTab, setFc3dTab] = useState('overview')
+  const [pl3Draws, setPl3Draws] = useState(PL3_DRAWS)
+  const [pl3Tab, setPl3Tab] = useState('overview')
   const [tick, setTick] = useState(0) // 账本变化后刷新「待打卡」标记
   const usingSample = draws[0]?.sample
   const fc3dUsingSample = fc3dDraws[0]?.sample
+  const pl3UsingSample = pl3Draws[0]?.sample
+
+  // 三位数彩票（福彩3D / 排列三）共用同一套页面与算法，只切换数据源
+  const isDigit = lottery === 'fc3d' || lottery === 'pl3'
+  const digitDraws = lottery === 'pl3' ? pl3Draws : fc3dDraws
+  const digitTab = lottery === 'pl3' ? pl3Tab : fc3dTab
+  const setDigitTab = lottery === 'pl3' ? setPl3Tab : setFc3dTab
+  const digitLabel = lottery === 'pl3' ? '排列三' : '福彩3D'
+  const digitUsingSample = lottery === 'pl3' ? pl3UsingSample : fc3dUsingSample
 
   // ---------- 访问控制 ----------
   // gate: loading(检查中) | open(已授权/本地模式) | gated(未授权，渲染门禁)
@@ -195,8 +208,10 @@ export default function App() {
               <p className="masthead-sub">
                 {lottery === 'kl8' ? (
                   <>福彩快乐8 · 数据研究档案 <i>KUAILE 8 RESEARCH LEDGER</i></>
-                ) : (
+                ) : lottery === 'fc3d' ? (
                   <>福彩3D · 数据研究档案 <i>FC3D RESEARCH LEDGER</i></>
+                ) : (
+                  <>体彩排列三 · 数据研究档案 <i>PL3 RESEARCH LEDGER</i></>
                 )}
               </p>
             </div>
@@ -214,8 +229,8 @@ export default function App() {
               <>
                 <div>3 位数 · 000 – 999</div>
                 <div>直选概率 1 / 1,000</div>
-                <div className={fc3dUsingSample ? 'meta-sample' : 'meta-real'}>
-                  数据源：{fc3dUsingSample ? '内置演示数据' : '真实开奖数据'}
+                <div className={digitUsingSample ? 'meta-sample' : 'meta-real'}>
+                  数据源：{digitUsingSample ? '内置演示数据' : '真实开奖数据'}
                 </div>
               </>
             )}
@@ -236,6 +251,14 @@ export default function App() {
                 onClick={() => setLottery('fc3d')}
               >
                 福彩3D
+              </button>
+              <button
+                role="tab"
+                aria-selected={lottery === 'pl3'}
+                className={`lottery-tab ${lottery === 'pl3' ? 'active' : ''}`}
+                onClick={() => setLottery('pl3')}
+              >
+                排列三
               </button>
               <span className={`lottery-indicator ${lottery}`} />
             </div>
@@ -260,13 +283,13 @@ export default function App() {
           ))}
         </nav>
       )}
-      {lottery === 'fc3d' && (
-        <nav className="tabs" aria-label="福彩3D 页面导航">
+      {isDigit && (
+        <nav className="tabs" aria-label={`${digitLabel} 页面导航`}>
           {FC3D_TABS.map((t) => (
             <button
               key={t.id}
-              className={`tab-btn ${fc3dTab === t.id ? 'active' : ''}`}
-              onClick={() => setFc3dTab(t.id)}
+              className={`tab-btn ${digitTab === t.id ? 'active' : ''}`}
+              onClick={() => setDigitTab(t.id)}
             >
               {t.label}
               <i>{t.en}</i>
@@ -276,18 +299,35 @@ export default function App() {
       )}
 
       <main className="main">
-        {lottery === 'fc3d' ? (
+        {isDigit ? (
           <>
-            {fc3dTab === 'overview' && <FC3DOverview draws={fc3dDraws} />}
-            {fc3dTab === 'hotcold' && <FC3DHotCold draws={fc3dDraws} />}
-            {fc3dTab === 'patterns' && <FC3DPatterns draws={fc3dDraws} />}
-            {fc3dTab === 'repeats' && <FC3DRepeats draws={fc3dDraws} />}
-            {fc3dTab === 'dantuo' && <FC3DDanTuo />}
-            {fc3dTab === 'prize' && <FC3DPrize draws={fc3dDraws} />}
-            {fc3dTab === 'predict' && <FC3D draws={fc3dDraws} />}
-            {fc3dTab === 'audit' && <FC3DAudit draws={fc3dDraws} />}
-            {fc3dTab === 'terms' && <FC3DTerms />}
-            {fc3dTab === 'data' && <FC3DDataManager draws={fc3dDraws} setDraws={setFc3dDraws} />}
+            {digitTab === 'overview' && <FC3DOverview draws={digitDraws} />}
+            {digitTab === 'hotcold' && <FC3DHotCold draws={digitDraws} />}
+            {digitTab === 'patterns' && <FC3DPatterns draws={digitDraws} />}
+            {digitTab === 'repeats' && <FC3DRepeats draws={digitDraws} />}
+            {digitTab === 'dantuo' && <FC3DDanTuo label={digitLabel} />}
+            {digitTab === 'prize' && (
+              <FC3DPrize draws={digitDraws} lottery={lottery} label={digitLabel} />
+            )}
+            {digitTab === 'predict' && <FC3D draws={digitDraws} />}
+            {digitTab === 'audit' && <FC3DAudit draws={digitDraws} />}
+            {digitTab === 'terms' && <FC3DTerms label={digitLabel} />}
+            {digitTab === 'data' && (
+              lottery === 'pl3' ? (
+                <FC3DDataManager
+                  draws={pl3Draws}
+                  setDraws={setPl3Draws}
+                  label="排列三"
+                  fetchDraws={fetchPl3Draws}
+                  sampleDraws={PL3_DRAWS}
+                  filePrefix="pl3"
+                  sourceUrl="https://www.lottery.gov.cn/kj/kjlb.html?pl3"
+                  sourceName="中国体彩网开奖公告"
+                />
+              ) : (
+                <FC3DDataManager draws={fc3dDraws} setDraws={setFc3dDraws} />
+              )
+            )}
           </>
         ) : tab === 'admin' ? (
           <Admin

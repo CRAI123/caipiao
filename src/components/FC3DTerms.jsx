@@ -66,10 +66,10 @@ const TERMS = [
   },
 ]
 
-export default function FC3DTerms() {
+export default function FC3DTerms({ label = '福彩3D' }) {
   return (
     <div className="page">
-      <Card title="术语大全" tag="福彩3D 常用术语参考">
+      <Card title="术语大全" tag={`${label} 常用术语参考`}>
         <p className="muted small">
           以下术语均已在本站各分析页中实现为功能：跨度/和值/奇偶/大中小/质合/形态/遗漏/冷热。
           开奖为完全随机独立事件，术语仅为数据描述，不构成投注建议。

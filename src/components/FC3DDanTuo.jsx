@@ -24,7 +24,7 @@ function combinations(arr, k) {
   return result
 }
 
-export default function FC3DDanTuo() {
+export default function FC3DDanTuo({ label = '福彩3D' }) {
   const [dan, setDan] = useState([])
   const [tuo, setTuo] = useState([])
   const [playType, setPlayType] = useState('group6')
@@ -72,7 +72,7 @@ export default function FC3DDanTuo() {
 
   return (
     <div className="page">
-      <Card title="复式胆拖选号" tag="福彩3D">
+      <Card title="复式胆拖选号" tag={label}>
         <div className="fc3d-dt-type">
           {PLAY_TYPES.map((p) => (
             <button

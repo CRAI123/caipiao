@@ -24,9 +24,16 @@ const FIELD_DEFS = [
   ['同步时间', 1],
 ]
 
-/** 把一条账本记录转成飞书字段（快乐8 与 福彩3D 共用一套列） */
+const LOTTERY_NAME = { kl8: '快乐8', fc3d: '福彩3D', pl3: '排列三' }
+
+/** 记录所属彩种（未知值按快乐8处理） */
+function lotteryName(r) {
+  return LOTTERY_NAME[r?.lottery] || LOTTERY_NAME.kl8
+}
+
+/** 把一条账本记录转成飞书字段（快乐8 与三位数彩票共用一套列） */
 function recToFields(r) {
-  const isFc3d = r?.lottery === 'fc3d'
+  const isFc3d = !!LOTTERY_NAME[r?.lottery] && r.lottery !== 'kl8'
   const bought = !!r?.bought
   const picks = Array.isArray(r?.picks)
     ? r.picks.filter((n) => Number.isInteger(n)).map((n) => String(n).padStart(2, '0'))
@@ -50,7 +57,7 @@ function recToFields(r) {
       : ''
   return {
     日期: r?.date || '',
-    彩种: isFc3d ? '福彩3D' : '快乐8',
+    彩种: lotteryName(r),
     期号: r?.drawId != null ? String(r.drawId) : '',
     是否购买: bought ? '买了' : '没买',
     玩法: playLabel,

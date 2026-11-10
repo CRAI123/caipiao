@@ -148,7 +148,7 @@ body {
   position: absolute;
   top: 3px;
   bottom: 3px;
-  width: calc(50% - 3px);
+  width: calc(33.333% - 2px);
   background: var(--red);
   border-radius: 4px;
   transition: transform 0.3s cubic-bezier(0.4, 0, 0.2, 1);
@@ -156,6 +156,7 @@ body {
 }
 .lottery-indicator.kl8 { transform: translateX(0); }
 .lottery-indicator.fc3d { transform: translateX(100%); }
+.lottery-indicator.pl3 { transform: translateX(200%); }
 
 /* ---------- 福彩3D 板块 ---------- */
 .fc3d { max-width: 1180px; margin: 0 auto; padding: 0 24px 40px; }

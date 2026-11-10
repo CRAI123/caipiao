@@ -56,7 +56,13 @@ export default function Journal({ draws }) {
   }, [])
 
   const stats = useMemo(() => journalStats(list), [list])
-  const fstats = useMemo(() => fc3dStats(list), [list])
+  const digitStats = useMemo(
+    () => ({
+      fc3d: fc3dStats(list, 'fc3d'),
+      pl3: fc3dStats(list, 'pl3'),
+    }),
+    [list],
+  )
   const filtered = useMemo(
     () => (lotFilter === 'all' ? list : list.filter((r) => lotteryOf(r) === lotFilter)),
     [list, lotFilter],
@@ -266,31 +272,35 @@ export default function Journal({ draws }) {
         </Card>
       </div>
 
-      {fstats.days > 0 && (
-        <Card title="福彩3D 账本汇总" tag={`${fstats.days} 天 · ${fstats.bets} 注`}>
-          <div className="stat-grid">
-            <StatCard label="中奖注数" value={fstats.wins} unit="注" tone="red" note={`共投 ${fstats.bets} 注`} />
-            <StatCard label="累计投入" value={fstats.spend} unit="元" note={`单注 2 元`} />
-            <StatCard label="累计奖金" value={fstats.prize} unit="元" tone="blue" note={fstats.wins ? `命中 ${fstats.wins} 注` : '未中奖'} />
-            <StatCard
-              label="净盈亏"
-              value={`${fstats.net >= 0 ? '+' : ''}${fstats.net}`}
-              unit="元"
-              tone={fstats.net >= 0 ? 'blue' : 'red'}
-              note={`回报率 ${(fstats.roi * 100).toFixed(1)}%`}
-            />
-          </div>
-          <Note>
-            3D 按「注」判定中奖（直选 1040 元 / 组选3 346 元 / 组选6 173 元），与快乐8 的「命中几个号」口径不同。
-            记录来自「福彩3D → 中奖计算 → 记入本期账本」。
-          </Note>
-        </Card>
-      )}
+      {['fc3d', 'pl3'].map((lot) => {
+        const s = digitStats[lot]
+        if (!s.days) return null
+        return (
+          <Card key={lot} title={`${LOTTERY_LABEL[lot]} 账本汇总`} tag={`${s.days} 天 · ${s.bets} 注`}>
+            <div className="stat-grid">
+              <StatCard label="中奖注数" value={s.wins} unit="注" tone="red" note={`共投 ${s.bets} 注`} />
+              <StatCard label="累计投入" value={s.spend} unit="元" note={`单注 2 元`} />
+              <StatCard label="累计奖金" value={s.prize} unit="元" tone="blue" note={s.wins ? `命中 ${s.wins} 注` : '未中奖'} />
+              <StatCard
+                label="净盈亏"
+                value={`${s.net >= 0 ? '+' : ''}${s.net}`}
+                unit="元"
+                tone={s.net >= 0 ? 'blue' : 'red'}
+                note={`回报率 ${(s.roi * 100).toFixed(1)}%`}
+              />
+            </div>
+            <Note>
+              三位数彩票按「注」判定中奖（直选 1040 元 / 组选3 346 元 / 组选6 173 元），与快乐8 的「命中几个号」口径不同。
+              记录来自「{LOTTERY_LABEL[lot]} → 中奖计算 → 记入本期账本」。
+            </Note>
+          </Card>
+        )
+      })}
 
       <Card title="账本工具" tag="云数据库 / 飞书多维表格">
         <div className="toolbar">
           <span className="toolbar-label">彩种筛选</span>
-          {[['all', '全部'], ['kl8', LOTTERY_LABEL.kl8], ['fc3d', LOTTERY_LABEL.fc3d]].map(([k, label]) => (
+          {[['all', '全部'], ['kl8', LOTTERY_LABEL.kl8], ['fc3d', LOTTERY_LABEL.fc3d], ['pl3', LOTTERY_LABEL.pl3]].map(([k, label]) => (
             <button
               key={k}
               className={`mode-btn ${lotFilter === k ? 'active' : ''}`}
@@ -373,12 +383,12 @@ export default function Journal({ draws }) {
               {filtered.length === 0 && (
                 <tr>
                   <td colSpan={12} className="muted">
-                    还没有记录。快乐8 到「每日打卡」记录，福彩3D 到「中奖计算 → 记入本期账本」。
+                    还没有记录。快乐8 到「每日打卡」记录，福彩3D / 排列三 到「中奖计算 → 记入本期账本」。
                   </td>
                 </tr>
               )}
               {filtered.map((r) => {
-                const isFc3d = lotteryOf(r) === 'fc3d'
+                const isFc3d = lotteryOf(r) !== 'kl8' // 三位数彩票（3D / 排列三）按注记录
                 const draw = draws.find((d) => d.date === r.date)
                 const hitSet = new Set(draw?.nums || [])
                 const profit = (r.prize || 0) - (r.spend || 0)

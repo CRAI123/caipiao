@@ -17,11 +17,11 @@ import { comb } from './stats.js'
 
 const KEY = 'kl8_journal_v1' // 保留原 key，历史记录读取时补上 lottery='kl8'
 
-export const LOTTERY_LABEL = { kl8: '快乐8', fc3d: '福彩3D' }
+export const LOTTERY_LABEL = { kl8: '快乐8', fc3d: '福彩3D', pl3: '排列三' }
 
 /** 记录所属彩种（旧记录没有该字段，默认按快乐8处理） */
 export function lotteryOf(rec) {
-  return rec?.lottery === 'fc3d' ? 'fc3d' : 'kl8'
+  return LOTTERY_LABEL[rec?.lottery] ? rec.lottery : 'kl8'
 }
 
 let memoryStore = null
@@ -153,18 +153,19 @@ export function normalizeRecord(draft, draw, existing = null) {
 }
 
 /**
- * 把福彩3D的一期中奖计算结果写成账本记录（一天一条，主键「日期 + fc3d」）。
+ * 把三位数彩票（福彩3D / 体彩排列三）一期的中奖计算结果写成账本记录
+ * （一天一条，主键「日期 + 彩种」）。
  * bets 是每注的百十个位；hits 记录中奖注数。
  */
 export function buildFc3dRecord(
-  { draw, playId, playName, bets, spend, wins, prize, note = '' },
+  { draw, lottery = 'fc3d', playId, playName, bets, spend, wins, prize, note = '' },
   existing = null,
 ) {
   const now = new Date().toISOString()
   const list = Array.isArray(bets) ? bets : []
   return {
     date: draw?.date || '',
-    lottery: 'fc3d',
+    lottery: LOTTERY_LABEL[lottery] ? lottery : 'fc3d',
     drawId: draw?.drawId ?? draw?.id ?? null,
     bought: true,
     tickets: list,
@@ -243,9 +244,9 @@ export function journalStats(list) {
   }
 }
 
-/** 福彩3D账本汇总（按注统计，与快乐8的「命中个数」口径不同） */
-export function fc3dStats(list) {
-  const bought = list.filter((r) => lotteryOf(r) === 'fc3d' && r.bought)
+/** 三位数彩票账本汇总（按注统计，与快乐8的「命中个数」口径不同） */
+export function fc3dStats(list, lottery = 'fc3d') {
+  const bought = list.filter((r) => lotteryOf(r) === lottery && r.bought)
   const sum = (fn) => bought.reduce((s, r) => s + num(fn(r)), 0)
   const spend = sum((r) => r.spend)
   const prize = sum((r) => r.prize)

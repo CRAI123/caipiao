@@ -15,6 +15,20 @@ const cwlProxy = {
       Referer: 'https://www.cwl.gov.cn/ygkj/wqkjgg/kl8/',
     },
   },
+  // 体彩排列三：dev/preview 直连体彩官网接口（线上走 /api/pl3-proxy serverless function）
+  '/api/pl3-proxy': {
+    target: 'https://webapi.sporttery.cn',
+    changeOrigin: true,
+    rewrite: (path) => {
+      const u = new URL(path, 'http://x')
+      const count = Math.min(200, Math.max(10, Number(u.searchParams.get('count')) || 100))
+      return `/gateway/lottery/getHistoryPageListV1.qry?gameNo=35&provinceId=0&pageSize=${count}&isVerify=1&pageNo=1`
+    },
+    headers: {
+      Referer: 'https://static.sporttery.cn/',
+      Accept: 'application/json, text/plain, */*',
+    },
+  },
   // 兼容旧路径
   '/cwl-api': {
     target: 'https://www.cwl.gov.cn',

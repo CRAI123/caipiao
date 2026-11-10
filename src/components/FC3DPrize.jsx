@@ -73,7 +73,7 @@ function judgeBet(digits, playId, drawDigits) {
 
 const STATUS_LABEL = { win: '中奖', lose: '未中', invalid: '形态不符' }
 
-export default function FC3DPrize({ draws }) {
+export default function FC3DPrize({ draws, lottery = 'fc3d', label = '福彩3D' }) {
   const [drawIdx, setDrawIdx] = useState(0)
   const [text, setText] = useState('')
   const [play, setPlay] = useState('')
@@ -103,10 +103,10 @@ export default function FC3DPrize({ draws }) {
 
   const askPlay = rows.length > 0 && !play
 
-  // 本期是否已经有 3D 账本记录（同一天只保留一条）
+  // 本期是否已经有账本记录（同一天同一彩种只保留一条）
   const existingRec = useMemo(
-    () => (draw ? getRecord(loadJournal(), draw.date, 'fc3d') : null),
-    [draw, savedTick],
+    () => (draw ? getRecord(loadJournal(), draw.date, lottery) : null),
+    [draw, savedTick, lottery],
   )
 
   async function saveToLedger() {
@@ -118,6 +118,7 @@ export default function FC3DPrize({ draws }) {
       const rec = buildFc3dRecord(
         {
           draw,
+          lottery,
           playId: play,
           playName: playDef.name,
           bets: valid.map((r) => r.digits),
@@ -152,7 +153,7 @@ export default function FC3DPrize({ draws }) {
     <div className="page">
       <Note tone="warn">
         本工具只按固定奖金规则计算<b>已知开奖结果</b>的命中与奖金，不预测、不改变中奖概率。
-        单注 2 元，奖金为福彩3D固定奖：直选 1040 元 / 组选3 346 元 / 组选6 173 元。
+        单注 2 元，奖金为{label}固定奖：直选 1040 元 / 组选3 346 元 / 组选6 173 元。
       </Note>
 
       <Card title="中奖计算" tag="填号码 → 选玩法 → 自动算奖金">
@@ -272,7 +273,7 @@ export default function FC3DPrize({ draws }) {
                 {saving ? '保存中…' : existingRec ? '更新本期账本记录' : '记入本期账本'}
               </button>
               <span className="muted small">
-                记入后到「快乐8 → 购彩账本」筛选「福彩3D」可查看，并一起同步到飞书
+                记入后到「快乐8 → 购彩账本」筛选「{label}」可查看，并一起同步到飞书
               </span>
             </div>
             {ledgerMsg && <Note tone={ledgerMsg.tone === 'warn' ? 'warn' : 'info'}>{ledgerMsg.text}</Note>}

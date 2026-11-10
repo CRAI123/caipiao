@@ -52,7 +52,16 @@ function parseFc3dText(text) {
   return { draws, errors }
 }
 
-export default function FC3DDataManager({ draws, setDraws }) {
+export default function FC3DDataManager({
+  draws,
+  setDraws,
+  label = '福彩3D',
+  fetchDraws = fetchFc3dDraws,
+  sampleDraws = FC3D_DRAWS,
+  filePrefix = 'fc3d',
+  sourceUrl = 'https://www.cwl.gov.cn/ygkj/wqkjgg/3d/',
+  sourceName = '中国福彩官网开奖公告',
+}) {
   const [text, setText] = useState('')
   const [errors, setErrors] = useState([])
   const [msg, setMsg] = useState(null)
@@ -65,7 +74,7 @@ export default function FC3DDataManager({ draws, setDraws }) {
     setFetchErr(null)
     setFetchMsg(null)
     try {
-      const list = await fetchFc3dDraws(100)
+      const list = await fetchDraws(100)
       setDraws(list)
       setFetchMsg(`已抓取 ${list.length} 期（旧数据已清空并整体覆盖）：${list[list.length - 1].id} → ${list[0].id}`)
     } catch (e) {
@@ -93,7 +102,7 @@ export default function FC3DDataManager({ draws, setDraws }) {
     const blob = new Blob([lines + '\n'], { type: 'text/plain;charset=utf-8' })
     const a = document.createElement('a')
     a.href = URL.createObjectURL(blob)
-    a.download = 'fc3d_history.csv'
+    a.download = `${filePrefix}_history.csv`
     a.click()
     URL.revokeObjectURL(a.href)
   }
@@ -106,14 +115,13 @@ export default function FC3DDataManager({ draws, setDraws }) {
         分隔符支持空格/逗号，日期可省略。
       </Note>
 
-      <Card title="一键抓取开奖数据" tag="来源：中国福彩官网">
+      <Card title="一键抓取开奖数据" tag={`来源：${sourceName}`}>
         <p className="muted small">
-          自动抓取最近 100 期福彩3D开奖（期号、开奖日期、百十个 3 个号码），来源为
-          <a href="https://www.cwl.gov.cn/ygkj/wqkjgg/3d/" target="_blank" rel="noreferrer">
-            中国福彩官网开奖公告
+          自动抓取最近 100 期{label}开奖（期号、开奖日期、百十个 3 个号码），来源为
+          <a href={sourceUrl} target="_blank" rel="noreferrer">
+            {sourceName}
           </a>
-          。官网未开放跨域，本站通过本地代理转发，因此需以 <code>npm run dev</code> 或
-          <code>npm run preview</code> 方式运行。福彩3D 每天开奖一期。
+          。官网未开放跨域，本站通过代理转发。{label} 每天开奖一期。
         </p>
         <div className="row-actions">
           <button className="btn-primary" onClick={doFetch} disabled={fetching}>
@@ -150,7 +158,7 @@ export default function FC3DDataManager({ draws, setDraws }) {
             >
               清空输入
             </button>
-            <button className="tab-btn" onClick={() => setDraws(FC3D_DRAWS)}>
+            <button className="tab-btn" onClick={() => setDraws(sampleDraws)}>
               恢复演示数据
             </button>
           </div>
