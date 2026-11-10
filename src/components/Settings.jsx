@@ -11,10 +11,59 @@ import { ensureAccessTables, fetchMyRequest, listAdmins, setSharedLarkConfig } f
 
 const ACCESS_LABEL = { pending: '待审核', approved: '已同意', rejected: '被拒绝' }
 
+/**
+ * 从飞书链接中自动提取 app_token 和 table_id。
+ * 支持：
+ *   https://xxx.feishu.cn/base/<app_token>?table=<table_id>
+ *   https://xxx.feishu.cn/wiki/<node_token>?table=<table_id>（知识库内嵌表格，app_token 需另行解析）
+ * 返回 { appToken, tableId, isWiki } ；解析失败返回 null。
+ */
+function parseLarkUrl(input) {
+  const s = String(input || '').trim()
+  if (!s) return null
+  // 知识库链接：/wiki/<token>
+  const wiki = s.match(/\/wiki\/([A-Za-z0-9]+)/)
+  if (wiki) {
+    const table = s.match(/[?&]table=([A-Za-z0-9]+)/)
+    return { appToken: wiki[1], tableId: table ? table[1] : '', isWiki: true }
+  }
+  // 标准多维表格：/base/<token>
+  const base = s.match(/\/base\/([A-Za-z0-9]+)/)
+  if (base) {
+    const table = s.match(/[?&]table=([A-Za-z0-9]+)/)
+    return { appToken: base[1], tableId: table ? table[1] : '', isWiki: false }
+  }
+  // 纯 token（用户只粘了一段）：tbl 开头视为 table_id，否则视为 app_token
+  if (/^tbl[A-Za-z0-9]+$/.test(s)) return { appToken: '', tableId: s, isWiki: false }
+  if (/^[A-Za-z0-9]{10,}$/.test(s)) return { appToken: s, tableId: '', isWiki: false }
+  return null
+}
+
 export default function Settings() {
   const [form, setForm] = useState(loadSettings)
   const [msg, setMsg] = useState(null)
   const [busy, setBusy] = useState(false)
+  const [larkLink, setLarkLink] = useState('')
+
+  /** 粘贴链接 → 自动识别并填入 app_token / table_id */
+  function fillFromLink() {
+    const p = parseLarkUrl(larkLink)
+    if (!p) {
+      return setMsg({ tone: 'warn', text: '没认出这个链接。请粘贴地址栏里以 /base/ 或 /wiki/ 开头的完整链接。' })
+    }
+    if (p.isWiki) {
+      return setMsg({
+        tone: 'warn',
+        text: '这是知识库（/wiki/）里的表格，它的 app_token 被藏在节点后面，无法直接从链接获取。请到飞书首页新建一个独立的多维表格（不要建到知识库里），新表地址栏是 /base/ 开头，再粘贴过来。',
+      })
+    }
+    const next = { ...form }
+    if (p.appToken) next.feishuAppToken = p.appToken
+    if (p.tableId) next.feishuTableId = p.tableId
+    setForm(next)
+    setLarkLink('')
+    setMsg({ tone: 'info', text: `已识别并填入：app_token=${p.appToken || '（未变）'}，table_id=${p.tableId || '（未变）'}` })
+  }
 
   // 本机访问身份（设备识别码 + 申请状态 + 是否管理员设备）
   const [dev, setDev] = useState(null)
@@ -208,6 +257,20 @@ export default function Settings() {
             <input className="text-input mono" type="password" value={form.feishuAppSecret} onChange={set('feishuAppSecret')} />
           </div>
         </div>
+        <div className="field">
+          <label className="field-label">粘贴表格链接，自动填好下面两项</label>
+          <div className="row-actions" style={{ marginTop: 0 }}>
+            <input
+              className="text-input mono"
+              style={{ flex: 1 }}
+              value={larkLink}
+              onChange={(e) => setLarkLink(e.target.value)}
+              onKeyDown={(e) => { if (e.key === 'Enter') fillFromLink() }}
+              placeholder="https://xxx.feishu.cn/base/XXXX?table=tblXXXX"
+            />
+            <button className="tab-btn" onClick={fillFromLink} disabled={!larkLink.trim()}>识别并填入</button>
+          </div>
+        </div>
         <div className="field-row">
           <div className="field">
             <label className="field-label">多维表格 app_token</label>
@@ -249,13 +312,12 @@ export default function Settings() {
           <b>第一次配置？按下面 5 步照做（约 5 分钟）：</b>
           <ol className="settings-steps">
             <li>
-              <b>新建表格，抄下两段 ID。</b>在飞书里新建一个「多维表格」，然后看浏览器地址栏：
-              <br />
-              <code>https://xxx.feishu.cn/base/<b>这一段是 app_token</b>?table=<b>tbl 开头这段是 table_id</b></code>
-              <br />
-              <code>/base/</code> 后面那一长串（一般不带斜杠后面内容）就是 <code>app_token</code>；
-              地址里 <code>?table=</code> 后面以 <code>tbl</code> 开头的那串就是 <code>table_id</code>。
-              分别填到上面的「多维表格 app_token」和「数据表 table_id」里。
+              <b>新建表格，把链接粘贴过来即可。</b>在飞书里新建一个「多维表格」（<b>注意：不要建到知识库/wiki 里</b>，
+              知识库里的表格 app_token 无法从链接直接获取），然后直接把地址栏整个链接
+              粘贴到上面的「粘贴表格链接」框，点「识别并填入」，会自动拆出
+              <code>app_token</code>（<code>/base/</code> 后面那段）和 <code>table_id</code>（<code>?table=</code> 后面那段）。
+              如果你愿意手动抄，链接长这样：
+              <code>https://xxx.feishu.cn/base/<b>app_token</b>?table=<b>table_id</b></code>
             </li>
             <li>
               <b>建一个应用，拿到钥匙。</b>打开
