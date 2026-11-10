@@ -213,3 +213,35 @@ export async function setSharedLarkConfig(sql, { feishuAppId, feishuAppSecret, f
   })
   await writeConfig(sql, LARK_CONFIG_KEY, payload)
 }
+
+// ---------- 每日推荐推送配置（服务端 Cron 读取） ----------
+const PUSH_CONFIG_KEY = 'daily_push_config'
+
+/** 读取每日推送配置；未配置返回 null */
+export async function getDailyPushConfig(sql) {
+  const raw = await readConfig(sql, PUSH_CONFIG_KEY)
+  if (!raw) return null
+  try {
+    const obj = JSON.parse(raw)
+    if (!obj || typeof obj !== 'object') return null
+    return {
+      webhook: obj.webhook || '',
+      secret: obj.secret || '',
+      kl8: obj.kl8 !== false,
+      fc3d: obj.fc3d !== false,
+    }
+  } catch {
+    return null
+  }
+}
+
+/** 保存每日推送配置 */
+export async function setDailyPushConfig(sql, { webhook, secret, kl8, fc3d }) {
+  const payload = JSON.stringify({
+    webhook: String(webhook || '').trim(),
+    secret: String(secret || '').trim(),
+    kl8: kl8 !== false,
+    fc3d: fc3d !== false,
+  })
+  await writeConfig(sql, PUSH_CONFIG_KEY, payload)
+}

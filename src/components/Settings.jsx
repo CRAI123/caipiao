@@ -7,7 +7,8 @@ import { loadSettings, saveSettings, resetSettings, isNeonReady, isLlmReady, isL
 import { testConnection, getSql } from '../lib/neon.js'
 import { pingLlm } from '../lib/ai.js'
 import { getDeviceId } from '../lib/device.js'
-import { ensureAccessTables, fetchMyRequest, listAdmins, setSharedLarkConfig } from '../lib/access.js'
+import { ensureAccessTables, fetchMyRequest, listAdmins, setSharedLarkConfig, getDailyPushConfig, setDailyPushConfig } from '../lib/access.js'
+import { apiBase } from '../lib/api.js'
 
 const ACCESS_LABEL = { pending: '待审核', approved: '已同意', rejected: '被拒绝' }
 
@@ -44,6 +45,10 @@ export default function Settings() {
   const [msg, setMsg] = useState(null)
   const [busy, setBusy] = useState(false)
   const [larkLink, setLarkLink] = useState('')
+
+  // 每日推荐推送（服务端 Cron 读取，保存在云数据库）
+  const [push, setPush] = useState({ webhook: '', secret: '', kl8: true, fc3d: true })
+  const [pushBusy, setPushBusy] = useState(false)
 
   /** 粘贴链接 → 自动识别并填入 app_token / table_id */
   function fillFromLink() {
@@ -86,8 +91,13 @@ export default function Settings() {
       try {
         const sql = getSql(s.neonUrl)
         await ensureAccessTables(sql)
-        const [req, admins] = await Promise.all([fetchMyRequest(sql, d.id), listAdmins(sql)])
+        const [req, admins, pushCfg] = await Promise.all([
+          fetchMyRequest(sql, d.id),
+          listAdmins(sql),
+          getDailyPushConfig(sql),
+        ])
         if (!alive) return
+        if (pushCfg) setPush(pushCfg)
         setAccess({ mode: 'neon', req, isAdmin: admins.some((a) => a.device_id === d.id) })
       } catch (e) {
         if (alive) setAccess({ mode: 'error', message: e.message })
@@ -130,6 +140,44 @@ export default function Settings() {
       setMsg({ tone: 'warn', text: `保存失败：${e.message}` })
     } finally {
       setBusy(false)
+    }
+  }
+
+  /** 保存每日推送配置；test=true 时顺带让服务端立即发一条测试消息 */
+  async function savePush(test) {
+    const s = loadSettings()
+    if (!isNeonReady(s)) {
+      return setMsg({
+        tone: 'warn',
+        text: '每日推送由服务器定时执行，配置必须存在云数据库里。请先在上方配置 Neon 云数据库。',
+      })
+    }
+    if (!push.webhook.trim()) {
+      return setMsg({ tone: 'warn', text: '请先填写飞书机器人的 Webhook 地址' })
+    }
+    setPushBusy(true)
+    setMsg(null)
+    try {
+      const sql = getSql(s.neonUrl)
+      await ensureAccessTables(sql)
+      await setDailyPushConfig(sql, push)
+      if (!test) {
+        return setMsg({ tone: 'info', text: '已保存，之后每天 14:00（北京时间）自动推送到飞书' })
+      }
+      const res = await fetch(`${apiBase()}/api/daily-push?test=1`, { method: 'POST' })
+      const data = await res.json().catch(() => ({}))
+      if (!res.ok) throw new Error(data.error || `HTTP ${res.status}`)
+      const skipped = [data.skipped?.kl8 && `快乐8：${data.skipped.kl8}`, data.skipped?.fc3d && `福彩3D：${data.skipped.fc3d}`]
+        .filter(Boolean)
+        .join('；')
+      setMsg({
+        tone: 'info',
+        text: skipped ? `已保存并发送测试消息（部分彩种跳过：${skipped}）` : '已保存并发送测试消息，请到飞书群查看',
+      })
+    } catch (e) {
+      setMsg({ tone: 'warn', text: `操作失败：${e.message}` })
+    } finally {
+      setPushBusy(false)
     }
   }
 
@@ -239,6 +287,60 @@ export default function Settings() {
           <br />
           <b>AI 能做什么：</b>帮你复盘真实账本（投入产出、命中率对照理论概率、消费习惯变化）。
           <b>不会做什么：</b>绝不预测号码、不宣称有规律、不建议你多买。
+        </div>
+      </Card>
+
+      <Card title="每日推荐推送（飞书机器人）" tag={push.webhook ? '已配置' : '未配置'}>
+        <div className="field">
+          <label className="field-label">飞书机器人 Webhook 地址</label>
+          <input
+            className="text-input mono"
+            value={push.webhook}
+            onChange={(e) => setPush({ ...push, webhook: e.target.value })}
+            placeholder="https://open.feishu.cn/open-apis/bot/v2/hook/xxxxxxxx"
+          />
+        </div>
+        <div className="field">
+          <label className="field-label">签名校验密钥（机器人开了「签名校验」才填）</label>
+          <input
+            className="text-input mono"
+            type="password"
+            value={push.secret}
+            onChange={(e) => setPush({ ...push, secret: e.target.value })}
+            placeholder="留空表示不校验"
+          />
+        </div>
+        <div className="row-actions">
+          <label className="sync-badge" style={{ cursor: 'pointer' }}>
+            <input
+              type="checkbox"
+              checked={push.kl8}
+              onChange={(e) => setPush({ ...push, kl8: e.target.checked })}
+            />{' '}
+            推送快乐8
+          </label>
+          <label className="sync-badge" style={{ cursor: 'pointer' }}>
+            <input
+              type="checkbox"
+              checked={push.fc3d}
+              onChange={(e) => setPush({ ...push, fc3d: e.target.checked })}
+            />{' '}
+            推送福彩3D
+          </label>
+          <button className="tab-btn" onClick={() => savePush(false)} disabled={pushBusy}>保存</button>
+          <button className="btn-primary" onClick={() => savePush(true)} disabled={pushBusy}>
+            {pushBusy ? '发送中…' : '保存并发送测试'}
+          </button>
+        </div>
+        <div className="settings-guide">
+          <b>怎么拿到 Webhook：</b>在飞书群里点右上角「…」→「设置」→「群机器人」→「添加机器人」→ 选「自定义机器人」，
+          起个名字后复制它给出的 Webhook 地址粘贴到上方。如果勾选了「签名校验」，把密钥一起填进第二栏。
+          <br />
+          <b>什么时候发：</b>每天 <b>14:00（北京时间）</b>由 Vercel 定时任务自动计算并推送快乐8 / 福彩3D 的下期参考号码，
+          内容包括推荐十码、分注参考、3D 位置推荐、双胆拖码、和值跨度区间。
+          <br />
+          <b>注意：</b>定时任务运行在服务器上，所以必须配置云数据库（配置保存在云端）；填好后点「保存并发送测试」可以先看效果。
+          开奖为独立随机事件，推送内容仅为历史数据整理，不构成投注建议。
         </div>
       </Card>
 
