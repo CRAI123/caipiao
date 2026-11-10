@@ -14,8 +14,8 @@ function Digit({ d, hit }) {
   )
 }
 
-export default function FC3DAudit({ draws, engine = fc3dEngine }) {
-  const [periods, setPeriods] = useState(30)
+export default function FC3DAudit({ draws, engine = fc3dEngine, defaultPeriods = 30, v2Label = '精准 v2' }) {
+  const [periods, setPeriods] = useState(defaultPeriods)
   const [algo, setAlgo] = useState('v2')
 
   const audit = useMemo(
@@ -75,7 +75,7 @@ export default function FC3DAudit({ draws, engine = fc3dEngine }) {
         <span className="toolbar-sep" />
         <span className="toolbar-label">算法</span>
         <button className={`tab-btn ${algo === 'v1' ? 'active' : ''}`} onClick={() => setAlgo('v1')}>经典 v1</button>
-        <button className={`tab-btn ${algo === 'v2' ? 'active' : ''}`} onClick={() => setAlgo('v2')}>精准 v2</button>
+        <button className={`tab-btn ${algo === 'v2' ? 'active' : ''}`} onClick={() => setAlgo('v2')}>{v2Label}</button>
       </div>
 
       <Note>

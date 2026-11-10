@@ -37,7 +37,7 @@ import { getDeviceId } from './lib/device.js'
 // 排列三专用推算引擎的算法说明（v1 与福彩3D共用，v2 为排列三模式）
 const PL3_ALGO_INFO = {
   v1: { name: '经典综合评分', desc: '热冷+跨度+和值+奇偶+形态+遗漏 8 维度加权评分' },
-  v2: { name: '排列三模式', desc: '数字出现概率建模 + 位置转移 + 经验分布区间 + 6 形态覆盖' },
+  v2: { name: '排列三 v3', desc: '多专家概率集成 + 1000 种结果穷举的精确预测分布' },
 }
 
 const TABS = [
@@ -324,7 +324,12 @@ export default function App() {
               ))}
             {digitTab === 'audit' &&
               (lottery === 'pl3' ? (
-                <FC3DAudit draws={digitDraws} engine={pl3Engine} />
+                <FC3DAudit
+                  draws={digitDraws}
+                  engine={pl3Engine}
+                  defaultPeriods={80}
+                  v2Label="精准 v3"
+                />
               ) : (
                 <FC3DAudit draws={digitDraws} />
               ))}
