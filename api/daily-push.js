@@ -75,51 +75,71 @@ const red = (s) => `<font color='red'>${s}</font>`
 const grey = (s) => `<font color='grey'>${s}</font>`
 
 /** 飞书卡片：一个彩种一张卡 */
-function buildCard({ title, template, lines }) {
+function buildCard({ title, template, blocks }) {
   return {
     msg_type: 'interactive',
     card: {
       config: { wide_screen_mode: true },
       header: { template, title: { tag: 'plain_text', content: title } },
-      elements: [
-        { tag: 'div', text: { tag: 'lark_md', content: lines.join('\n') } },
-        { tag: 'hr' },
-        DISCLAIMER,
-      ],
+      elements: [...blocks, { tag: 'hr' }, DISCLAIMER],
     },
   }
 }
 
+/** 一行多列：fields 是飞书卡片的并排短字段 */
+const fields = (...items) => ({
+  tag: 'div',
+  fields: items.map(([label, value]) => ({
+    is_short: true,
+    text: { tag: 'lark_md', content: `**${label}**\n${value}` },
+  })),
+})
+
+const line = (content) => ({ tag: 'div', text: { tag: 'lark_md', content } })
+
 function buildKl8Card(kl8, title) {
+  const picks = kl8.picks.map(pad).join(' ')
   return buildCard({
     title,
     template: 'blue',
-    lines: [
-      `参考第 ${kl8.latest.id} 期之后`,
-      `最新开奖：${grey(kl8.latest.nums.map(pad).join(' '))}`,
-      `推荐十码：${red(kl8.picks.map(pad).join(' '))}`,
-      '分注参考：',
-      `① ${kl8.groups[0].map(pad).join(' ')}`,
-      `② ${kl8.groups[1].map(pad).join(' ')}`,
-      `③ ${kl8.groups[2].map(pad).join(' ')}`,
+    blocks: [
+      line(`上期开奖（第 ${kl8.latest.id} 期）：${grey(kl8.latest.nums.map(pad).join(' '))}`),
+      line(`**推荐十码**\n<font color='red'>${picks}</font>`),
+      line('**三注参考**'),
+      line(`① ${kl8.groups[0].map(pad).join(' ')}`),
+      line(`② ${kl8.groups[1].map(pad).join(' ')}`),
+      line(`③ ${kl8.groups[2].map(pad).join(' ')}`),
     ],
   })
 }
 
 function buildFc3dCard(fc3d, title) {
   const p = fc3d.pred
-  const posText = ['百', '十', '个'].map((label, i) => `${label} ${red(p.posTop[i].join('/'))}`).join(' · ')
+  const [bai, shi, ge] = p.posTop
+  const bets = bai.length * shi.length * ge.length
   return buildCard({
     title,
     template: 'red',
-    lines: [
-      `参考第 ${fc3d.latest.id} 期之后`,
-      `最新开奖：${grey(fc3d.latest.num.join(' '))}`,
-      `位置推荐：${posText}`,
-      `双胆：${red(p.dan.join(' '))}　拖码：${p.tuo.join(' ')}`,
-      `和值 ${p.sumRange[0]}~${p.sumRange[1]}　跨度 ${p.spanRange[0]}~${p.spanRange[1]}`,
-      `奇偶倾向：${p.recommendedOdd.slice(0, 2).join(' / ')}`,
-      `参考杀号：${grey(p.kill.map((k) => k.digit).join(' '))}`,
+    blocks: [
+      line(`上期开奖（第 ${fc3d.latest.id} 期）：${grey(fc3d.latest.num.join(' '))}`),
+      line(`**位置号码**（每位各取一个组成一注）`),
+      fields(
+        ['百位', red(bai.join(' '))],
+        ['十位', red(shi.join(' '))],
+        ['个位', red(ge.join(' '))],
+      ),
+      line(`直选复式共 **${bets} 注**（${bets * 2} 元）`),
+      { tag: 'hr' },
+      fields(
+        ['双胆', red(p.dan.join(' '))],
+        ['拖码', p.tuo.join(' ')],
+        ['和值', `${p.sumRange[0]}~${p.sumRange[1]}`],
+        ['跨度', `${p.spanRange[0]}~${p.spanRange[1]}`],
+      ),
+      fields(
+        ['奇偶倾向', p.recommendedOdd.slice(0, 2).join(' / ')],
+        ['参考杀号', grey(p.kill.map((k) => k.digit).join(' '))],
+      ),
     ],
   })
 }
