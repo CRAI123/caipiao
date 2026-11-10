@@ -6,7 +6,7 @@
 //   1) Neon admin_config 表 key = 'daily_push_config'
 //      value = {"webhook":"https://open.feishu.cn/open-apis/bot/v2/hook/xxx",
 //               "secret":"（可选，机器人开启签名校验时必填）",
-//               "kl8":true,"fc3d":true}
+//               "kl8":true,"fc3d":true,"pl3":true}
 //   2) 环境变量 FEISHU_WEBHOOK_URL / FEISHU_WEBHOOK_SECRET
 //
 // 手动触发：GET /api/daily-push?test=1
@@ -15,8 +15,10 @@ import crypto from 'node:crypto'
 import { getSql, readConfig } from './_lib/neon.js'
 import { fetchKl8Draws } from './_lib/kl8.js'
 import { fetchFc3dDraws } from './_lib/fc3d.js'
+import { fetchPl3Draws } from './_lib/pl3.js'
 import { scoreBalls, pickBalanced, BALL_MAX } from '../src/lib/stats.js'
 import { predictFC3Dv2 } from '../src/lib/fc3dPredict.js'
+import { predictFC3Dv2 as predictPl3 } from '../src/lib/pl3Predict.js'
 import { applyCors } from './_lib/http.js'
 
 const CONFIG_KEY = 'daily_push_config'
@@ -37,6 +39,7 @@ async function loadConfig() {
     secret: cfg.secret || process.env.FEISHU_WEBHOOK_SECRET || '',
     kl8: cfg.kl8 !== false,
     fc3d: cfg.fc3d !== false,
+    pl3: cfg.pl3 !== false,
   }
 }
 
@@ -57,6 +60,13 @@ const pad = (n) => String(n).padStart(2, '0')
 
 function buildFc3d(draws) {
   const p = predictFC3Dv2(draws)
+  if (!p) return null
+  return { latest: draws[0], pred: p }
+}
+
+/** 排列三：走排列三专用 v3 引擎（多专家集成 + 精确分布） */
+function buildPl3(draws) {
+  const p = predictPl3(draws)
   if (!p) return null
   return { latest: draws[0], pred: p }
 }
@@ -109,15 +119,15 @@ function buildKl8Card(kl8, title) {
   })
 }
 
-function buildFc3dCard(fc3d, title) {
-  const p = fc3d.pred
+function buildFc3dCard(digit, title, { template = 'red', extra = [] } = {}) {
+  const p = digit.pred
   const [bai, shi, ge] = p.posTop
   const bets = bai.length * shi.length * ge.length
   return buildCard({
     title,
-    template: 'red',
+    template,
     blocks: [
-      line(`上期开奖：${grey(fc3d.latest.num.join(' '))}`),
+      line(`上期开奖：${grey(digit.latest.num.join(' '))}`),
       HR,
       line(`**直选复式** ${bets} 注 · ${bets * 2} 元`),
       line(`百　${red(bai.join('/'))}`),
@@ -128,8 +138,25 @@ function buildFc3dCard(fc3d, title) {
       HR,
       line(`和值 ${p.sumRange[0]}~${p.sumRange[1]}　跨度 ${p.spanRange[0]}~${p.spanRange[1]}`),
       line(`杀号 ${grey(p.kill.map((k) => k.digit).join('/'))}`),
+      ...extra,
     ],
   })
+}
+
+/** 排列三卡：在 3D 版式上补一行覆盖档位（命中与成本） */
+function buildPl3Card(pl3, title) {
+  const tiers = pl3.pred.tiers || []
+  const extra = tiers.length
+    ? [
+        HR,
+        line(
+          `**覆盖档位** 期望命中 ${tiers
+            .map((t) => `${t.cover}码 ${t.expectHits}个/${t.groupCost}元`)
+            .join('　')}`,
+        ),
+      ]
+    : []
+  return buildFc3dCard(pl3, title, { template: 'orange', extra })
 }
 
 /** 飞书自定义机器人签名：以 "timestamp\\nsecret" 为密钥，对空串做 HMAC-SHA256 */
@@ -159,17 +186,19 @@ export default async function handler(req, res) {
       })
     }
 
-    // 并行走两边数据源，单个失败不影响另一个
-    const [kl8Res, fc3dRes] = await Promise.allSettled([
+    // 并行走三个数据源，单个失败不影响其它
+    const [kl8Res, fc3dRes, pl3Res] = await Promise.allSettled([
       cfg.kl8 ? fetchKl8Draws(100) : Promise.resolve(null),
       cfg.fc3d ? fetchFc3dDraws(100) : Promise.resolve(null),
+      cfg.pl3 ? fetchPl3Draws(100) : Promise.resolve(null),
     ])
 
     const kl8 = kl8Res.status === 'fulfilled' && kl8Res.value ? buildKl8(kl8Res.value) : null
     const fc3d = fc3dRes.status === 'fulfilled' && fc3dRes.value ? buildFc3d(fc3dRes.value) : null
+    const pl3 = pl3Res.status === 'fulfilled' && pl3Res.value ? buildPl3(pl3Res.value.draws) : null
 
-    if (!kl8 && !fc3d) {
-      const errs = [kl8Res, fc3dRes]
+    if (!kl8 && !fc3d && !pl3) {
+      const errs = [kl8Res, fc3dRes, pl3Res]
         .filter((r) => r.status === 'rejected')
         .map((r) => r.reason?.message)
         .filter(Boolean)
@@ -185,10 +214,11 @@ export default async function handler(req, res) {
 
     const prefix = isTest ? '【测试】' : ''
 
-    // 一个彩种一张卡：快乐8 蓝头、3D 红头，分别发送
+    // 一个彩种一张卡：快乐8 蓝头、3D 红头、排列三橙头，分别发送
     const cards = []
     if (kl8) cards.push(buildKl8Card(kl8, `${prefix}快乐8 推荐 · ${dateText}`))
     if (fc3d) cards.push(buildFc3dCard(fc3d, `${prefix}福彩3D 推荐 · ${dateText}`))
+    if (pl3) cards.push(buildPl3Card(pl3, `${prefix}排列三 推荐 · ${dateText}`))
 
     const timestamp = Math.floor(Date.now() / 1000)
     const signPart = feishuSign(cfg.secret, timestamp)
@@ -210,11 +240,12 @@ export default async function handler(req, res) {
     return res.status(200).json({
       ok: true,
       test: isTest,
-      pushed: { kl8: !!kl8, fc3d: !!fc3d },
+      pushed: { kl8: !!kl8, fc3d: !!fc3d, pl3: !!pl3 },
       messages: cards.length,
       skipped: {
         kl8: kl8Res.status === 'rejected' ? kl8Res.reason?.message : null,
         fc3d: fc3dRes.status === 'rejected' ? fc3dRes.reason?.message : null,
+        pl3: pl3Res.status === 'rejected' ? pl3Res.reason?.message : null,
       },
     })
   } catch (e) {
