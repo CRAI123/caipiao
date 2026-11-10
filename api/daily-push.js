@@ -61,53 +61,67 @@ function buildFc3d(draws) {
   return { latest: draws[0], pred: p }
 }
 
-function buildElements(kl8, fc3d) {
-  const els = []
+const DISCLAIMER = {
+  tag: 'note',
+  elements: [
+    {
+      tag: 'plain_text',
+      content: '开奖为独立随机事件，以上号码仅为历史数据整理，不构成任何投注建议。',
+    },
+  ],
+}
 
-  if (kl8) {
-    els.push({
-      tag: 'div',
-      text: {
-        tag: 'lark_md',
-        content:
-          `**快乐8** · 参考第 ${kl8.latest.id} 期之后\n` +
-          `最新开奖：${kl8.latest.nums.map(pad).join(' ')}\n` +
-          `推荐十码：**${kl8.picks.map(pad).join(' ')}**\n` +
-          `分注参考：\n① ${kl8.groups[0].map(pad).join(' ')}\n② ${kl8.groups[1].map(pad).join(' ')}\n③ ${kl8.groups[2].map(pad).join(' ')}`,
-      },
-    })
+const red = (s) => `<font color='red'>${s}</font>`
+const grey = (s) => `<font color='grey'>${s}</font>`
+
+/** 飞书卡片：一个彩种一张卡 */
+function buildCard({ title, template, lines }) {
+  return {
+    msg_type: 'interactive',
+    card: {
+      config: { wide_screen_mode: true },
+      header: { template, title: { tag: 'plain_text', content: title } },
+      elements: [
+        { tag: 'div', text: { tag: 'lark_md', content: lines.join('\n') } },
+        { tag: 'hr' },
+        DISCLAIMER,
+      ],
+    },
   }
+}
 
-  if (fc3d) {
-    const p = fc3d.pred
-    const posText = ['百', '十', '个'].map((label, i) => `${label} ${p.posTop[i].join('/')}`).join(' · ')
-    els.push({
-      tag: 'div',
-      text: {
-        tag: 'lark_md',
-        content:
-          `**福彩3D** · 参考第 ${fc3d.latest.id} 期之后\n` +
-          `最新开奖：${fc3d.latest.num.join(' ')}\n` +
-          `位置推荐：${posText}\n` +
-          `双胆：**${p.dan.join(' ')}**　拖码：${p.tuo.join(' ')}\n` +
-          `和值：${p.sumRange[0]}~${p.sumRange[1]}　跨度：${p.spanRange[0]}~${p.spanRange[1]}\n` +
-          `奇偶倾向：${p.recommendedOdd.slice(0, 2).join(' / ')}\n` +
-          `参考杀号：${p.kill.map((k) => k.digit).join(' ')}`,
-      },
-    })
-  }
-
-  els.push({ tag: 'hr' })
-  els.push({
-    tag: 'note',
-    elements: [
-      {
-        tag: 'plain_text',
-        content: '开奖为独立随机事件，以上号码仅为历史数据整理，不构成任何投注建议。',
-      },
+function buildKl8Card(kl8, title) {
+  return buildCard({
+    title,
+    template: 'blue',
+    lines: [
+      `参考第 ${kl8.latest.id} 期之后`,
+      `最新开奖：${grey(kl8.latest.nums.map(pad).join(' '))}`,
+      `推荐十码：${red(kl8.picks.map(pad).join(' '))}`,
+      '分注参考：',
+      `① ${kl8.groups[0].map(pad).join(' ')}`,
+      `② ${kl8.groups[1].map(pad).join(' ')}`,
+      `③ ${kl8.groups[2].map(pad).join(' ')}`,
     ],
   })
-  return els
+}
+
+function buildFc3dCard(fc3d, title) {
+  const p = fc3d.pred
+  const posText = ['百', '十', '个'].map((label, i) => `${label} ${red(p.posTop[i].join('/'))}`).join(' · ')
+  return buildCard({
+    title,
+    template: 'red',
+    lines: [
+      `参考第 ${fc3d.latest.id} 期之后`,
+      `最新开奖：${grey(fc3d.latest.num.join(' '))}`,
+      `位置推荐：${posText}`,
+      `双胆：${red(p.dan.join(' '))}　拖码：${p.tuo.join(' ')}`,
+      `和值 ${p.sumRange[0]}~${p.sumRange[1]}　跨度 ${p.spanRange[0]}~${p.spanRange[1]}`,
+      `奇偶倾向：${p.recommendedOdd.slice(0, 2).join(' / ')}`,
+      `参考杀号：${grey(p.kill.map((k) => k.digit).join(' '))}`,
+    ],
+  })
 }
 
 /** 飞书自定义机器人签名：以 "timestamp\\nsecret" 为密钥，对空串做 HMAC-SHA256 */
@@ -161,40 +175,35 @@ export default async function handler(req, res) {
       day: '2-digit',
     }).format(now)
 
-    const payload = {
-      msg_type: 'interactive',
-      card: {
-        config: { wide_screen_mode: true },
-        header: {
-          template: 'blue',
-          title: {
-            tag: 'plain_text',
-            content: `${isTest ? '【测试】' : ''}每日推荐 · ${dateText}`,
-          },
-        },
-        elements: buildElements(kl8, fc3d),
-      },
-    }
+    const prefix = isTest ? '【测试】' : ''
+
+    // 一个彩种一张卡：快乐8 蓝头、3D 红头，分别发送
+    const cards = []
+    if (kl8) cards.push(buildKl8Card(kl8, `${prefix}快乐8 推荐 · ${dateText}`))
+    if (fc3d) cards.push(buildFc3dCard(fc3d, `${prefix}福彩3D 推荐 · ${dateText}`))
 
     const timestamp = Math.floor(Date.now() / 1000)
-    const body = { ...payload, ...feishuSign(cfg.secret, timestamp) }
+    const signPart = feishuSign(cfg.secret, timestamp)
 
-    const r = await fetch(cfg.webhook, {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify(body),
-    })
-    const data = await r.json().catch(() => ({}))
-    if (!r.ok || (data.code ?? 0) !== 0) {
-      return res.status(502).json({
-        error: `飞书推送失败：${data.msg || `HTTP ${r.status}`}${data.code ? `（${data.code}）` : ''}`,
+    for (const payload of cards) {
+      const r = await fetch(cfg.webhook, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ ...payload, ...signPart }),
       })
+      const data = await r.json().catch(() => ({}))
+      if (!r.ok || (data.code ?? 0) !== 0) {
+        return res.status(502).json({
+          error: `飞书推送失败：${data.msg || `HTTP ${r.status}`}${data.code ? `（${data.code}）` : ''}`,
+        })
+      }
     }
 
     return res.status(200).json({
       ok: true,
       test: isTest,
       pushed: { kl8: !!kl8, fc3d: !!fc3d },
+      messages: cards.length,
       skipped: {
         kl8: kl8Res.status === 'rejected' ? kl8Res.reason?.message : null,
         fc3d: fc3dRes.status === 'rejected' ? fc3dRes.reason?.message : null,
