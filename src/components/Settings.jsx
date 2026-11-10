@@ -52,9 +52,13 @@ export default function Settings() {
       return setMsg({ tone: 'warn', text: '没认出这个链接。请粘贴地址栏里以 /base/ 或 /wiki/ 开头的完整链接。' })
     }
     if (p.isWiki) {
+      const next = { ...form, feishuAppToken: p.appToken }
+      if (p.tableId) next.feishuTableId = p.tableId
+      setForm(next)
+      setLarkLink('')
       return setMsg({
         tone: 'warn',
-        text: '这是知识库（/wiki/）里的表格，它的 app_token 被藏在节点后面，无法直接从链接获取。请到飞书首页新建一个独立的多维表格（不要建到知识库里），新表地址栏是 /base/ 开头，再粘贴过来。',
+        text: '已识别为知识库（/wiki/）里的表格并填入，同步时会自动解析出真正的 app_token。注意：你的应用需要额外开通「wiki:wiki」权限并发布一个新版本，否则会同步失败；嫌麻烦的话，新建一个独立多维表格（/base/ 链接）最省事。',
       })
     }
     const next = { ...form }
@@ -312,12 +316,12 @@ export default function Settings() {
           <b>第一次配置？按下面 5 步照做（约 5 分钟）：</b>
           <ol className="settings-steps">
             <li>
-              <b>新建表格，把链接粘贴过来即可。</b>在飞书里新建一个「多维表格」（<b>注意：不要建到知识库/wiki 里</b>，
-              知识库里的表格 app_token 无法从链接直接获取），然后直接把地址栏整个链接
+              <b>新建表格，把链接粘贴过来即可。</b>在飞书里新建一个「多维表格」，然后直接把地址栏整个链接
               粘贴到上面的「粘贴表格链接」框，点「识别并填入」，会自动拆出
               <code>app_token</code>（<code>/base/</code> 后面那段）和 <code>table_id</code>（<code>?table=</code> 后面那段）。
-              如果你愿意手动抄，链接长这样：
-              <code>https://xxx.feishu.cn/base/<b>app_token</b>?table=<b>table_id</b></code>
+              <br />
+              <b>表格建在知识库里（链接是 /wiki/ 开头）也能用</b>，同步时会自动解析出真正的 app_token；
+              但应用要多开一个 <code>wiki:wiki</code> 权限（下面第 3 步一起勾上）并发布，所以建议能建独立表格就建独立的。
             </li>
             <li>
               <b>建一个应用，拿到钥匙。</b>打开
@@ -329,6 +333,7 @@ export default function Settings() {
             <li>
               <b>开通权限并发布（最常漏的一步）。</b>同一个应用里点左侧「权限管理」→ 搜索 <code>bitable</code>
               → 勾选 <code>bitable:app</code>（查看、评论、编辑和管理多维表格）。
+              如果你的表格在知识库里（/wiki/ 链接），再搜 <code>wiki</code> 勾上 <code>wiki:wiki</code>。
               然后到左侧「版本管理与发布」→「创建版本」→ 保存并发起发布。
               如果你不是企业管理员，需要管理员在飞书「审批」里点通过，权限才会真正生效。
             </li>

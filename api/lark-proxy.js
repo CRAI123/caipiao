@@ -129,15 +129,36 @@ export default async function handler(req, res) {
     }
     const token = tokenData.tenant_access_token
 
+    // 1.5 若用户填的是知识库（wiki）节点 token，先解析成真正的多维表格 app_token
+    let realAppToken = appToken
+    try {
+      const nodeRes = await fetch(
+        `${LARK_API}/wiki/v2/spaces/get_node?token=${encodeURIComponent(appToken)}&obj_type=wiki`,
+        { headers: { Authorization: `Bearer ${token}` } },
+      )
+      const nodeData = await nodeRes.json().catch(() => ({}))
+      if (nodeData.code === 0) {
+        const node = nodeData.data?.node
+        if (node?.obj_type === 'bitable' && node.obj_token) {
+          realAppToken = node.obj_token
+        } else if (node) {
+          throw new Error(`该知识库节点不是多维表格（实际是 ${node.obj_type || '未知'}），请在知识库里新建「多维表格」类型的节点`)
+        }
+      }
+    } catch (e) {
+      if (e.message?.startsWith('该知识库节点')) throw e
+      // 其他情况按普通 app_token 继续，后面 bitable 接口会给出更准确的报错
+    }
+
     // 2. 确保表字段存在
     const fieldsData = await larkFetch(
       token,
-      `${LARK_API}/bitable/v1/apps/${appToken}/tables/${tableId}/fields?page_size=100`,
+      `${LARK_API}/bitable/v1/apps/${realAppToken}/tables/${tableId}/fields?page_size=100`,
     )
     const existingFields = new Set((fieldsData.data?.items || []).map((f) => f.field_name))
     for (const [name, type] of FIELD_DEFS) {
       if (existingFields.has(name)) continue
-      await larkFetch(token, `${LARK_API}/bitable/v1/apps/${appToken}/tables/${tableId}/fields`, {
+      await larkFetch(token, `${LARK_API}/bitable/v1/apps/${realAppToken}/tables/${tableId}/fields`, {
         method: 'POST',
         body: JSON.stringify({ field_name: name, type }),
       })
@@ -147,7 +168,7 @@ export default async function handler(req, res) {
     const existingByKey = new Map()
     let pageToken = ''
     do {
-      const url = `${LARK_API}/bitable/v1/apps/${appToken}/tables/${tableId}/records?page_size=100${
+      const url = `${LARK_API}/bitable/v1/apps/${realAppToken}/tables/${tableId}/records?page_size=100${
         pageToken ? `&page_token=${encodeURIComponent(pageToken)}` : ''
       }`
       const d = await larkFetch(token, url)
@@ -181,7 +202,7 @@ export default async function handler(req, res) {
     for (let i = 0; i < toUpdate.length; i += 100) {
       await larkFetch(
         token,
-        `${LARK_API}/bitable/v1/apps/${appToken}/tables/${tableId}/records/batch_update`,
+        `${LARK_API}/bitable/v1/apps/${realAppToken}/tables/${tableId}/records/batch_update`,
         { method: 'POST', body: JSON.stringify({ records: toUpdate.slice(i, i + 100) }) },
       )
     }
@@ -190,7 +211,7 @@ export default async function handler(req, res) {
     for (let i = 0; i < toCreate.length; i += 100) {
       await larkFetch(
         token,
-        `${LARK_API}/bitable/v1/apps/${appToken}/tables/${tableId}/records/batch_create`,
+        `${LARK_API}/bitable/v1/apps/${realAppToken}/tables/${tableId}/records/batch_create`,
         { method: 'POST', body: JSON.stringify({ records: toCreate.slice(i, i + 100) }) },
       )
     }
