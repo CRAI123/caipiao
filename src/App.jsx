@@ -27,11 +27,18 @@ import FC3DDataManager from './components/FC3DDataManager.jsx'
 import { FC3D_DRAWS } from './data/fc3d.js'
 import { PL3_DRAWS } from './data/pl3.js'
 import { fetchPl3Draws } from './lib/pl3.js'
+import * as pl3Engine from './lib/pl3Predict.js'
 import { loadJournal, getRecord } from './lib/journal.js'
 import { loadSettings, isNeonReady } from './lib/settings.js'
 import { getSql } from './lib/neon.js'
 import { ensureAccessTables, fetchMyRequest, listAdmins } from './lib/access.js'
 import { getDeviceId } from './lib/device.js'
+
+// 排列三专用推算引擎的算法说明（v1 与福彩3D共用，v2 为排列三模式）
+const PL3_ALGO_INFO = {
+  v1: { name: '经典综合评分', desc: '热冷+跨度+和值+奇偶+形态+遗漏 8 维度加权评分' },
+  v2: { name: '排列三模式', desc: '数字出现概率建模 + 位置转移 + 经验分布区间 + 6 形态覆盖' },
+}
 
 const TABS = [
   { id: 'overview', label: '总览', en: 'OVERVIEW' },
@@ -309,8 +316,18 @@ export default function App() {
             {digitTab === 'prize' && (
               <FC3DPrize draws={digitDraws} lottery={lottery} label={digitLabel} />
             )}
-            {digitTab === 'predict' && <FC3D draws={digitDraws} />}
-            {digitTab === 'audit' && <FC3DAudit draws={digitDraws} />}
+            {digitTab === 'predict' &&
+              (lottery === 'pl3' ? (
+                <FC3D draws={digitDraws} engine={pl3Engine} algoInfo={PL3_ALGO_INFO} />
+              ) : (
+                <FC3D draws={digitDraws} />
+              ))}
+            {digitTab === 'audit' &&
+              (lottery === 'pl3' ? (
+                <FC3DAudit draws={digitDraws} engine={pl3Engine} />
+              ) : (
+                <FC3DAudit draws={digitDraws} />
+              ))}
             {digitTab === 'terms' && <FC3DTerms label={digitLabel} />}
             {digitTab === 'data' && (
               lottery === 'pl3' ? (

@@ -1,7 +1,7 @@
 // 福彩3D 下期推荐 —— 基于多维度术语评分的下期推算 + 上期回算验证
 // 支持 v1（综合评分）与 v2（位置独立+马尔可夫+指数衰减）两种算法
 import React, { useMemo, useState } from 'react'
-import { predictFC3D, backtestFC3D, predictFC3Dv2, backtestFC3Dv2 } from '../lib/fc3dPredict.js'
+import * as fc3dEngine from '../lib/fc3dPredict.js'
 
 function DigitBall({ d, hot, cold, omit }) {
   let cls = 'digit-ball'
@@ -20,10 +20,16 @@ const ALGO_INFO = {
   v2: { name: '精准模式', desc: '位置独立建模 + 马尔可夫转移 + 指数衰减 + 遗漏回补' },
 }
 
-export default function FC3D({ draws }) {
+export default function FC3D({ draws, engine = fc3dEngine, algoInfo = ALGO_INFO }) {
   const [algo, setAlgo] = useState('v2')
-  const pred = useMemo(() => (algo === 'v2' ? predictFC3Dv2(draws) : predictFC3D(draws)), [draws, algo])
-  const backtest = useMemo(() => (algo === 'v2' ? backtestFC3Dv2(draws) : backtestFC3D(draws)), [draws, algo])
+  const pred = useMemo(
+    () => (algo === 'v2' ? engine.predictFC3Dv2(draws) : engine.predictFC3D(draws)),
+    [draws, algo, engine],
+  )
+  const backtest = useMemo(
+    () => (algo === 'v2' ? engine.backtestFC3Dv2(draws) : engine.backtestFC3D(draws)),
+    [draws, algo, engine],
+  )
 
   if (!pred) {
     return (
@@ -40,11 +46,11 @@ export default function FC3D({ draws }) {
         <h2>下期推荐推算</h2>
         <p>
           基于 {draws.length} 期历史数据推算下期参考号码。当前算法：
-          <b style={{ margin: '0 4px' }}>{ALGO_INFO[algo].name}</b>
-          <span className="muted">（{ALGO_INFO[algo].desc}）</span>
+          <b style={{ margin: '0 4px' }}>{algoInfo[algo].name}</b>
+          <span className="muted">（{algoInfo[algo].desc}）</span>
         </p>
         <div className="algo-toggle">
-          {Object.entries(ALGO_INFO).map(([k, v]) => (
+          {Object.entries(algoInfo).map(([k, v]) => (
             <button
               key={k}
               className={`tab-btn ${algo === k ? 'active' : ''}`}

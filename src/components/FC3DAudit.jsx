@@ -2,10 +2,7 @@
 // 支持 v1 / v2 双算法对比
 import React, { useMemo, useState } from 'react'
 import { Card, Note, StatCard } from './common.jsx'
-import {
-  walkForwardAuditFC3D, predictFC3D, analyzeDraw,
-  walkForwardAuditFC3Dv2, predictFC3Dv2,
-} from '../lib/fc3dPredict.js'
+import * as fc3dEngine from '../lib/fc3dPredict.js'
 
 const PERIODS = [20, 30, 50, 80]
 
@@ -17,37 +14,37 @@ function Digit({ d, hit }) {
   )
 }
 
-export default function FC3DAudit({ draws }) {
+export default function FC3DAudit({ draws, engine = fc3dEngine }) {
   const [periods, setPeriods] = useState(30)
   const [algo, setAlgo] = useState('v2')
 
   const audit = useMemo(
     () => (algo === 'v2'
-      ? walkForwardAuditFC3Dv2(draws, { periods, minTrain: 20 })
-      : walkForwardAuditFC3D(draws, { periods, minTrain: 20 })),
-    [draws, periods, algo],
+      ? engine.walkForwardAuditFC3Dv2(draws, { periods, minTrain: 20 })
+      : engine.walkForwardAuditFC3D(draws, { periods, minTrain: 20 })),
+    [draws, periods, algo, engine],
   )
 
   // v1 vs v2 对比
   const compare = useMemo(() => {
     if (draws.length < 40) return null
-    const a1 = walkForwardAuditFC3D(draws, { periods, minTrain: 20 })
-    const a2 = walkForwardAuditFC3Dv2(draws, { periods, minTrain: 20 })
+    const a1 = engine.walkForwardAuditFC3D(draws, { periods, minTrain: 20 })
+    const a2 = engine.walkForwardAuditFC3Dv2(draws, { periods, minTrain: 20 })
     return { a1, a2 }
-  }, [draws, periods])
+  }, [draws, periods, engine])
 
   // 最新一期的回滚验证
   const rollback = useMemo(() => {
     if (draws.length < 21) return null
     const train = draws.slice(1)
     const actual = draws[0]
-    const pred = algo === 'v2' ? predictFC3Dv2(train) : predictFC3D(train)
+    const pred = algo === 'v2' ? engine.predictFC3Dv2(train) : engine.predictFC3D(train)
     if (!pred) return null
-    const a = analyzeDraw(actual.num)
+    const a = engine.analyzeDraw(actual.num)
     const allRec = [...pred.dan, ...pred.tuo]
     const hits = actual.num.filter((d) => allRec.includes(d))
     return { draw: actual, prediction: pred, hits, analysis: a }
-  }, [draws, algo])
+  }, [draws, algo, engine])
 
   if (audit.periods === 0) {
     return (
