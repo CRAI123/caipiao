@@ -20,11 +20,12 @@ const ALGO_INFO = {
   v2: { name: '精准模式', desc: '位置独立建模 + 马尔可夫转移 + 指数衰减 + 遗漏回补' },
 }
 
-export default function FC3D({ draws, engine = fc3dEngine, algoInfo = ALGO_INFO }) {
+export default function FC3D({ draws, engine = fc3dEngine, algoInfo = ALGO_INFO, showTiers = false }) {
   const [algo, setAlgo] = useState('v2')
+  const [cover, setCover] = useState(6)
   const pred = useMemo(
-    () => (algo === 'v2' ? engine.predictFC3Dv2(draws) : engine.predictFC3D(draws)),
-    [draws, algo, engine],
+    () => (algo === 'v2' ? engine.predictFC3Dv2(draws, { cover }) : engine.predictFC3D(draws)),
+    [draws, algo, engine, cover],
   )
   const backtest = useMemo(
     () => (algo === 'v2' ? engine.backtestFC3Dv2(draws) : engine.backtestFC3D(draws)),
@@ -93,6 +94,68 @@ export default function FC3D({ draws, engine = fc3dEngine, algoInfo = ALGO_INFO 
           ))}
         </div>
       </div>
+
+      {/* 覆盖档位：6/7/8 码，命中与成本一目了然 */}
+      {showTiers && pred.tiers && (
+        <div className="predict-row">
+          <div className="predict-label">覆盖档位</div>
+          <div className="predict-value">
+            {pred.tiers.map((t) => (
+              <button
+                key={t.cover}
+                className={`tab-btn ${cover === t.cover ? 'active' : ''}`}
+                onClick={() => setCover(t.cover)}
+              >
+                {t.cover} 码 · 期望 {t.expectHits}
+              </button>
+            ))}
+          </div>
+        </div>
+      )}
+
+      {showTiers && pred.tiers && (
+        <div className="odd-card">
+          <div className="odd-card-head">
+            <h3>覆盖档位 · 命中与成本</h3>
+            <span className="muted small">期望命中 = 覆盖码数 × 30%</span>
+          </div>
+          <div className="table-scroll">
+            <table className="ledger-table">
+              <thead>
+                <tr>
+                  <th>档位</th>
+                  <th>平均命中</th>
+                  <th>3 码全覆盖</th>
+                  <th>组选复式</th>
+                  <th>成本</th>
+                  <th>每命中 1 个号</th>
+                </tr>
+              </thead>
+              <tbody>
+                {pred.tiers.map((t) => (
+                  <tr key={t.cover}>
+                    <td>
+                      {t.cover} 码
+                      {cover === t.cover ? (
+                        <span className="prize-badge prize-badge-win" style={{ marginLeft: 6 }}>当前</span>
+                      ) : null}
+                    </td>
+                    <td className="mono">{t.expectHits} 个</td>
+                    <td className="mono">{t.fullCoverRate}%</td>
+                    <td className="mono">{t.groupBets} 注</td>
+                    <td className="mono">{t.groupCost} 元</td>
+                    <td className="mono">{t.costPerHit} 元</td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+          <div className="note note-info" style={{ marginTop: 12 }}>
+            档位越高，平均命中越多（6 码 1.8 个 → 8 码 2.4 个），但每命中 1 个号的代价同步上升，
+            单注中奖概率本身不变。选哪档只取决于你愿意花多少钱，不存在“更划算的选号”。
+          </div>
+        </div>
+      )}
 
       {/* v2 定位推荐 */}
       {pred.posTop && (

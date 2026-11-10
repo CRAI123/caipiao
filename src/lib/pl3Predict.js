@@ -139,9 +139,32 @@ function modeOf(arr) {
 }
 
 /**
- * 排列三下期推算（字段与 3D v2 完全兼容，页面可直接复用）。
+ * 覆盖档位：选 k 个号时，期望命中恒为 k × 30%（与选哪 k 个号无关）。
+ * 这里只负责算清楚「命中多少」和「要花多少钱」，让性价比一眼可见。
  */
-export function predictFC3Dv2(draws) {
+function buildTiers(rankedDigits) {
+  return [6, 7, 8].map((k) => {
+    const groupBets = (k * (k - 1) * (k - 2)) / 6 // 组选复式注数 C(k,3)
+    const directBets = k * k * k // 直选复式注数 k³
+    return {
+      cover: k,
+      codes: rankedDigits.slice(0, k).map((x) => x.digit),
+      expectHits: +(k * 0.3).toFixed(1),
+      fullCoverRate: +((k / 10) ** 3 * 100).toFixed(1), // 3 个开奖号全落在覆盖内的概率
+      groupBets,
+      groupCost: groupBets * 2,
+      directBets,
+      directCost: directBets * 2,
+      costPerHit: +((groupBets * 2) / (k * 0.3)).toFixed(1),
+    }
+  })
+}
+
+/**
+ * 排列三下期推算（字段与 3D v2 完全兼容，页面可直接复用）。
+ * cover：覆盖码数（6/7/8），只影响推荐码的个数，不影响任何单注概率。
+ */
+export function predictFC3Dv2(draws, { cover = 6 } = {}) {
   const base = basePredictV2(draws)
   if (!base) return null
   if (draws.length < 10) return base
@@ -158,7 +181,8 @@ export function predictFC3Dv2(draws) {
     .map((p, d) => ({ digit: d, score: +(p * 100).toFixed(2) }))
     .sort((a, b) => b.score - a.score)
   const dan = rankedDigits.slice(0, 2).map((x) => x.digit)
-  const tuo = rankedDigits.slice(2, 6).map((x) => x.digit)
+  const tuo = rankedDigits.slice(2, Math.max(6, cover)).map((x) => x.digit)
+  const tiers = buildTiers(rankedDigits)
 
   const posTop = posProb.map((p) =>
     p
@@ -225,6 +249,8 @@ export function predictFC3Dv2(draws) {
     recommendedForms,
     oddEven: { ...buildOddEven(draws, 50), ranked: base.oddEven.ranked, recommendedPatterns: recommendedOdd },
     kill,
+    cover,
+    tiers,
     algorithm: 'pl3-v3',
   }
 }
