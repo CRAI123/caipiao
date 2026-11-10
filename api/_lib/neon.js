@@ -50,3 +50,11 @@ export async function readConfig(sql, key) {
   const rows = await sql`SELECT value FROM admin_config WHERE key = ${key}`
   return rows[0]?.value || null
 }
+
+/** 写入 admin_config 表的共享配置（不存在则插入） */
+export async function writeConfig(sql, key, value) {
+  await sql`
+    INSERT INTO admin_config (key, value)
+    VALUES (${key}, ${value})
+    ON CONFLICT (key) DO UPDATE SET value = EXCLUDED.value`
+}

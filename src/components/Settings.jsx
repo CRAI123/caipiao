@@ -108,6 +108,21 @@ export default function Settings() {
     }
   }, [])
 
+  // 定时推送的最近一次结果（失败也留痕，避免被静默吞掉）
+  const [lastPush, setLastPush] = useState(null)
+  async function loadLastPush() {
+    try {
+      const r = await fetch('/api/daily-push?status=1')
+      const d = await r.json()
+      setLastPush(d.last || null)
+    } catch {
+      /* 忽略：本地开发或接口未部署 */
+    }
+  }
+  useEffect(() => {
+    loadLastPush()
+  }, [])
+
   // 是否可查看 / 修改系统级配置（云数据库、大模型）
   // 规则：本地模式（无 Neon）无门禁，视为管理员；Neon 模式下仅管理员设备可见
   const canEditSystem = access?.mode === 'local' || access?.isAdmin
@@ -182,6 +197,7 @@ export default function Settings() {
       setMsg({ tone: 'warn', text: `操作失败：${e.message}` })
     } finally {
       setPushBusy(false)
+      loadLastPush()
     }
   }
 
@@ -343,6 +359,26 @@ export default function Settings() {
           <button className="btn-primary" onClick={() => savePush(true)} disabled={pushBusy}>
             {pushBusy ? '发送中…' : '保存并发送测试'}
           </button>
+        </div>
+
+        {/* 最近一次定时推送的结果：成功/失败都留痕，不会被静默吞掉 */}
+        <div className="note" style={{ marginTop: 10 }}>
+          {!lastPush ? (
+            <span className="muted">最近一次推送：暂无记录（每天 14:00 由 Vercel 自动执行，无需开电脑）</span>
+          ) : lastPush.ok ? (
+            <>
+              <b>最近一次推送成功</b> · {new Date(lastPush.at).toLocaleString('zh-CN', { timeZone: 'Asia/Shanghai' })}
+              {' · '}发出 {lastPush.sent ?? lastPush.messages ?? 0} 条
+              {lastPush.fresh && Object.entries(lastPush.fresh).some(([, v]) => v?.state === 'stale') ? (
+                <span style={{ color: 'var(--red)' }}>（当时有彩种数据未更新，卡片内已红字标注）</span>
+              ) : null}
+            </>
+          ) : (
+            <span style={{ color: 'var(--red)' }}>
+              <b>最近一次推送失败</b> · {new Date(lastPush.at).toLocaleString('zh-CN', { timeZone: 'Asia/Shanghai' })}
+              {' · '}{lastPush.error || '未知原因'}
+            </span>
+          )}
         </div>
         <div className="settings-guide">
           <b>怎么拿到 Webhook：</b>在飞书群里点右上角「…」→「设置」→「群机器人」→「添加机器人」→ 选「自定义机器人」，

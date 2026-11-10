@@ -12,7 +12,7 @@
 // 手动触发：GET /api/daily-push?test=1
 // ============================================================
 import crypto from 'node:crypto'
-import { getSql, readConfig } from './_lib/neon.js'
+import { getSql, readConfig, writeConfig } from './_lib/neon.js'
 import { fetchKl8Draws } from './_lib/kl8.js'
 import { fetchFc3dDraws } from './_lib/fc3d.js'
 import { fetchPl3Draws } from './_lib/pl3.js'
@@ -22,6 +22,45 @@ import { predictFC3Dv2 as predictPl3 } from '../src/lib/pl3Predict.js'
 import { applyCors } from './_lib/http.js'
 
 const CONFIG_KEY = 'daily_push_config'
+const STATUS_KEY = 'daily_push_last'
+const FRESH_RETRY_MS = 1500
+
+/** 北京时间日期（YYYY-MM-DD） */
+const shDate = (d = new Date()) =>
+  new Intl.DateTimeFormat('en-CA', { timeZone: 'Asia/Shanghai' }).format(d)
+
+/**
+ * 三个彩种都是每天开一期，14:00 推送时最新一期应当是「昨天」。
+ * fresh=false 表示数据源还没更新，卡片顶部会亮红字提醒。
+ */
+function freshness(latest) {
+  const expected = shDate(new Date(Date.now() - 86400000))
+  const date = latest?.date || null
+  if (!date) return { state: 'unknown', expected, date: null, id: latest?.id ?? null }
+  return {
+    state: date >= expected ? 'ok' : 'stale',
+    expected,
+    date,
+    id: latest?.id ?? null,
+  }
+}
+
+const staleWarning = (f, name) =>
+  f && f.state === 'stale'
+    ? line(
+        `<font color='red'>⚠️ ${name}数据源还没更新：最新只到 ${f.date}（第 ${f.id} 期），本期推荐基于旧数据，稍后可手动重发</font>`,
+      )
+    : null
+
+/** 记录最近一次推送结果，供设置页查看（失败也能看到，不会被静默吞掉） */
+async function savePushStatus(status) {
+  if (!process.env.DATABASE_URL) return
+  try {
+    await writeConfig(getSql(), STATUS_KEY, JSON.stringify(status))
+  } catch (e) {
+    console.error('[daily-push] 记录推送状态失败：', e.message)
+  }
+}
 
 async function loadConfig() {
   let cfg = {}
@@ -85,13 +124,13 @@ const red = (s) => `<font color='red'>${s}</font>`
 const grey = (s) => `<font color='grey'>${s}</font>`
 
 /** 飞书卡片：一个彩种一张卡 */
-function buildCard({ title, template, blocks }) {
+function buildCard({ title, template, blocks, warning }) {
   return {
     msg_type: 'interactive',
     card: {
       config: { wide_screen_mode: true },
       header: { template, title: { tag: 'plain_text', content: title } },
-      elements: [...blocks, { tag: 'hr' }, DISCLAIMER],
+      elements: [...(warning ? [warning, HR] : []), ...blocks, { tag: 'hr' }, DISCLAIMER],
     },
   }
 }
@@ -101,11 +140,12 @@ const line = (content) => ({ tag: 'div', text: { tag: 'lark_md', content } })
 
 const HR = { tag: 'hr' }
 
-function buildKl8Card(kl8, title) {
+function buildKl8Card(kl8, title, warning) {
   const picks = kl8.picks.map(pad).join(' ')
   return buildCard({
     title,
     template: 'blue',
+    warning,
     blocks: [
       line(`上期开奖：${grey(kl8.latest.nums.map(pad).join(' '))}`),
       HR,
@@ -119,13 +159,14 @@ function buildKl8Card(kl8, title) {
   })
 }
 
-function buildFc3dCard(digit, title, { template = 'red', extra = [] } = {}) {
+function buildFc3dCard(digit, title, { template = 'red', extra = [], warning = null } = {}) {
   const p = digit.pred
   const [bai, shi, ge] = p.posTop
   const bets = bai.length * shi.length * ge.length
   return buildCard({
     title,
     template,
+    warning,
     blocks: [
       line(`上期开奖：${grey(digit.latest.num.join(' '))}`),
       HR,
@@ -144,7 +185,7 @@ function buildFc3dCard(digit, title, { template = 'red', extra = [] } = {}) {
 }
 
 /** 排列三卡：在 3D 版式上补一行覆盖档位（命中与成本） */
-function buildPl3Card(pl3, title) {
+function buildPl3Card(pl3, title, warning) {
   const tiers = pl3.pred.tiers || []
   const extra = tiers.length
     ? [
@@ -156,7 +197,7 @@ function buildPl3Card(pl3, title) {
         ),
       ]
     : []
-  return buildFc3dCard(pl3, title, { template: 'orange', extra })
+  return buildFc3dCard(pl3, title, { template: 'orange', extra, warning })
 }
 
 /** 飞书自定义机器人签名：以 "timestamp\\nsecret" 为密钥，对空串做 HMAC-SHA256 */
@@ -170,6 +211,20 @@ function feishuSign(secret, timestamp) {
 export default async function handler(req, res) {
   if (applyCors(req, res)) return
 
+  // 设置页查看「最近一次推送」状态（只返回结果，不暴露 webhook，任何 GET 都能读）
+  if (req.method === 'GET' && req.query?.status === '1') {
+    let last = null
+    if (process.env.DATABASE_URL) {
+      try {
+        const raw = await readConfig(getSql(), STATUS_KEY)
+        if (raw) last = JSON.parse(raw)
+      } catch (e) {
+        console.error('[daily-push] 读取推送状态失败：', e.message)
+      }
+    }
+    return res.status(200).json({ last })
+  }
+
   // 如果配置了 CRON_SECRET，则要求定时调用带 Bearer（前端手动测试走 POST，不受影响）
   const cronSecret = process.env.CRON_SECRET
   if (cronSecret && req.method === 'GET' && req.headers.authorization !== `Bearer ${cronSecret}`) {
@@ -181,28 +236,59 @@ export default async function handler(req, res) {
   try {
     const cfg = await loadConfig()
     if (!cfg.webhook) {
+      await savePushStatus({ at: new Date().toISOString(), ok: false, error: '未配置飞书 Webhook' })
       return res.status(400).json({
         error: '还没有配置飞书机器人 Webhook。请到「设置 → 每日推荐推送」里填写并保存。',
       })
     }
 
     // 并行走三个数据源，单个失败不影响其它
-    const [kl8Res, fc3dRes, pl3Res] = await Promise.allSettled([
+    let [kl8Res, fc3dRes, pl3Res] = await Promise.allSettled([
       cfg.kl8 ? fetchKl8Draws(100) : Promise.resolve(null),
       cfg.fc3d ? fetchFc3dDraws(100) : Promise.resolve(null),
       cfg.pl3 ? fetchPl3Draws(100) : Promise.resolve(null),
+    ])
+
+    // 数据源偶发缓存：抓到的最新一期还停在旧日期时，等 1.5 秒补抓一次（三路并行，不叠加耗时）
+    const drawsOf = (r) =>
+      r.status === 'fulfilled' && r.value ? (Array.isArray(r.value) ? r.value : r.value.draws) : null
+    const refetchIfStale = async (r, enabled, fn) => {
+      const list = drawsOf(r)
+      if (!enabled || !list?.length) return r
+      if (freshness(list[0]).state !== 'stale') return r
+      await new Promise((ok) => setTimeout(ok, FRESH_RETRY_MS))
+      const [again] = await Promise.allSettled([fn(100)])
+      const retried = drawsOf(again)
+      // 补抓没变新就保留原结果，至少还能发出去
+      return retried?.length ? again : r
+    }
+    ;[kl8Res, fc3dRes, pl3Res] = await Promise.all([
+      refetchIfStale(kl8Res, cfg.kl8, fetchKl8Draws),
+      refetchIfStale(fc3dRes, cfg.fc3d, fetchFc3dDraws),
+      refetchIfStale(pl3Res, cfg.pl3, fetchPl3Draws),
     ])
 
     const kl8 = kl8Res.status === 'fulfilled' && kl8Res.value ? buildKl8(kl8Res.value) : null
     const fc3d = fc3dRes.status === 'fulfilled' && fc3dRes.value ? buildFc3d(fc3dRes.value) : null
     const pl3 = pl3Res.status === 'fulfilled' && pl3Res.value ? buildPl3(pl3Res.value.draws) : null
 
+    const fresh = {
+      kl8: kl8 ? freshness(kl8.latest) : null,
+      fc3d: fc3d ? freshness(fc3d.latest) : null,
+      pl3: pl3 ? freshness(pl3.latest) : null,
+    }
+
+    const skipped = {
+      kl8: kl8Res.status === 'rejected' ? kl8Res.reason?.message : null,
+      fc3d: fc3dRes.status === 'rejected' ? fc3dRes.reason?.message : null,
+      pl3: pl3Res.status === 'rejected' ? pl3Res.reason?.message : null,
+    }
+
     if (!kl8 && !fc3d && !pl3) {
-      const errs = [kl8Res, fc3dRes, pl3Res]
-        .filter((r) => r.status === 'rejected')
-        .map((r) => r.reason?.message)
-        .filter(Boolean)
-      return res.status(502).json({ error: `开奖数据获取失败：${errs.join('；') || '未知原因'}` })
+      const errs = Object.values(skipped).filter(Boolean)
+      const error = `开奖数据获取失败：${errs.join('；') || '未知原因'}`
+      await savePushStatus({ at: new Date().toISOString(), ok: false, error, skipped })
+      return res.status(502).json({ error })
     }
 
     const now = new Date()
@@ -216,13 +302,14 @@ export default async function handler(req, res) {
 
     // 一个彩种一张卡：快乐8 蓝头、3D 红头、排列三橙头，分别发送
     const cards = []
-    if (kl8) cards.push(buildKl8Card(kl8, `${prefix}快乐8 推荐 · ${dateText}`))
-    if (fc3d) cards.push(buildFc3dCard(fc3d, `${prefix}福彩3D 推荐 · ${dateText}`))
-    if (pl3) cards.push(buildPl3Card(pl3, `${prefix}排列三 推荐 · ${dateText}`))
+    if (kl8) cards.push(buildKl8Card(kl8, `${prefix}快乐8 推荐 · ${dateText}`, staleWarning(fresh.kl8, '快乐8')))
+    if (fc3d) cards.push(buildFc3dCard(fc3d, `${prefix}福彩3D 推荐 · ${dateText}`, { warning: staleWarning(fresh.fc3d, '福彩3D') }))
+    if (pl3) cards.push(buildPl3Card(pl3, `${prefix}排列三 推荐 · ${dateText}`, staleWarning(fresh.pl3, '排列三')))
 
     const timestamp = Math.floor(Date.now() / 1000)
     const signPart = feishuSign(cfg.secret, timestamp)
 
+    let sent = 0
     for (const payload of cards) {
       const r = await fetch(cfg.webhook, {
         method: 'POST',
@@ -231,25 +318,33 @@ export default async function handler(req, res) {
       })
       const data = await r.json().catch(() => ({}))
       if (!r.ok || (data.code ?? 0) !== 0) {
-        return res.status(502).json({
-          error: `飞书推送失败：${data.msg || `HTTP ${r.status}`}${data.code ? `（${data.code}）` : ''}`,
-        })
+        const error = `飞书推送失败：${data.msg || `HTTP ${r.status}`}${data.code ? `（${data.code}）` : ''}`
+        await savePushStatus({ at: new Date().toISOString(), ok: false, error, sent, total: cards.length, fresh })
+        return res.status(502).json({ error })
       }
+      sent++
     }
+
+    await savePushStatus({
+      at: new Date().toISOString(),
+      ok: true,
+      test: isTest,
+      sent,
+      pushed: { kl8: !!kl8, fc3d: !!fc3d, pl3: !!pl3 },
+      fresh,
+    })
 
     return res.status(200).json({
       ok: true,
       test: isTest,
       pushed: { kl8: !!kl8, fc3d: !!fc3d, pl3: !!pl3 },
       messages: cards.length,
-      skipped: {
-        kl8: kl8Res.status === 'rejected' ? kl8Res.reason?.message : null,
-        fc3d: fc3dRes.status === 'rejected' ? fc3dRes.reason?.message : null,
-        pl3: pl3Res.status === 'rejected' ? pl3Res.reason?.message : null,
-      },
+      fresh,
+      skipped,
     })
   } catch (e) {
     console.error('[daily-push]', e)
+    await savePushStatus({ at: new Date().toISOString(), ok: false, error: e.message || '推送失败' })
     return res.status(500).json({ error: e.message || '推送失败' })
   }
 }
