@@ -92,7 +92,7 @@ export default function FC3DAudit({ draws, engine = fc3dEngine, defaultPeriods =
                 <tr>
                   <th>指标</th>
                   <th>经典 v1</th>
-                  <th>精准 v2</th>
+                  <th>{v2Label}</th>
                   <th>机选基准</th>
                 </tr>
               </thead>
@@ -131,7 +131,8 @@ export default function FC3DAudit({ draws, engine = fc3dEngine, defaultPeriods =
             </table>
           </div>
           <Note>
-            v2 在跨度/和值区间估计上更准（用正态分布 ±1σ，覆盖约 68% 样本），
+            {v2Label} 用四个窗口的频率 + 位置转移合成概率，再穷举 1000 种结果得到和值/跨度/奇偶的
+            精确分布，区间按覆盖 80% 取最短段落，所以跨度、和值、奇偶命中率明显更高；
             但<b>数字平均命中仍在 1.8 附近</b>，与机选基准几乎重合——这正是独立随机事件的诚实结论。
           </Note>
         </Card>
