@@ -29,6 +29,11 @@ const cwlProxy = {
       Accept: 'application/json, text/plain, */*',
     },
   },
+  // 双色球：dev 无本地 serverless，转发到线上同域代理（线上直接命中 /api/ssq-proxy）
+  '/api/ssq-proxy': {
+    target: 'https://cai.rayzo.cn',
+    changeOrigin: true,
+  },
   // 兼容旧路径
   '/cwl-api': {
     target: 'https://www.cwl.gov.cn',

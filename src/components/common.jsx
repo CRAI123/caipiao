@@ -146,6 +146,23 @@ export function Note({ children, tone = 'info' }) {
   return <p className={`note note-${tone}`}>{children}</p>
 }
 
+/** 双色球一期开奖：6 个红球 + 1 个蓝球 */
+export function SsqDraw({ draw, size = 'md', hitSet = null, hitBlue = false, danSet = null }) {
+  if (!draw) return null
+  return (
+    <span className="draw-balls ssq-draw">
+      {draw.red.map((n) => {
+        const cls = [hitSet?.has(n) ? 'ball-hit' : '', danSet?.has(n) ? 'ball-dan' : '']
+          .filter(Boolean)
+          .join(' ')
+        return <Ball key={`r${n}`} n={n} kind="red" size={size} className={cls} />
+      })}
+      <span className="ssq-divider" aria-hidden="true" />
+      <Ball n={draw.blue} kind="blue" size={size} className={hitBlue ? 'ball-hit' : ''} />
+    </span>
+  )
+}
+
 export function pad2(n) {
   return String(n).padStart(2, '0')
 }

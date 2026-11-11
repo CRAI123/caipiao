@@ -24,9 +24,21 @@ import FC3DPrize from './components/FC3DPrize.jsx'
 import FC3DAudit from './components/FC3DAudit.jsx'
 import FC3DTerms from './components/FC3DTerms.jsx'
 import FC3DDataManager from './components/FC3DDataManager.jsx'
+import SSQOverview from './components/SSQOverview.jsx'
+import SSQHotCold from './components/SSQHotCold.jsx'
+import SSQPatterns from './components/SSQPatterns.jsx'
+import SSQRepeats from './components/SSQRepeats.jsx'
+import SSQDanTuo from './components/SSQDanTuo.jsx'
+import SSQPrize from './components/SSQPrize.jsx'
+import SSQPredict from './components/SSQPredict.jsx'
+import SSQAudit from './components/SSQAudit.jsx'
+import SSQTerms from './components/SSQTerms.jsx'
+import SSQDataManager from './components/SSQDataManager.jsx'
 import { FC3D_DRAWS } from './data/fc3d.js'
 import { PL3_DRAWS } from './data/pl3.js'
+import { SSQ_DRAWS } from './data/ssq.js'
 import { fetchPl3Draws } from './lib/pl3.js'
+import { fetchSsqDraws } from './lib/ssq.js'
 import * as pl3Engine from './lib/pl3Predict.js'
 import { loadJournal, getRecord } from './lib/journal.js'
 import { loadSettings, isNeonReady } from './lib/settings.js'
@@ -68,6 +80,19 @@ const FC3D_TABS = [
   { id: 'data', label: '数据管理', en: 'DATA' },
 ]
 
+const SSQ_TABS = [
+  { id: 'overview', label: '总览', en: 'OVERVIEW' },
+  { id: 'hotcold', label: '冷热遗漏', en: 'HOT & COLD' },
+  { id: 'patterns', label: '形态走势', en: 'PATTERNS' },
+  { id: 'repeats', label: '重号分析', en: 'REPEATS' },
+  { id: 'dantuo', label: '复式胆拖', en: 'BETS' },
+  { id: 'prize', label: '中奖计算', en: 'PRIZE' },
+  { id: 'predict', label: '下期推荐', en: 'PREDICT' },
+  { id: 'audit', label: '方法体检', en: 'AUDIT' },
+  { id: 'terms', label: '术语大全', en: 'TERMS' },
+  { id: 'data', label: '数据管理', en: 'DATA' },
+]
+
 export default function App() {
   const [draws, setDraws] = useState(HISTORY_DRAWS.length ? HISTORY_DRAWS : SAMPLE_DRAWS)
   const [tab, setTab] = useState('overview')
@@ -76,10 +101,13 @@ export default function App() {
   const [fc3dTab, setFc3dTab] = useState('overview')
   const [pl3Draws, setPl3Draws] = useState(PL3_DRAWS)
   const [pl3Tab, setPl3Tab] = useState('overview')
+  const [ssqDraws, setSsqDraws] = useState(SSQ_DRAWS)
+  const [ssqTab, setSsqTab] = useState('overview')
   const [tick, setTick] = useState(0) // 账本变化后刷新「待打卡」标记
   const usingSample = draws[0]?.sample
   const fc3dUsingSample = fc3dDraws[0]?.sample
   const pl3UsingSample = pl3Draws[0]?.sample
+  const ssqUsingSample = ssqDraws[0]?.sample
 
   // 三位数彩票（福彩3D / 排列三）共用同一套页面与算法，只切换数据源
   const isDigit = lottery === 'fc3d' || lottery === 'pl3'
@@ -217,8 +245,10 @@ export default function App() {
                   <>福彩快乐8 · 数据研究档案 <i>KUAILE 8 RESEARCH LEDGER</i></>
                 ) : lottery === 'fc3d' ? (
                   <>福彩3D · 数据研究档案 <i>FC3D RESEARCH LEDGER</i></>
-                ) : (
+                ) : lottery === 'pl3' ? (
                   <>体彩排列三 · 数据研究档案 <i>PL3 RESEARCH LEDGER</i></>
+                ) : (
+                  <>福彩双色球 · 数据研究档案 <i>SSQ RESEARCH LEDGER</i></>
                 )}
               </p>
             </div>
@@ -230,6 +260,14 @@ export default function App() {
                 <div>选十中十概率 1 / 8,911,711</div>
                 <div className={usingSample ? 'meta-sample' : 'meta-real'}>
                   数据源：{usingSample ? '内置演示数据' : '真实开奖数据'}
+                </div>
+              </>
+            ) : lottery === 'ssq' ? (
+              <>
+                <div>33 选 6 红 + 16 选 1 蓝</div>
+                <div>头奖概率 1 / 17,721,088</div>
+                <div className={ssqUsingSample ? 'meta-sample' : 'meta-real'}>
+                  数据源：{ssqUsingSample ? '内置演示数据' : '真实开奖数据'}
                 </div>
               </>
             ) : (
@@ -266,6 +304,14 @@ export default function App() {
                 onClick={() => setLottery('pl3')}
               >
                 排列三
+              </button>
+              <button
+                role="tab"
+                aria-selected={lottery === 'ssq'}
+                className={`lottery-tab ${lottery === 'ssq' ? 'active' : ''}`}
+                onClick={() => setLottery('ssq')}
+              >
+                双色球
               </button>
               <span className={`lottery-indicator ${lottery}`} />
             </div>
@@ -305,8 +351,36 @@ export default function App() {
         </nav>
       )}
 
+      {lottery === 'ssq' && (
+        <nav className="tabs" aria-label="双色球 页面导航">
+          {SSQ_TABS.map((t) => (
+            <button
+              key={t.id}
+              className={`tab-btn ${ssqTab === t.id ? 'active' : ''}`}
+              onClick={() => setSsqTab(t.id)}
+            >
+              {t.label}
+              <i>{t.en}</i>
+            </button>
+          ))}
+        </nav>
+      )}
+
       <main className="main">
-        {isDigit ? (
+        {lottery === 'ssq' ? (
+          <>
+            {ssqTab === 'overview' && <SSQOverview draws={ssqDraws} />}
+            {ssqTab === 'hotcold' && <SSQHotCold draws={ssqDraws} />}
+            {ssqTab === 'patterns' && <SSQPatterns draws={ssqDraws} />}
+            {ssqTab === 'repeats' && <SSQRepeats draws={ssqDraws} />}
+            {ssqTab === 'dantuo' && <SSQDanTuo draws={ssqDraws} />}
+            {ssqTab === 'prize' && <SSQPrize />}
+            {ssqTab === 'predict' && <SSQPredict draws={ssqDraws} />}
+            {ssqTab === 'audit' && <SSQAudit draws={ssqDraws} />}
+            {ssqTab === 'terms' && <SSQTerms />}
+            {ssqTab === 'data' && <SSQDataManager draws={ssqDraws} setDraws={setSsqDraws} />}
+          </>
+        ) : isDigit ? (
           <>
             {digitTab === 'overview' && <FC3DOverview draws={digitDraws} />}
             {digitTab === 'hotcold' && <FC3DHotCold draws={digitDraws} />}
