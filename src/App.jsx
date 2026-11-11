@@ -47,10 +47,15 @@ import { getSql } from './lib/neon.js'
 import { ensureAccessTables, fetchMyRequest, listAdmins } from './lib/access.js'
 import { getDeviceId } from './lib/device.js'
 
-// 排列三专用推算引擎的算法说明（v1 与福彩3D共用，v2 为排列三模式）
+// 排列三专用推算引擎的算法说明（v1 与福彩3D共用，v2/v3 为排列三模式，pro 为增强档）
 const PL3_ALGO_INFO = {
   v1: { name: '经典综合评分', desc: '热冷+跨度+和值+奇偶+形态+遗漏 8 维度加权评分' },
   v2: { name: '排列三 v3', desc: '多专家概率集成 + 1000 种结果穷举的精确预测分布' },
+  pro: {
+    name: '排列三 Pro',
+    desc: '9 专家 Hedge 自适应权重 + 六维结构约束 + 定位/Top 组合输出',
+    recommend: true,
+  },
 }
 
 const TABS = [
@@ -406,6 +411,8 @@ export default function App() {
                   engine={pl3Engine}
                   defaultPeriods={80}
                   v2Label="精准 v3"
+                  proEnabled
+                  proLabel="排列三 Pro"
                 />
               ) : (
                 <FC3DAudit draws={digitDraws} />

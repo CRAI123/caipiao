@@ -1,5 +1,5 @@
 // 福彩3D 下期推荐 —— 基于多维度术语评分的下期推算 + 上期回算验证
-// 支持 v1（综合评分）与 v2（位置独立+马尔可夫+指数衰减）两种算法
+// 算法档位由 algoInfo 驱动：福彩3D 两档（v1/v2），排列三三档（v1/v2/pro）
 import React, { useMemo, useState } from 'react'
 import * as fc3dEngine from '../lib/fc3dPredict.js'
 
@@ -17,20 +17,24 @@ function DigitBall({ d, hot, cold, omit }) {
 
 const ALGO_INFO = {
   v1: { name: '经典综合评分', desc: '热冷+跨度+和值+奇偶+形态+遗漏 8 维度加权评分' },
-  v2: { name: '精准模式', desc: '位置独立建模 + 马尔可夫转移 + 指数衰减 + 遗漏回补' },
+  v2: { name: '精准模式', desc: '位置独立建模 + 马尔可夫转移 + 指数衰减 + 遗漏回补', recommend: true },
+}
+
+// 档位 → 引擎函数名，避免在组件里写死 if/else
+const ALGO_FN = {
+  v1: { predict: 'predictFC3D', backtest: 'backtestFC3D' },
+  v2: { predict: 'predictFC3Dv2', backtest: 'backtestFC3Dv2' },
+  pro: { predict: 'predictPL3Pro', backtest: 'backtestPL3Pro' },
 }
 
 export default function FC3D({ draws, engine = fc3dEngine, algoInfo = ALGO_INFO, showTiers = false }) {
-  const [algo, setAlgo] = useState('v2')
+  const [algo, setAlgo] = useState(
+    Object.keys(algoInfo).find((k) => algoInfo[k].recommend) || 'v2',
+  )
   const [cover, setCover] = useState(6)
-  const pred = useMemo(
-    () => (algo === 'v2' ? engine.predictFC3Dv2(draws, { cover }) : engine.predictFC3D(draws)),
-    [draws, algo, engine, cover],
-  )
-  const backtest = useMemo(
-    () => (algo === 'v2' ? engine.backtestFC3Dv2(draws) : engine.backtestFC3D(draws)),
-    [draws, algo, engine],
-  )
+  const fn = ALGO_FN[algo] || ALGO_FN.v2
+  const pred = useMemo(() => engine[fn.predict](draws, { cover }), [draws, engine, fn.predict, cover])
+  const backtest = useMemo(() => engine[fn.backtest](draws), [draws, engine, fn.backtest])
 
   if (!pred) {
     return (
@@ -58,7 +62,7 @@ export default function FC3D({ draws, engine = fc3dEngine, algoInfo = ALGO_INFO,
               onClick={() => setAlgo(k)}
             >
               {v.name}
-              {k === 'v2' && <em style={{ color: 'var(--red)' }}> · 推荐</em>}
+              {v.recommend && <em style={{ color: 'var(--red)' }}> · 推荐</em>}
             </button>
           ))}
         </div>
@@ -170,6 +174,81 @@ export default function FC3D({ draws, engine = fc3dEngine, algoInfo = ALGO_INFO,
                 ))}
               </span>
             ))}
+          </div>
+        </div>
+      )}
+
+      {/* Pro 增强输出：结构约束后的 Top 组合 + 直选方案 + 专家权重 */}
+      {pred.topCombos && (
+        <div className="odd-card">
+          <div className="odd-card-head">
+            <h3>Pro 增强输出</h3>
+            <span className="muted small">
+              9 专家自适应集成 · 结构约束强度 β={pred.structBeta}
+            </span>
+          </div>
+
+          <div className="table-scroll">
+            <table className="ledger-table">
+              <thead>
+                <tr>
+                  <th>排名</th>
+                  <th>号码</th>
+                  <th>模型概率</th>
+                  <th>相对提升</th>
+                  <th>和值</th>
+                  <th>跨度</th>
+                  <th>形态</th>
+                </tr>
+              </thead>
+              <tbody>
+                {pred.topCombos.map((c) => (
+                  <tr key={c.num.join('-')}>
+                    <td className="mono">{c.rank}</td>
+                    <td className="mono">
+                      <b>{c.num.join(' ')}</b>
+                    </td>
+                    <td className="mono">{c.prob}%</td>
+                    <td className="mono">×{c.lift}</td>
+                    <td className="mono">{c.sum}</td>
+                    <td className="mono">{c.span}</td>
+                    <td>{c.form}</td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+
+          <div className="chip-row" style={{ marginTop: 12 }}>
+            <span className="chip">
+              <i>
+                直选方案 {pred.directPlan.bets} 注 · {pred.directPlan.cost} 元
+              </i>
+            </span>
+            {['百', '十', '个'].map((label, i) => (
+              <span key={label} className="chip">
+                <i>
+                  {label}位 {pred.directPlan.pos[i].join(' ')}
+                </i>
+              </span>
+            ))}
+          </div>
+
+          <div className="predict-sub" style={{ marginTop: 14 }}>专家当前权重（Hedge 自适应，%）</div>
+          <div className="chip-row">
+            {pred.expertWeights.map((e) => (
+              <span key={e.key} className="chip">
+                <i>
+                  {e.name} {e.weight}
+                </i>
+              </span>
+            ))}
+          </div>
+
+          <div className="note note-info" style={{ marginTop: 12 }}>
+            权重不是手工拍的：每个专家先在最近 24 期上按对数损失打分，越准权重越高，所以权重接近均匀
+            恰恰说明没有哪个专家真的更懂未来。Top 组合的「相对提升」是结构约束加权后的概率相对原始
+            位置模型的倍数，只代表推荐区更集中，<b>不代表单注中奖概率变高</b>。
           </div>
         </div>
       )}

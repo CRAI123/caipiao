@@ -1,10 +1,13 @@
 // 福彩3D 方法体检 —— 滚动回测：每期只用「之前」的数据预测，与真实开奖对比
-// 支持 v1 / v2 双算法对比
+// 排列三额外提供 Pro 档位（9 专家 + Hedge 自适应权重 + 结构约束）
 import React, { useMemo, useState } from 'react'
 import { Card, Note, StatCard } from './common.jsx'
 import * as fc3dEngine from '../lib/fc3dPredict.js'
 
 const PERIODS = [20, 30, 50, 80]
+
+const AUDIT_FN = { v1: 'walkForwardAuditFC3D', v2: 'walkForwardAuditFC3Dv2', pro: 'walkForwardAuditPL3Pro' }
+const PREDICT_FN = { v1: 'predictFC3D', v2: 'predictFC3Dv2', pro: 'predictPL3Pro' }
 
 function Digit({ d, hit }) {
   return (
@@ -14,31 +17,39 @@ function Digit({ d, hit }) {
   )
 }
 
-export default function FC3DAudit({ draws, engine = fc3dEngine, defaultPeriods = 30, v2Label = '精准 v2' }) {
+export default function FC3DAudit({
+  draws,
+  engine = fc3dEngine,
+  defaultPeriods = 30,
+  v2Label = '精准 v2',
+  proEnabled = false,
+  proLabel = '排列三 Pro',
+}) {
   const [periods, setPeriods] = useState(defaultPeriods)
-  const [algo, setAlgo] = useState('v2')
+  const [algo, setAlgo] = useState(proEnabled ? 'pro' : 'v2')
 
   const audit = useMemo(
-    () => (algo === 'v2'
-      ? engine.walkForwardAuditFC3Dv2(draws, { periods, minTrain: 20 })
-      : engine.walkForwardAuditFC3D(draws, { periods, minTrain: 20 })),
+    () => engine[AUDIT_FN[algo]](draws, { periods, minTrain: algo === 'pro' ? 40 : 20 }),
     [draws, periods, algo, engine],
   )
 
-  // v1 vs v2 对比
+  // v1 vs v2（vs Pro）对比
   const compare = useMemo(() => {
     if (draws.length < 40) return null
     const a1 = engine.walkForwardAuditFC3D(draws, { periods, minTrain: 20 })
     const a2 = engine.walkForwardAuditFC3Dv2(draws, { periods, minTrain: 20 })
-    return { a1, a2 }
-  }, [draws, periods, engine])
+    const a3 = proEnabled
+      ? engine.walkForwardAuditPL3Pro(draws, { periods, minTrain: 40 })
+      : null
+    return { a1, a2, a3 }
+  }, [draws, periods, engine, proEnabled])
 
   // 最新一期的回滚验证
   const rollback = useMemo(() => {
     if (draws.length < 21) return null
     const train = draws.slice(1)
     const actual = draws[0]
-    const pred = algo === 'v2' ? engine.predictFC3Dv2(train) : engine.predictFC3D(train)
+    const pred = engine[PREDICT_FN[algo]](train)
     if (!pred) return null
     const a = engine.analyzeDraw(actual.num)
     const allRec = [...pred.dan, ...pred.tuo]
@@ -76,6 +87,11 @@ export default function FC3DAudit({ draws, engine = fc3dEngine, defaultPeriods =
         <span className="toolbar-label">算法</span>
         <button className={`tab-btn ${algo === 'v1' ? 'active' : ''}`} onClick={() => setAlgo('v1')}>经典 v1</button>
         <button className={`tab-btn ${algo === 'v2' ? 'active' : ''}`} onClick={() => setAlgo('v2')}>{v2Label}</button>
+        {proEnabled && (
+          <button className={`tab-btn ${algo === 'pro' ? 'active' : ''}`} onClick={() => setAlgo('pro')}>
+            {proLabel}
+          </button>
+        )}
       </div>
 
       <Note>
@@ -83,7 +99,7 @@ export default function FC3DAudit({ draws, engine = fc3dEngine, defaultPeriods =
         再和该期真实开奖对答案。这样预测时看不到未来，结果才是对方法本身的公平检验。
       </Note>
 
-      {/* v1 vs v2 对比 */}
+      {/* v1 vs v2 vs Pro 对比 */}
       {compare && (
         <Card title="算法对比" tag={`近 ${periods} 期滚动回测`}>
           <div className="table-scroll">
@@ -93,6 +109,7 @@ export default function FC3DAudit({ draws, engine = fc3dEngine, defaultPeriods =
                   <th>指标</th>
                   <th>经典 v1</th>
                   <th>{v2Label}</th>
+                  {proEnabled && <th>{proLabel}</th>}
                   <th>机选基准</th>
                 </tr>
               </thead>
@@ -101,38 +118,60 @@ export default function FC3DAudit({ draws, engine = fc3dEngine, defaultPeriods =
                   <td>平均组选命中</td>
                   <td className="mono">{compare.a1.avgHits}</td>
                   <td className="mono"><b>{compare.a2.avgHits}</b></td>
+                  {proEnabled && <td className="mono"><b>{compare.a3?.avgHits}</b></td>}
                   <td className="mono muted">{compare.a1.baseline}</td>
                 </tr>
                 <tr>
                   <td>跨度命中率</td>
                   <td className="mono">{compare.a1.spanRate}%</td>
                   <td className="mono"><b>{compare.a2.spanRate}%</b></td>
+                  {proEnabled && <td className="mono"><b>{compare.a3?.spanRate}%</b></td>}
                   <td className="muted">—</td>
                 </tr>
                 <tr>
                   <td>和值命中率</td>
                   <td className="mono">{compare.a1.sumRate}%</td>
                   <td className="mono"><b>{compare.a2.sumRate}%</b></td>
+                  {proEnabled && <td className="mono"><b>{compare.a3?.sumRate}%</b></td>}
                   <td className="muted">—</td>
                 </tr>
                 <tr>
                   <td>奇偶命中率</td>
                   <td className="mono">{compare.a1.oddRate}%</td>
                   <td className="mono">{compare.a2.oddRate}%</td>
+                  {proEnabled && <td className="mono"><b>{compare.a3?.oddRate}%</b></td>}
                   <td className="muted">—</td>
                 </tr>
                 <tr>
                   <td>形态命中率</td>
                   <td className="mono">{compare.a1.formRate}%</td>
                   <td className="mono">{compare.a2.formRate}%</td>
+                  {proEnabled && <td className="mono">{compare.a3?.formRate}%</td>}
                   <td className="muted">—</td>
                 </tr>
+                {proEnabled && (
+                  <tr>
+                    <td>定位至少中 1 位</td>
+                    <td className="muted">—</td>
+                    <td className="muted">—</td>
+                    <td className="mono"><b>{compare.a3?.posRate}%</b></td>
+                    <td className="muted">—</td>
+                  </tr>
+                )}
               </tbody>
             </table>
           </div>
           <Note>
             {v2Label} 用四个窗口的频率 + 位置转移合成概率，再穷举 1000 种结果得到和值/跨度/奇偶的
-            精确分布，区间按覆盖 80% 取最短段落，所以跨度、和值、奇偶命中率明显更高；
+            精确分布，区间按覆盖 80% 取最短段落，所以跨度、和值、奇偶命中率明显更高。
+            {proEnabled && (
+              <>
+                {' '}
+                {proLabel} 在此基础上换成 9 个专家并用 Hedge 自动定权重，再叠加跨度/和值/形态/奇偶/
+                和值尾/重号六个结构约束，区间宽度不变但命中率略高；数字命中与 v2 的差距仍在随机波动内。
+              </>
+            )}
+            <br />
             但<b>数字平均命中仍在 1.8 附近</b>，与机选基准几乎重合——这正是独立随机事件的诚实结论。
           </Note>
         </Card>
