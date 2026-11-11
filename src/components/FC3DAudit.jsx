@@ -9,6 +9,31 @@ const PERIODS = [20, 30, 50, 80]
 const AUDIT_FN = { v1: 'walkForwardAuditFC3D', v2: 'walkForwardAuditFC3Dv2', pro: 'walkForwardAuditPL3Pro' }
 const PREDICT_FN = { v1: 'predictFC3D', v2: 'predictFC3Dv2', pro: 'predictPL3Pro' }
 
+// 3 位 0-9 均匀开奖下的精确分布，用来算「给定取值个数时的命中率上限」
+const SUM_DIST = (() => {
+  const c = Array(28).fill(0)
+  for (let a = 0; a < 10; a++) for (let b = 0; b < 10; b++) for (let d = 0; d < 10; d++) c[a + b + d]++
+  return c.map((v) => v / 1000)
+})()
+const SPAN_DIST = (() => {
+  const c = Array(10).fill(0)
+  for (let a = 0; a < 10; a++) {
+    for (let b = 0; b < 10; b++) {
+      for (let d = 0; d < 10; d++) c[Math.max(a, b, d) - Math.min(a, b, d)]++
+    }
+  }
+  return c.map((v) => v / 1000)
+})()
+function bestCoverage(dist, width) {
+  let m = 0
+  for (let i = 0; i + width < dist.length; i++) {
+    let s = 0
+    for (let j = i; j <= i + width; j++) s += dist[j]
+    if (s > m) m = s
+  }
+  return +((m || 0) * 100).toFixed(1)
+}
+
 function Digit({ d, hit }) {
   return (
     <span className={`digit-ball ${hit ? 'hot' : ''}`} style={hit ? {} : { opacity: 0.45 }}>
@@ -43,6 +68,25 @@ export default function FC3DAudit({
       : null
     return { a1, a2, a3 }
   }, [draws, periods, engine, proEnabled])
+
+  // 理论上限：由实际给出的取值个数反推，与任何算法无关
+  const ceiling = useMemo(() => {
+    if (!compare) return null
+    const avgWidth = (key) => {
+      const rows = compare.a2.rows
+      if (!rows.length) return 0
+      return rows.reduce((s, r) => s + (r.prediction[key][1] - r.prediction[key][0]), 0) / rows.length
+    }
+    const oddCount = compare.a2.rows[0]?.prediction.recommendedOdd.length || 6
+    return {
+      hits: compare.a1.baseline,
+      span: bestCoverage(SPAN_DIST, Math.round(avgWidth('spanRange'))),
+      sum: bestCoverage(SUM_DIST, Math.round(avgWidth('sumRange'))),
+      odd: +((oddCount / 8) * 100).toFixed(1),
+      form: 99.9,
+      pos: 48.8, // 每位取 2 码时，至少中 1 位的概率 = 1 - 0.8³
+    }
+  }, [compare])
 
   // 最新一期的回滚验证
   const rollback = useMemo(() => {
@@ -111,6 +155,7 @@ export default function FC3DAudit({
                   <th>{v2Label}</th>
                   {proEnabled && <th>{proLabel}</th>}
                   <th>机选基准</th>
+                  <th>理论上限</th>
                 </tr>
               </thead>
               <tbody>
@@ -120,6 +165,7 @@ export default function FC3DAudit({
                   <td className="mono"><b>{compare.a2.avgHits}</b></td>
                   {proEnabled && <td className="mono"><b>{compare.a3?.avgHits}</b></td>}
                   <td className="mono muted">{compare.a1.baseline}</td>
+                  <td className="mono muted">{ceiling?.hits}</td>
                 </tr>
                 <tr>
                   <td>跨度命中率</td>
@@ -127,6 +173,7 @@ export default function FC3DAudit({
                   <td className="mono"><b>{compare.a2.spanRate}%</b></td>
                   {proEnabled && <td className="mono"><b>{compare.a3?.spanRate}%</b></td>}
                   <td className="muted">—</td>
+                  <td className="mono muted">{ceiling?.span}%</td>
                 </tr>
                 <tr>
                   <td>和值命中率</td>
@@ -134,6 +181,7 @@ export default function FC3DAudit({
                   <td className="mono"><b>{compare.a2.sumRate}%</b></td>
                   {proEnabled && <td className="mono"><b>{compare.a3?.sumRate}%</b></td>}
                   <td className="muted">—</td>
+                  <td className="mono muted">{ceiling?.sum}%</td>
                 </tr>
                 <tr>
                   <td>奇偶命中率</td>
@@ -141,6 +189,7 @@ export default function FC3DAudit({
                   <td className="mono">{compare.a2.oddRate}%</td>
                   {proEnabled && <td className="mono"><b>{compare.a3?.oddRate}%</b></td>}
                   <td className="muted">—</td>
+                  <td className="mono muted">{ceiling?.odd}%</td>
                 </tr>
                 <tr>
                   <td>形态命中率</td>
@@ -148,6 +197,7 @@ export default function FC3DAudit({
                   <td className="mono">{compare.a2.formRate}%</td>
                   {proEnabled && <td className="mono">{compare.a3?.formRate}%</td>}
                   <td className="muted">—</td>
+                  <td className="mono muted">{ceiling?.form}%</td>
                 </tr>
                 {proEnabled && (
                   <tr>
@@ -156,6 +206,7 @@ export default function FC3DAudit({
                     <td className="muted">—</td>
                     <td className="mono"><b>{compare.a3?.posRate}%</b></td>
                     <td className="muted">—</td>
+                    <td className="mono muted">{ceiling?.pos}%</td>
                   </tr>
                 )}
               </tbody>
@@ -163,7 +214,7 @@ export default function FC3DAudit({
           </div>
           <Note>
             {v2Label} 用四个窗口的频率 + 位置转移合成概率，再穷举 1000 种结果得到和值/跨度/奇偶的
-            精确分布，区间按覆盖 80% 取最短段落，所以跨度、和值、奇偶命中率明显更高。
+            精确分布，区间按覆盖目标取最短段落（80% → 奇偶取 7 种，上限 87.5%）。
             {proEnabled && (
               <>
                 {' '}
@@ -172,7 +223,8 @@ export default function FC3DAudit({
               </>
             )}
             <br />
-            但<b>数字平均命中仍在 1.8 附近</b>，与机选基准几乎重合——这正是独立随机事件的诚实结论。
+            <b>「理论上限」列</b>是按同样取值个数、在真实均匀分布下能拿到的最高命中率。可以看到实测值
+            已经贴着上限——想再高只能加宽区间（多加取值），那是纯粹的覆盖面扩张，没有任何信息增益。
           </Note>
         </Card>
       )}

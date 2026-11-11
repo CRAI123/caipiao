@@ -164,7 +164,7 @@ function buildTiers(rankedDigits) {
  * 排列三下期推算（字段与 3D v2 完全兼容，页面可直接复用）。
  * cover：覆盖码数（6/7/8），只影响推荐码的个数，不影响任何单注概率。
  */
-export function predictFC3Dv2(draws, { cover = 6 } = {}) {
+export function predictFC3Dv2(draws, { cover = 6, coverRate = 0.8 } = {}) {
   const base = basePredictV2(draws)
   if (!base) return null
   if (draws.length < 10) return base
@@ -202,17 +202,18 @@ export function predictFC3Dv2(draws, { cover = 6 } = {}) {
     }))
     .sort((a, b) => b.score - a.score)
 
-  // --- 3. 和值 / 跨度：最短的 75% 覆盖区间 ---
-  const sumRange = shortestInterval(sumDist, 0, 27, CFG.coverSum)
-  const spanRange = shortestInterval(spanDist, 0, 9, CFG.coverSpan)
+  // --- 3. 和值 / 跨度：按覆盖目标取最短区间 ---
+  const sumRange = shortestInterval(sumDist, 0, 27, coverRate)
+  const spanRange = shortestInterval(spanDist, 0, 9, coverRate)
 
   const sums = draws.slice(0, 300).map((d) => analyzeDraw(d.num).sum)
   const spans = draws.slice(0, 300).map((d) => analyzeDraw(d.num).span)
 
-  // --- 4. 奇偶：概率最高的 6 个形态 ---
+  // --- 4. 奇偶：8 种形态本身等概率，按覆盖目标取前 k 个 ---
+  const oddCount = Math.min(8, Math.max(1, Math.ceil(coverRate * 8)))
   const recommendedOdd = Object.entries(oddDist)
     .sort((a, b) => b[1] - a[1])
-    .slice(0, CFG.oddTop)
+    .slice(0, oddCount)
     .map(([pat]) => pat)
 
   // --- 5. 形态：概率最高的 Top2 ---
@@ -247,6 +248,8 @@ export function predictFC3Dv2(draws, { cover = 6 } = {}) {
     spanMode: modeOf(spans),
     recommendedOdd,
     recommendedForms,
+    coverRate,
+    oddCount,
     oddEven: { ...buildOddEven(draws, 50), ranked: base.oddEven.ranked, recommendedPatterns: recommendedOdd },
     kill,
     cover,
@@ -319,9 +322,6 @@ const PRO = {
   structWindow: 120,
   structBlend: 0.2, // 近期分布 vs 长期分布的混合比例
   structBeta: 0.45, // 结构约束强度（0 = 关闭）
-  coverSum: 0.85,
-  coverSpan: 0.85,
-  oddTop: 6,
   topCombos: 10,
 }
 
@@ -520,7 +520,7 @@ function structLogProb(s, model) {
  * 排列三 Pro 推算。
  * 返回值与 v2/v3 完全兼容，另附 topCombos / expertWeights / structBeta 等增强字段。
  */
-export function predictPL3Pro(draws, { cover = 6, beta = PRO.structBeta } = {}) {
+export function predictPL3Pro(draws, { cover = 6, beta = PRO.structBeta, coverRate = 0.8 } = {}) {
   const base = basePredictV2(draws)
   if (!base) return null
   // 样本太少时退化为 v3，避免二阶转移和结构模型没有统计意义
@@ -621,11 +621,12 @@ export function predictPL3Pro(draws, { cover = 6, beta = PRO.structBeta } = {}) 
       form: formName[x.s.form],
     }))
 
-  const sumRange = shortestInterval(sumDist, 0, 27, PRO.coverSum)
-  const spanRange = shortestInterval(spanDist, 0, 9, PRO.coverSpan)
+  const sumRange = shortestInterval(sumDist, 0, 27, coverRate)
+  const spanRange = shortestInterval(spanDist, 0, 9, coverRate)
+  const oddCount = Math.min(8, Math.max(1, Math.ceil(coverRate * 8)))
   const recommendedOdd = Object.entries(oddDist)
     .sort((a, b) => b[1] - a[1])
-    .slice(0, PRO.oddTop)
+    .slice(0, oddCount)
     .map(([pat]) => pat)
   const recommendedForms = formDist
     .map((v, i) => ({ name: formName[i], v }))
@@ -672,6 +673,8 @@ export function predictPL3Pro(draws, { cover = 6, beta = PRO.structBeta } = {}) 
     spanMode: modeOf(spans),
     recommendedOdd,
     recommendedForms,
+    coverRate,
+    oddCount,
     oddEven: { ...buildOddEven(draws, 50), ranked: base.oddEven.ranked, recommendedPatterns: recommendedOdd },
     kill,
     cover,

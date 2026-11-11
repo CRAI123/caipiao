@@ -32,8 +32,12 @@ export default function FC3D({ draws, engine = fc3dEngine, algoInfo = ALGO_INFO,
     Object.keys(algoInfo).find((k) => algoInfo[k].recommend) || 'v2',
   )
   const [cover, setCover] = useState(6)
+  const [coverRate, setCoverRate] = useState(0.8)
   const fn = ALGO_FN[algo] || ALGO_FN.v2
-  const pred = useMemo(() => engine[fn.predict](draws, { cover }), [draws, engine, fn.predict, cover])
+  const pred = useMemo(
+    () => engine[fn.predict](draws, { cover, coverRate }),
+    [draws, engine, fn.predict, cover, coverRate],
+  )
   const backtest = useMemo(() => engine[fn.backtest](draws), [draws, engine, fn.backtest])
 
   if (!pred) {
@@ -65,6 +69,23 @@ export default function FC3D({ draws, engine = fc3dEngine, algoInfo = ALGO_INFO,
               {v.recommend && <em style={{ color: 'var(--red)' }}> · 推荐</em>}
             </button>
           ))}
+        </div>
+        <div className="algo-toggle" style={{ marginTop: 8 }}>
+          <span className="muted small" style={{ alignSelf: 'center', marginRight: 6 }}>
+            区间覆盖目标
+          </span>
+          {[0.7, 0.8, 0.85, 0.9].map((r) => (
+            <button
+              key={r}
+              className={`tab-btn ${coverRate === r ? 'active' : ''}`}
+              onClick={() => setCoverRate(r)}
+            >
+              {Math.round(r * 100)}%
+            </button>
+          ))}
+          <span className="muted small" style={{ alignSelf: 'center', marginLeft: 6 }}>
+            目标越高，区间越宽、命中率越高，但没有任何信息增益
+          </span>
         </div>
       </div>
 
@@ -279,25 +300,36 @@ export default function FC3D({ draws, engine = fc3dEngine, algoInfo = ALGO_INFO,
           <div className="metric-value">
             {pred.spanRange[0]} – {pred.spanRange[1]}
           </div>
-          <div className="metric-sub">均值 {pred.spanAvg} · 众数 {pred.spanMode}</div>
+          <div className="metric-sub">
+            取 {pred.spanRange[1] - pred.spanRange[0] + 1} 个值 · 均值 {pred.spanAvg} · 众数 {pred.spanMode}
+          </div>
         </div>
         <div className="metric-card">
           <div className="metric-name">和值</div>
           <div className="metric-value">
             {pred.sumRange[0]} – {pred.sumRange[1]}
           </div>
-          <div className="metric-sub">均值 {pred.sumAvg} · 众数 {pred.sumMode}</div>
+          <div className="metric-sub">
+            取 {pred.sumRange[1] - pred.sumRange[0] + 1} 个值 · 均值 {pred.sumAvg} · 众数 {pred.sumMode}
+          </div>
         </div>
         <div className="metric-card">
           <div className="metric-name">奇偶形态</div>
           <div className="metric-value">{pred.recommendedOdd.slice(0, 2).join(' / ')}</div>
-          <div className="metric-sub">主推 {pred.oddEven?.recommendedMacro || '—'} · 位置节奏加权</div>
+          <div className="metric-sub">
+            取 {pred.recommendedOdd.length} 种 · 上限 {((pred.recommendedOdd.length / 8) * 100).toFixed(1)}%
+          </div>
         </div>
         <div className="metric-card">
           <div className="metric-name">推荐形态</div>
           <div className="metric-value">{pred.recommendedForms.join(' / ')}</div>
           <div className="metric-sub">近50期出现频率</div>
         </div>
+      </div>
+
+      <div className="note note-warn" style={{ marginTop: 12 }}>
+        和值、跨度、奇偶的「准确率」由取值个数决定：奇偶 8 种形态真实概率各为 1/8，取 7 种的上限就是
+        87.5%，取 6 种只有 75%；和值取 13 个值的上限约 80%。这不是算法能突破的，只是覆盖宽度的算术结果。
       </div>
 
       {/* 奇偶专项 */}

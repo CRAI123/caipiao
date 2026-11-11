@@ -676,7 +676,7 @@ function meanStd(arr) {
  * - 综合评分选出胆码/拖码
  * - 和值/跨度用正态区间（均值±1σ）
  */
-export function predictFC3Dv2(draws) {
+export function predictFC3Dv2(draws, { coverRate = 0.8 } = {}) {
   if (draws.length < 10) return null
   const last = draws[0]
   const lastAnalysis = analyzeDraw(last.num)
@@ -750,17 +750,20 @@ export function predictFC3Dv2(draws) {
     s.map((v, d) => ({ d, v })).sort((a, b) => b.v - a.v).slice(0, 2).map((x) => x.d),
   )
 
-  // --- 和值/跨度：正态区间（均值±1σ） ---
+  // --- 和值/跨度：正态区间，宽度由覆盖目标决定（0.8 → ±1.28σ） ---
+  const Z = { 0.7: 1.036, 0.75: 1.15, 0.8: 1.282, 0.85: 1.44, 0.9: 1.645 }
+  const z = Z[coverRate] || Z[0.8]
   const sums = recentDraws.map((d) => analyzeDraw(d.num).sum)
   const spans = recentDraws.map((d) => analyzeDraw(d.num).span)
   const sumStat = meanStd(sums)
   const spanStat = meanStd(spans)
-  const sumRange = [Math.max(0, Math.round(sumStat.mean - sumStat.std)), Math.min(27, Math.round(sumStat.mean + sumStat.std))]
-  const spanRange = [Math.max(0, Math.round(spanStat.mean - spanStat.std)), Math.min(9, Math.round(spanStat.mean + spanStat.std))]
+  const sumRange = [Math.max(0, Math.round(sumStat.mean - z * sumStat.std)), Math.min(27, Math.round(sumStat.mean + z * sumStat.std))]
+  const spanRange = [Math.max(0, Math.round(spanStat.mean - z * spanStat.std)), Math.min(9, Math.round(spanStat.mean + z * spanStat.std))]
 
-  // --- 奇偶专项模型 ---
+  // --- 奇偶专项模型：8 种形态本身等概率，按覆盖目标取前 k 个 ---
   const oddEven = buildOddEven(draws, 50)
-  const recommendedOdd = oddEven.recommendedPatterns
+  const oddCount = Math.min(8, Math.max(1, Math.ceil(coverRate * 8)))
+  const recommendedOdd = oddEven.ranked.slice(0, oddCount).map((p) => p.pattern)
 
   // --- 形态推荐（近期 Top2） ---
   const formDist = {}
@@ -789,6 +792,8 @@ export function predictFC3Dv2(draws) {
     sumAvg: sumStat.mean,
     recommendedOdd,
     recommendedForms,
+    coverRate,
+    oddCount,
     oddEven,
     road012,
     repeatNeighbor,
