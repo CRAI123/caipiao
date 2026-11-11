@@ -1,12 +1,13 @@
 // ============================================================
 // 每日推荐推送 —— Vercel Cron（14:00 Asia/Shanghai = 06:00 UTC）
-// 计算快乐8 / 福彩3D 下期参考号码，推送到飞书自定义机器人 Webhook。
+// 计算快乐8 / 福彩3D / 排列三 / 双色球 下期参考号码，推送到飞书自定义机器人 Webhook。
+// 每个彩种都走站内当前最强算法：排列三 = Pro（9 专家 Hedge 权重 + 结构约束）。
 //
 // 配置来源（优先数据库）：
 //   1) Neon admin_config 表 key = 'daily_push_config'
 //      value = {"webhook":"https://open.feishu.cn/open-apis/bot/v2/hook/xxx",
 //               "secret":"（可选，机器人开启签名校验时必填）",
-//               "kl8":true,"fc3d":true,"pl3":true}
+//               "kl8":true,"fc3d":true,"pl3":true,"ssq":true}
 //   2) 环境变量 FEISHU_WEBHOOK_URL / FEISHU_WEBHOOK_SECRET
 //
 // 手动触发：GET /api/daily-push?test=1
@@ -16,9 +17,11 @@ import { getSql, readConfig, writeConfig } from './_lib/neon.js'
 import { fetchKl8Draws } from './_lib/kl8.js'
 import { fetchFc3dDraws } from './_lib/fc3d.js'
 import { fetchPl3Draws } from './_lib/pl3.js'
+import { fetchSsqDraws } from './_lib/ssq.js'
 import { scoreBalls, pickBalanced, BALL_MAX } from '../src/lib/stats.js'
 import { predictFC3Dv2 } from '../src/lib/fc3dPredict.js'
-import { predictFC3Dv2 as predictPl3 } from '../src/lib/pl3Predict.js'
+import { predictPL3Pro } from '../src/lib/pl3Predict.js'
+import { predictSSQ } from '../src/lib/ssqPredict.js'
 import { applyCors } from './_lib/http.js'
 
 const CONFIG_KEY = 'daily_push_config'
@@ -30,11 +33,13 @@ const shDate = (d = new Date()) =>
   new Intl.DateTimeFormat('en-CA', { timeZone: 'Asia/Shanghai' }).format(d)
 
 /**
- * 三个彩种都是每天开一期，14:00 推送时最新一期应当是「昨天」。
- * fresh=false 表示数据源还没更新，卡片顶部会亮红字提醒。
+ * 判断数据是否够新。
+ * 快乐8 / 3D / 排列三 每天开一期，14:00 推送时最新一期应当是「昨天」（maxAgeDays=1）；
+ * 双色球每周二、四、日开奖，14:00 推送时最新一期最多是 3 天前，所以放宽到 4 天。
+ * state='stale' 表示数据源还没更新，卡片顶部会亮红字提醒。
  */
-function freshness(latest) {
-  const expected = shDate(new Date(Date.now() - 86400000))
+function freshness(latest, maxAgeDays = 1) {
+  const expected = shDate(new Date(Date.now() - 86400000 * maxAgeDays))
   const date = latest?.date || null
   if (!date) return { state: 'unknown', expected, date: null, id: latest?.id ?? null }
   return {
@@ -79,6 +84,7 @@ async function loadConfig() {
     kl8: cfg.kl8 !== false,
     fc3d: cfg.fc3d !== false,
     pl3: cfg.pl3 !== false,
+    ssq: cfg.ssq !== false,
   }
 }
 
@@ -103,9 +109,16 @@ function buildFc3d(draws) {
   return { latest: draws[0], pred: p }
 }
 
-/** 排列三：走排列三专用 v3 引擎（多专家集成 + 精确分布） */
+/** 排列三：走 Pro 档（9 专家 Hedge 自适应权重 + 六维结构约束），站内概率最高的一档 */
 function buildPl3(draws) {
-  const p = predictPl3(draws)
+  const p = predictPL3Pro(draws)
+  if (!p) return null
+  return { latest: draws[0], pred: p }
+}
+
+/** 双色球：红球结构评分枚举 + 蓝球周期/振荡评分 */
+function buildSsq(draws) {
+  const p = predictSSQ(draws)
   if (!p) return null
   return { latest: draws[0], pred: p }
 }
@@ -200,6 +213,41 @@ function buildPl3Card(pl3, title, warning) {
   return buildFc3dCard(pl3, title, { template: 'orange', extra, warning })
 }
 
+/** 双色球卡：绿头，6 红 + 1 蓝 + 结构 + 覆盖档位 */
+function buildSsqCard(ssq, title, warning) {
+  const p = ssq.pred
+  const s = p.structure
+  const tiers = p.tiers || []
+  return buildCard({
+    title,
+    template: 'green',
+    warning,
+    blocks: [
+      line(
+        `上期开奖：红 ${grey(ssq.latest.red.map(pad).join(' '))}　蓝 ${grey(pad(ssq.latest.blue))}`,
+      ),
+      HR,
+      line(`**推荐 6 红**\n<font color='red'>${p.red.map(pad).join(' ')}</font>`),
+      line(
+        `**推荐蓝球** <font color='red'>${pad(p.blue)}</font>　备选 ${p.blueBackups
+          .map(pad)
+          .join(' ')}`,
+      ),
+      HR,
+      line(
+        `和值 ${s.sum}　跨度 ${s.span}　三区 ${s.zone3.join(':')}　大小 ${s.big}:${s.small}　奇偶 ${s.odd}:${s.even}`,
+      ),
+      line(`杀红 ${grey(p.kill.map(pad).join(' '))}`),
+      HR,
+      line(
+        `**覆盖档位** ${tiers
+          .map((t) => `${t.cover}码 ${t.expectHits}个/${t.cost}元`)
+          .join('　')}`,
+      ),
+    ],
+  })
+}
+
 /** 飞书自定义机器人签名：以 "timestamp\\nsecret" 为密钥，对空串做 HMAC-SHA256 */
 function feishuSign(secret, timestamp) {
   if (!secret) return {}
@@ -242,49 +290,54 @@ export default async function handler(req, res) {
       })
     }
 
-    // 并行走三个数据源，单个失败不影响其它
-    let [kl8Res, fc3dRes, pl3Res] = await Promise.allSettled([
+    // 并行走四个数据源，单个失败不影响其它
+    let [kl8Res, fc3dRes, pl3Res, ssqRes] = await Promise.allSettled([
       cfg.kl8 ? fetchKl8Draws(100) : Promise.resolve(null),
       cfg.fc3d ? fetchFc3dDraws(100) : Promise.resolve(null),
       cfg.pl3 ? fetchPl3Draws(100) : Promise.resolve(null),
+      cfg.ssq ? fetchSsqDraws(100) : Promise.resolve(null),
     ])
 
-    // 数据源偶发缓存：抓到的最新一期还停在旧日期时，等 1.5 秒补抓一次（三路并行，不叠加耗时）
+    // 数据源偶发缓存：抓到的最新一期还停在旧日期时，等 1.5 秒补抓一次（四路并行，不叠加耗时）
     const drawsOf = (r) =>
       r.status === 'fulfilled' && r.value ? (Array.isArray(r.value) ? r.value : r.value.draws) : null
-    const refetchIfStale = async (r, enabled, fn) => {
+    const refetchIfStale = async (r, enabled, fn, maxAgeDays = 1) => {
       const list = drawsOf(r)
       if (!enabled || !list?.length) return r
-      if (freshness(list[0]).state !== 'stale') return r
+      if (freshness(list[0], maxAgeDays).state !== 'stale') return r
       await new Promise((ok) => setTimeout(ok, FRESH_RETRY_MS))
       const [again] = await Promise.allSettled([fn(100)])
       const retried = drawsOf(again)
       // 补抓没变新就保留原结果，至少还能发出去
       return retried?.length ? again : r
     }
-    ;[kl8Res, fc3dRes, pl3Res] = await Promise.all([
+    ;[kl8Res, fc3dRes, pl3Res, ssqRes] = await Promise.all([
       refetchIfStale(kl8Res, cfg.kl8, fetchKl8Draws),
       refetchIfStale(fc3dRes, cfg.fc3d, fetchFc3dDraws),
       refetchIfStale(pl3Res, cfg.pl3, fetchPl3Draws),
+      refetchIfStale(ssqRes, cfg.ssq, fetchSsqDraws, 4),
     ])
 
     const kl8 = kl8Res.status === 'fulfilled' && kl8Res.value ? buildKl8(kl8Res.value) : null
     const fc3d = fc3dRes.status === 'fulfilled' && fc3dRes.value ? buildFc3d(fc3dRes.value) : null
     const pl3 = pl3Res.status === 'fulfilled' && pl3Res.value ? buildPl3(pl3Res.value.draws) : null
+    const ssq = ssqRes.status === 'fulfilled' && ssqRes.value ? buildSsq(ssqRes.value.draws) : null
 
     const fresh = {
       kl8: kl8 ? freshness(kl8.latest) : null,
       fc3d: fc3d ? freshness(fc3d.latest) : null,
       pl3: pl3 ? freshness(pl3.latest) : null,
+      ssq: ssq ? freshness(ssq.latest, 4) : null,
     }
 
     const skipped = {
       kl8: kl8Res.status === 'rejected' ? kl8Res.reason?.message : null,
       fc3d: fc3dRes.status === 'rejected' ? fc3dRes.reason?.message : null,
       pl3: pl3Res.status === 'rejected' ? pl3Res.reason?.message : null,
+      ssq: ssqRes.status === 'rejected' ? ssqRes.reason?.message : null,
     }
 
-    if (!kl8 && !fc3d && !pl3) {
+    if (!kl8 && !fc3d && !pl3 && !ssq) {
       const errs = Object.values(skipped).filter(Boolean)
       const error = `开奖数据获取失败：${errs.join('；') || '未知原因'}`
       await savePushStatus({ at: new Date().toISOString(), ok: false, error, skipped })
@@ -300,11 +353,12 @@ export default async function handler(req, res) {
 
     const prefix = isTest ? '【测试】' : ''
 
-    // 一个彩种一张卡：快乐8 蓝头、3D 红头、排列三橙头，分别发送
+    // 一个彩种一张卡：快乐8 蓝头、3D 红头、排列三橙头、双色球绿头，分别发送
     const cards = []
     if (kl8) cards.push(buildKl8Card(kl8, `${prefix}快乐8 推荐 · ${dateText}`, staleWarning(fresh.kl8, '快乐8')))
     if (fc3d) cards.push(buildFc3dCard(fc3d, `${prefix}福彩3D 推荐 · ${dateText}`, { warning: staleWarning(fresh.fc3d, '福彩3D') }))
     if (pl3) cards.push(buildPl3Card(pl3, `${prefix}排列三 推荐 · ${dateText}`, staleWarning(fresh.pl3, '排列三')))
+    if (ssq) cards.push(buildSsqCard(ssq, `${prefix}双色球 推荐 · ${dateText}`, staleWarning(fresh.ssq, '双色球')))
 
     const timestamp = Math.floor(Date.now() / 1000)
     const signPart = feishuSign(cfg.secret, timestamp)
@@ -330,14 +384,14 @@ export default async function handler(req, res) {
       ok: true,
       test: isTest,
       sent,
-      pushed: { kl8: !!kl8, fc3d: !!fc3d, pl3: !!pl3 },
+      pushed: { kl8: !!kl8, fc3d: !!fc3d, pl3: !!pl3, ssq: !!ssq },
       fresh,
     })
 
     return res.status(200).json({
       ok: true,
       test: isTest,
-      pushed: { kl8: !!kl8, fc3d: !!fc3d, pl3: !!pl3 },
+      pushed: { kl8: !!kl8, fc3d: !!fc3d, pl3: !!pl3, ssq: !!ssq },
       messages: cards.length,
       fresh,
       skipped,

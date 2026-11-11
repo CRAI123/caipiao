@@ -47,7 +47,7 @@ export default function Settings() {
   const [larkLink, setLarkLink] = useState('')
 
   // 每日推荐推送（服务端 Cron 读取，保存在云数据库）
-  const [push, setPush] = useState({ webhook: '', secret: '', kl8: true, fc3d: true, pl3: true })
+  const [push, setPush] = useState({ webhook: '', secret: '', kl8: true, fc3d: true, pl3: true, ssq: true })
   const [pushBusy, setPushBusy] = useState(false)
 
   /** 粘贴链接 → 自动识别并填入 app_token / table_id */
@@ -97,7 +97,7 @@ export default function Settings() {
           getDailyPushConfig(sql),
         ])
         if (!alive) return
-        if (pushCfg) setPush({ webhook: '', secret: '', kl8: true, fc3d: true, pl3: true, ...pushCfg })
+        if (pushCfg) setPush({ webhook: '', secret: '', kl8: true, fc3d: true, pl3: true, ssq: true, ...pushCfg })
         setAccess({ mode: 'neon', req, isAdmin: admins.some((a) => a.device_id === d.id) })
       } catch (e) {
         if (alive) setAccess({ mode: 'error', message: e.message })
@@ -186,6 +186,7 @@ export default function Settings() {
         data.skipped?.kl8 && `快乐8：${data.skipped.kl8}`,
         data.skipped?.fc3d && `福彩3D：${data.skipped.fc3d}`,
         data.skipped?.pl3 && `排列三：${data.skipped.pl3}`,
+        data.skipped?.ssq && `双色球：${data.skipped.ssq}`,
       ]
         .filter(Boolean)
         .join('；')
@@ -355,6 +356,14 @@ export default function Settings() {
             />{' '}
             推送排列三
           </label>
+          <label className="sync-badge" style={{ cursor: 'pointer' }}>
+            <input
+              type="checkbox"
+              checked={push.ssq}
+              onChange={(e) => setPush({ ...push, ssq: e.target.checked })}
+            />{' '}
+            推送双色球
+          </label>
           <button className="tab-btn" onClick={() => savePush(false)} disabled={pushBusy}>保存</button>
           <button className="btn-primary" onClick={() => savePush(true)} disabled={pushBusy}>
             {pushBusy ? '发送中…' : '保存并发送测试'}
@@ -386,7 +395,7 @@ export default function Settings() {
           <br />
           <b>什么时候发：</b>每天 <b>14:00（北京时间）</b>由 Vercel 定时任务自动计算推送，
           每个彩种发<b>一条卡片消息</b>：快乐8 蓝底（推荐十码 + 三注分注）、福彩3D 红底（位置推荐、双胆拖码、和值跨度、杀号）、
-          排列三 橙底（同上 + 覆盖档位的命中与成本），关键号码会标红。
+          排列三 橙底（Pro 版：同上 + 覆盖档位的命中与成本）、双色球 绿底（6 红 + 1 蓝、备选蓝球、杀红、和值三区结构），关键号码会标红。
           <br />
           <b>注意：</b>定时任务运行在服务器上，所以必须配置云数据库（配置保存在云端）；填好后点「保存并发送测试」可以先看效果。
           开奖为独立随机事件，推送内容仅为历史数据整理，不构成投注建议。
