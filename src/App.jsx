@@ -29,6 +29,7 @@ import SSQHotCold from './components/SSQHotCold.jsx'
 import SSQPatterns from './components/SSQPatterns.jsx'
 import SSQRepeats from './components/SSQRepeats.jsx'
 import SSQDanTuo from './components/SSQDanTuo.jsx'
+import SSQCrowding from './components/SSQCrowding.jsx'
 import SSQPrize from './components/SSQPrize.jsx'
 import SSQPredict from './components/SSQPredict.jsx'
 import SSQAudit from './components/SSQAudit.jsx'
@@ -86,6 +87,7 @@ const SSQ_TABS = [
   { id: 'patterns', label: '形态走势', en: 'PATTERNS' },
   { id: 'repeats', label: '重号分析', en: 'REPEATS' },
   { id: 'dantuo', label: '复式胆拖', en: 'BETS' },
+  { id: 'crowd', label: '选号避挤', en: 'CROWDING' },
   { id: 'prize', label: '中奖计算', en: 'PRIZE' },
   { id: 'predict', label: '下期推荐', en: 'PREDICT' },
   { id: 'audit', label: '方法体检', en: 'AUDIT' },
@@ -374,6 +376,7 @@ export default function App() {
             {ssqTab === 'patterns' && <SSQPatterns draws={ssqDraws} />}
             {ssqTab === 'repeats' && <SSQRepeats draws={ssqDraws} />}
             {ssqTab === 'dantuo' && <SSQDanTuo draws={ssqDraws} />}
+            {ssqTab === 'crowd' && <SSQCrowding draws={ssqDraws} />}
             {ssqTab === 'prize' && <SSQPrize />}
             {ssqTab === 'predict' && <SSQPredict draws={ssqDraws} />}
             {ssqTab === 'audit' && <SSQAudit draws={ssqDraws} />}

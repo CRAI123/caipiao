@@ -843,3 +843,206 @@ export const PRIZE_TABLE = [
   { level: '五等奖', condition: '4 红 / 3 红 + 1 蓝', money: '10 元' },
   { level: '六等奖', condition: '1 蓝（红球不限）', money: '5 元' },
 ]
+
+// ---------------------------------------------------------------
+// 选号拥挤度（避挤）—— 唯一有文献支撑的优化方向
+// 说明：不改变中奖概率，只估算“这组号码有多少人可能也选了”，
+// 从而判断中奖后需要与多少人分摊奖金。
+// ---------------------------------------------------------------
+
+const CROWD_BANDS = [
+  { max: 34, label: '低拥挤', tone: 'green' },
+  { max: 54, label: '中等', tone: 'amber' },
+  { max: 69, label: '偏高', tone: 'red' },
+  { max: 100, label: '很高', tone: 'red' },
+]
+
+// 用确定性伪随机的「机选票」标定：50 分 = 与平均机选票一样拥挤
+let CROWD_CALIB = null
+
+function calibration() {
+  if (CROWD_CALIB) return CROWD_CALIB
+  let seed = 20261111
+  const rnd = () => {
+    seed = (seed * 1103515245 + 12345) & 0x7fffffff
+    return seed / 0x7fffffff
+  }
+  const vals = []
+  for (let i = 0; i < 1500; i++) {
+    const pool = [...RED_NUMS]
+    const red = []
+    while (red.length < 6) red.push(pool.splice(Math.floor(rnd() * pool.length), 1)[0])
+    const base = computeCrowd(red, 1 + Math.floor(rnd() * BLUE_MAX), null)
+    if (base) vals.push(base.pct)
+  }
+  const mean = vals.reduce((s, v) => s + v, 0) / vals.length
+  const sd = Math.sqrt(vals.reduce((s, v) => s + (v - mean) ** 2, 0) / vals.length) || 1
+  CROWD_CALIB = { mean, sd }
+  return CROWD_CALIB
+}
+
+/**
+ * 计算一组号码的“大众偏好分”（拥挤度）。
+ * @param {number[]} red 6 个红球
+ * @param {number} blue 蓝球
+ * @param {{red:number[]}|null} prevDraw 上一期开奖（用于重号判断）
+ */
+function computeCrowd(red, blue, prevDraw) {
+  const nums = [...red].sort((a, b) => a - b)
+  if (nums.length !== 6 || new Set(nums).size !== 6) return null
+  if (!Number.isInteger(blue) || blue < 1 || blue > BLUE_MAX) return null
+
+  const a = analyzeRed(nums)
+  const factors = []
+  const add = (key, label, raw, weight, tip) => {
+    const r = Math.max(0, Math.min(1, raw))
+    factors.push({ key, label, raw: +r.toFixed(2), weight, points: +(r * weight).toFixed(1), tip })
+  }
+
+  // 1. 生日号密度：01–12 既是月份又是日期，被选概率最高
+  const birthday = nums.filter((n) => n <= 12).length
+  add(
+    'birthday',
+    '生日号密度',
+    birthday / 6,
+    25,
+    birthday >= 3 ? `有 ${birthday} 个号码落在 01–12，月份/日期双重热门` : '',
+  )
+
+  // 2. 连号结构
+  add(
+    'consecutive',
+    '连号结构',
+    a.groups.length >= 2 ? 1 : a.groups.length ? 0.75 : 0,
+    14,
+    a.groups.length ? `含 ${a.groups.length} 组连号，是手选票的典型特征` : '',
+  )
+
+  // 3. 同尾号
+  const sameTail = 6 - a.tailGroups
+  add(
+    'tail',
+    '同尾号',
+    Math.min(sameTail / 2, 1),
+    10,
+    sameTail >= 2 ? `尾号只有 ${a.tailGroups} 组，同尾偏多` : '',
+  )
+
+  // 4. 质数偏好（文献证实玩家系统性偏爱质数）
+  add(
+    'prime',
+    '质数偏好',
+    Math.max(0, (a.prime - 2) / 3),
+    10,
+    a.prime >= 3 ? `含 ${a.prime} 个质数，玩家普遍偏爱质数` : '',
+  )
+
+  // 5. 吉利数字（6 / 8 / 9）
+  const lucky = nums.filter((n) => /[689]/.test(String(n))).length
+  add('lucky', '吉利数字', Math.min(lucky / 4, 1), 8, lucky >= 3 ? `含 ${lucky} 个带 6/8/9 的号码` : '')
+
+  // 6. 和值贴中位数（大众审美偏向“看起来均衡”）
+  const dev = Math.abs(a.sum - 102)
+  add('sum', '和值居中', Math.max(0, 1 - dev / 40), 10, dev <= 15 ? `和值 ${a.sum} 贴近大众偏好的 102` : '')
+
+  // 7. 未使用 32 / 33（全池最冷门的两号）
+  const hasEdge = nums.some((n) => n >= 32)
+  add('edge', '未用高段号', hasEdge ? 0 : 1, 8, hasEdge ? '' : '6 个号全部 ≤31，与绝大多数生日选号重叠')
+
+  // 8. 等距结构（肉眼像“手画的整齐图形”）
+  const g = a.gaps
+  const gapSpread = g.length >= 5 ? Math.max(...g) - Math.min(...g) : 99
+  const evenSpacing = gapSpread <= 2
+  add(
+    'spacing',
+    '等距结构',
+    gapSpread <= 1 ? 1 : gapSpread <= 2 ? 0.6 : 0,
+    9,
+    evenSpacing ? '号码间距几乎相等，属于典型的整齐选号' : '',
+  )
+
+  // 9. 与上期重复
+  const rep = prevDraw ? nums.filter((n) => prevDraw.red.includes(n)).length : 0
+  add(
+    'repeat',
+    '与上期重复',
+    Math.min(Math.max(0, rep - 2) / 4, 1),
+    8,
+    rep >= 3 ? `与上期重复 ${rep} 个，跟号的人不少` : '',
+  )
+
+  // 10. 蓝球热门度：01–12 是月份号，6/8/9/16 是吉利号
+  const blueRaw = blue <= 12 ? 0.7 : 0
+  const blueLucky = [6, 8, 9, 16].includes(blue) ? 0.3 : 0
+  add(
+    'blue',
+    '蓝球热门',
+    Math.min(blueRaw + blueLucky, 1),
+    8,
+    blue <= 12 ? `蓝球 ${String(blue).padStart(2, '0')} 落在 01–12，最容易被月份号撞上` : '',
+  )
+
+  // 11. 小号占比（大众选号天然偏小）
+  const smallCount = nums.filter((n) => n <= 16).length
+  add(
+    'small',
+    '小号偏多',
+    Math.max(0, (smallCount - 3) / 3),
+    10,
+    smallCount >= 4 ? `有 ${smallCount} 个号码 ≤16，小号票非常集中` : '',
+  )
+
+  // 12. 极端规律（长连号 / 全小 / 全大）
+  const allSmall = nums.every((n) => n <= 16)
+  const allBig = nums.every((n) => n >= 17)
+  const extreme = Math.max(a.maxConsecutive >= 4 ? 1 : 0, allSmall || allBig ? 1 : 0)
+  add(
+    'extreme',
+    '极端规律',
+    extreme,
+    14,
+    extreme ? '出现长连号或全小/全大，是最容易被大量彩民同时选中的形态' : '',
+  )
+
+  const totalPoints = factors.reduce((s, f) => s + f.points, 0)
+  const maxPoints = factors.reduce((s, f) => s + f.weight, 0)
+  const pct = totalPoints / maxPoints
+
+  const tips = []
+  if (!hasEdge) tips.push('把 1 个 01–16 的号码换成 32 或 33（全池最冷门）')
+  if (birthday >= 3) tips.push(`把 1–2 个 01–12 的号码上移到 17–31`)
+  if (a.groups.length) tips.push('拆开连号，号码之间至少留一个空档')
+  if (smallCount >= 4) tips.push('减少小号，把 1–2 个号提到 20 以上')
+  if (sameTail >= 2) tips.push('减少同尾，让尾号分散到 5 组左右')
+  if (a.prime >= 3) tips.push('质数控制在 2 个以内')
+  if (evenSpacing) tips.push('破坏等距结构，避免“看起来很整齐”')
+  if (blue <= 12) tips.push('蓝球改选 13–16，避开月份号')
+  if (rep >= 3) tips.push('与上期保留 0–2 个重号即可')
+
+  return {
+    pct,
+    factors: factors.sort((x, y) => y.points - x.points),
+    tips,
+    sum: a.sum,
+    span: a.span,
+  }
+}
+
+/**
+ * 计算一组号码的“大众偏好分”（拥挤度）。
+ * 50 分 = 与平均机选票一样拥挤，分数越高越大众化。
+ * @param {number[]} red 6 个红球
+ * @param {number} blue 蓝球
+ * @param {{red:number[]}|null} prevDraw 上一期开奖（用于重号判断）
+ */
+export function crowdingScore(red, blue, prevDraw = null) {
+  const base = computeCrowd(red, blue, prevDraw)
+  if (!base) return null
+  const { mean, sd } = calibration()
+  const z = (base.pct - mean) / sd
+  const score = Math.max(0, Math.min(100, Math.round(50 + z * 15)))
+  const band = CROWD_BANDS.find((b) => score <= b.max) || CROWD_BANDS[CROWD_BANDS.length - 1]
+  // 粗略分摊倍数：50 分 = 1.00×（平均机选票）
+  const shareFactor = +(score / 50).toFixed(2)
+  return { score, band: band.label, tone: band.tone, shareFactor, ...base }
+}
