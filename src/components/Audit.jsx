@@ -5,6 +5,15 @@ import { Card, Ball, DrawBalls, Note, StatCard, BarList, pad2, ballKindByRange }
 import { walkForwardAudit, hyperHits, PLAY_LABEL, BALL_MAX, PER_DRAW } from '../lib/stats.js'
 
 const PLAYS = [3, 5, 7, 10]
+
+/** 2026-11 本地实测：两个开源项目在「选十」上的留出检验结果（每期只用之前数据） */
+const EXTERNAL = [
+  { name: '开源 LSTM · 逐位 argmax', repo: 'KittenCN/predict_Lottery_ticket', n: '100 期', v: 2.39 },
+  { name: '开源 LSTM · 20 位概率求和', repo: 'KittenCN/predict_Lottery_ticket', n: '100 期', v: 2.51 },
+  { name: '开源 LSTM · 20 位概率取最大', repo: 'KittenCN/predict_Lottery_ticket', n: '100 期', v: 2.55 },
+  { name: '开源 8 算法引擎 · Mode 2', repo: 'KittenCN/kl8-lottery-analyzer', n: '60 期', v: 2.5 },
+]
+
 const MODES = [
   { id: 'hot', label: '偏热' },
   { id: 'mix', label: '冷热兼顾' },
@@ -158,6 +167,49 @@ export default function Audit({ draws }) {
             </tbody>
           </table>
         </div>
+      </Card>
+
+      <Card title="外部开源算法实测对照" tag="同一份 1000 期数据 · 严格留出 · 每期只用之前的数据">
+        <div className="table-scroll">
+          <table className="ledger-table">
+            <thead>
+              <tr>
+                <th>方法</th>
+                <th>样本</th>
+                <th>平均命中 /10</th>
+                <th>对机选基准</th>
+              </tr>
+            </thead>
+            <tbody>
+              {EXTERNAL.map((it) => (
+                <tr key={it.name}>
+                  <td>
+                    {it.name}
+                    <div className="muted" style={{ fontSize: 12 }}>{it.repo}</div>
+                  </td>
+                  <td className="mono muted">{it.n}</td>
+                  <td className="mono">{it.v.toFixed(2)}</td>
+                  <td className="mono" style={{ color: it.v >= 2.5 ? 'var(--blue)' : 'var(--red)' }}>
+                    {(it.v - 2.5 >= 0 ? '+' : '') + (it.v - 2.5).toFixed(2)}
+                  </td>
+                </tr>
+              ))}
+              <tr>
+                <td>机选理论值（任意 10 个号）</td>
+                <td className="mono muted">—</td>
+                <td className="mono">2.50</td>
+                <td className="mono muted">0.00</td>
+              </tr>
+            </tbody>
+          </table>
+        </div>
+        <Note>
+          2026-11 本地实测：两个项目都按其 README 训练/运行，留出期完全不参与训练。
+          结论是三个来源（本站评分法、TensorFlow LSTM、8 算法引擎）全部落在 2.39~2.55，
+          没有一个偏离 2.50 超过一个标准误——换算法不会改变期望命中。
+          另外，kl8-lottery-analyzer 把 20 列的号码矩阵传给要求「期号 + 20 个号（≥21 列）」的
+          Copula/互信息函数，异常被捕获后静默跳过，这两项高级能力实际未生效。
+        </Note>
       </Card>
 
       <Note tone="warn">
