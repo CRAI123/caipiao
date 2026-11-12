@@ -294,7 +294,7 @@ export function backtestFC3Dv2(draws) {
 }
 
 // ============================================================
-// 排列三 Pro（第三档）
+// 排列三 v3 Pro（第三档）
 //
 // 相对 v3 的三处增强：
 //   1. 专家从 4 个扩到 9 个：短/中/长/超长窗频率、一阶转移、二阶转移、
@@ -517,7 +517,7 @@ function structLogProb(s, model) {
 }
 
 /**
- * 排列三 Pro 推算。
+ * 排列三 v3 Pro 推算。
  * 返回值与 v2/v3 完全兼容，另附 topCombos / expertWeights / structBeta 等增强字段。
  */
 export function predictPL3Pro(draws, { cover = 6, beta = PRO.structBeta, coverRate = 0.8 } = {}) {

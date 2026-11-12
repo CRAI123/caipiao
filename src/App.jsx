@@ -52,9 +52,8 @@ const PL3_ALGO_INFO = {
   v1: { name: '经典综合评分', desc: '热冷+跨度+和值+奇偶+形态+遗漏 8 维度加权评分' },
   v2: { name: '排列三 v3', desc: '多专家概率集成 + 1000 种结果穷举的精确预测分布' },
   pro: {
-    name: '排列三 Pro',
+    name: '排列三 v3 Pro',
     desc: '9 专家 Hedge 自适应权重 + 六维结构约束 + 定位/Top 组合输出',
-    recommend: true,
   },
 }
 
@@ -412,7 +411,7 @@ export default function App() {
                   defaultPeriods={80}
                   v2Label="精准 v3"
                   proEnabled
-                  proLabel="排列三 Pro"
+                  proLabel="排列三 v3 Pro"
                 />
               ) : (
                 <FC3DAudit draws={digitDraws} />

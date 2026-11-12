@@ -1,7 +1,7 @@
 // ============================================================
 // 每日推荐推送 —— Vercel Cron（14:00 Asia/Shanghai = 06:00 UTC）
 // 计算快乐8 / 福彩3D / 排列三 / 双色球 下期参考号码，推送到飞书自定义机器人 Webhook。
-// 每个彩种都走站内当前最强算法：排列三 = Pro（9 专家 Hedge 权重 + 结构约束）。
+// 每个彩种都走站内当前最强算法，卡片标题里标明档位：排列三 = v3 Pro（9 专家 Hedge 权重 + 结构约束）。
 //
 // 配置来源（优先数据库）：
 //   1) Neon admin_config 表 key = 'daily_push_config'
@@ -109,7 +109,7 @@ function buildFc3d(draws) {
   return { latest: draws[0], pred: p }
 }
 
-/** 排列三：走 Pro 档（9 专家 Hedge 自适应权重 + 六维结构约束），站内概率最高的一档 */
+/** 排列三：v3 Pro 档（9 专家 Hedge 自适应权重 + 六维结构约束），站内概率最高的一档 */
 function buildPl3(draws) {
   const p = predictPL3Pro(draws)
   if (!p) return null
@@ -200,16 +200,19 @@ function buildFc3dCard(digit, title, { template = 'red', extra = [], warning = n
 /** 排列三卡：在 3D 版式上补一行覆盖档位（命中与成本） */
 function buildPl3Card(pl3, title, warning) {
   const tiers = pl3.pred.tiers || []
-  const extra = tiers.length
-    ? [
-        HR,
-        line(
-          `**覆盖档位** 期望命中 ${tiers
-            .map((t) => `${t.cover}码 ${t.expectHits}个/${t.groupCost}元`)
-            .join('　')}`,
-        ),
-      ]
-    : []
+  const extra = [
+    ...(tiers.length
+      ? [
+          HR,
+          line(
+            `**覆盖档位** 期望命中 ${tiers
+              .map((t) => `${t.cover}码 ${t.expectHits}个/${t.groupCost}元`)
+              .join('　')}`,
+          ),
+        ]
+      : []),
+    line(grey('算法 v3 Pro · 9 专家 Hedge 自适应权重 + 六维结构约束')),
+  ]
   return buildFc3dCard(pl3, title, { template: 'orange', extra, warning })
 }
 
@@ -357,7 +360,7 @@ export default async function handler(req, res) {
     const cards = []
     if (kl8) cards.push(buildKl8Card(kl8, `${prefix}快乐8 推荐 · ${dateText}`, staleWarning(fresh.kl8, '快乐8')))
     if (fc3d) cards.push(buildFc3dCard(fc3d, `${prefix}福彩3D 推荐 · ${dateText}`, { warning: staleWarning(fresh.fc3d, '福彩3D') }))
-    if (pl3) cards.push(buildPl3Card(pl3, `${prefix}排列三 推荐 · ${dateText}`, staleWarning(fresh.pl3, '排列三')))
+    if (pl3) cards.push(buildPl3Card(pl3, `${prefix}排列三 v3 Pro 推荐 · ${dateText}`, staleWarning(fresh.pl3, '排列三')))
     if (ssq) cards.push(buildSsqCard(ssq, `${prefix}双色球 推荐 · ${dateText}`, staleWarning(fresh.ssq, '双色球')))
 
     const timestamp = Math.floor(Date.now() / 1000)

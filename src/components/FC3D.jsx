@@ -199,11 +199,11 @@ export default function FC3D({ draws, engine = fc3dEngine, algoInfo = ALGO_INFO,
         </div>
       )}
 
-      {/* Pro 增强输出：结构约束后的 Top 组合 + 直选方案 + 专家权重 */}
+      {/* v3 Pro 增强输出：结构约束后的 Top 组合 + 直选方案 + 专家权重 */}
       {pred.topCombos && (
         <div className="odd-card">
           <div className="odd-card-head">
-            <h3>Pro 增强输出</h3>
+            <h3>v3 Pro 增强输出</h3>
             <span className="muted small">
               9 专家自适应集成 · 结构约束强度 β={pred.structBeta}
             </span>

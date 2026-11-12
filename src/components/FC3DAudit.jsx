@@ -48,10 +48,10 @@ export default function FC3DAudit({
   defaultPeriods = 30,
   v2Label = '精准 v2',
   proEnabled = false,
-  proLabel = '排列三 Pro',
+  proLabel = '排列三 v3 Pro',
 }) {
   const [periods, setPeriods] = useState(defaultPeriods)
-  const [algo, setAlgo] = useState(proEnabled ? 'pro' : 'v2')
+  const [algo, setAlgo] = useState('v2')
 
   const audit = useMemo(
     () => engine[AUDIT_FN[algo]](draws, { periods, minTrain: algo === 'pro' ? 40 : 20 }),
