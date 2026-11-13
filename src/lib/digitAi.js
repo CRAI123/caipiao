@@ -1,0 +1,210 @@
+// ============================================================
+// 近 100 期统计摘要 + AI 分析（福彩3D / 排列三通用）
+//
+// ⚠️ 开奖是独立随机事件，任何「规律」都只是对历史的描述。
+//    这里的候选组合按频率/遗漏/转移加权排序，覆盖的是历史分布，
+//    不提高任何一注的中奖概率（直选 1/1000，组六 1/167）。
+// ============================================================
+
+/** 把 draws（最新在前）整理成近 n 期统计 */
+export function summarizeDigit(draws, n = 100) {
+  const picked = draws
+    .slice(0, Math.min(n, draws.length))
+    .filter((d) => Array.isArray(d.num) && d.num.length === 3)
+  const total = picked.length
+  if (!total) return null
+  const chrono = [...picked].reverse()
+  const latest = picked[0]
+
+  const freq = [0, 1, 2].map(() => Array(10).fill(0))
+  const freq30 = [0, 1, 2].map(() => Array(10).fill(0))
+  const last = [0, 1, 2].map(() => Array(10).fill(-1))
+  const trans = [0, 1, 2].map(() => Array.from({ length: 10 }, () => Array(10).fill(0)))
+
+  const sums = []
+  const spans = []
+  const oddDist = [0, 0, 0, 0]
+  const bigDist = [0, 0, 0, 0]
+  const formDist = { 豹子: 0, 组三: 0, 组六: 0 }
+  let repeated = 0
+
+  chrono.forEach((d, i) => {
+    d.num.forEach((v, p) => {
+      freq[p][v]++
+      last[p][v] = i
+      if (i >= total - 30) freq30[p][v]++
+      if (i > 0) trans[p][chrono[i - 1].num[p]][v]++
+    })
+    const s = d.num[0] + d.num[1] + d.num[2]
+    sums.push(s)
+    spans.push(Math.max(...d.num) - Math.min(...d.num))
+    const odd = d.num.filter((v) => v % 2 === 1).length
+    oddDist[odd]++
+    bigDist[d.num.filter((v) => v >= 5).length]++
+    const uniq = new Set(d.num).size
+    formDist[uniq === 1 ? '豹子' : uniq === 2 ? '组三' : '组六']++
+    if (uniq < 3) repeated++
+  })
+
+  const omit = [0, 1, 2].map((p) => Array.from({ length: 10 }, (_, d) => total - 1 - last[p][d]))
+  const maxOmit = [0, 1, 2].map((p) => Math.max(1, ...omit[p]))
+  const lastNum = latest.num
+
+  // 位置权重：近 100 期频率 35% + 近 30 期频率 30% + 遗漏 15% + 上期同位转移 20%
+  const score = [0, 1, 2].map((p) =>
+    Array.from({ length: 10 }, (_, d) => {
+      const from = lastNum[p]
+      const transTotal = trans[p][from].reduce((a, b) => a + b, 0) || 1
+      return (
+        0.35 * (freq[p][d] / total) * 10 +
+        0.3 * (freq30[p][d] / Math.min(30, total)) * 10 +
+        0.15 * (omit[p][d] / maxOmit[p]) +
+        0.2 * (trans[p][from][d] / transTotal) * 10
+      )
+    }),
+  )
+  const topDigits = score.map((arr) =>
+    arr
+      .map((v, d) => ({ d, v }))
+      .sort((a, b) => b.v - a.v)
+      .slice(0, 3)
+      .map((x) => x.d),
+  )
+
+  // 直选候选：每位取前 2，共 8 注，按分数和排序
+  const straight = []
+  for (const a of topDigits[0].slice(0, 2))
+    for (const b of topDigits[1].slice(0, 2))
+      for (const c of topDigits[2].slice(0, 2))
+        straight.push({ num: [a, b, c], v: score[0][a] + score[1][b] + score[2][c] })
+  straight.sort((x, y) => y.v - x.v)
+
+  // 组选候选：取综合分最高的 5 个数字，生成 3 个不同数字的组六，按分数和排序
+  const digitScore = Array.from({ length: 10 }, (_, d) => (score[0][d] + score[1][d] + score[2][d]) / 3)
+  const pool = digitScore
+    .map((v, d) => ({ d, v }))
+    .sort((a, b) => b.v - a.v)
+    .slice(0, 5)
+    .map((x) => x.d)
+  const group = []
+  for (let i = 0; i < pool.length; i++)
+    for (let j = i + 1; j < pool.length; j++)
+      for (let k = j + 1; k < pool.length; k++)
+        group.push({
+          num: [pool[i], pool[j], pool[k]].sort((a, b) => a - b),
+          v: digitScore[pool[i]] + digitScore[pool[j]] + digitScore[pool[k]],
+        })
+  group.sort((x, y) => y.v - x.v)
+
+  const sortedSums = [...sums].sort((a, b) => a - b)
+  const q = (r) => sortedSums[Math.min(total - 1, Math.floor(total * r))]
+  const sortedSpans = [...spans].sort((a, b) => a - b)
+  const qs = (r) => sortedSpans[Math.min(total - 1, Math.floor(total * r))]
+  const avg = (arr) => arr.reduce((a, b) => a + b, 0) / arr.length
+
+  const share = (arr) => arr.map((c) => Math.round((c / total) * 100))
+
+  return {
+    total,
+    latest,
+    freq,
+    freq30,
+    omit,
+    topDigits,
+    sum: { min: Math.min(...sums), max: Math.max(...sums), avg: +avg(sums).toFixed(1), p30: q(0.3), p70: q(0.7) },
+    span: { avg: +avg(spans).toFixed(1), p30: qs(0.3), p70: qs(0.7) },
+    oddDist,
+    bigDist,
+    formDist,
+    repeatRate: Math.round((repeated / total) * 100),
+    candidates: {
+      straight: straight.slice(0, 5).map((x) => x.num),
+      group: group.slice(0, 3).map((x) => x.num),
+      group3: [[topDigits[0][0], topDigits[1][0], topDigits[2][0]]],
+    },
+    straightAll: straight,
+    groupAll: group,
+    digitScore,
+    share,
+  }
+}
+
+const SYSTEM_PROMPT = `你是「研彩室」的彩票数据分析助手，服务对象是研究者本人。你只做两件事：解读最近 100 期的历史统计，以及对程序给出的候选组合做排序与解释。
+
+【铁律】
+1. 只能使用用户消息里给出的统计与候选组合，不得编造数字，不得引入外部资料。
+2. 福彩3D/排列三每期从 000–999 等概率产生，直选单注中奖概率恒为 1/1000，组六约 1/167，与你选什么号无关。开奖相互独立，不存在可利用的「规律」「趋势」「必出胆码」。
+3. 你不得声称任何组合更容易中奖，不得承诺命中，不得鼓励加大投入或追号。
+4. 推荐只能从候选池中挑，禁止自创候选池以外的号码。
+5. 必须明确说明：以下是历史分布下的参考组合，不改变中奖概率，彩票期望回报为负。
+
+【输出结构】（简体中文，纯文本，不要 Markdown 表格）
+1. 结构概览：近 100 期和值/跨度区间、奇偶与大小分布、形态（豹子/组三/组六）与重号比例
+2. 位置观察：百/十/个位的高频与遗漏情况，一句话即可，不做预测
+3. 组合参考：从候选池中挑 3 注直选、2 注组选，说明挑选理由（只引用统计）
+4. 风险提示：预算上限与理性购彩提醒`
+
+/** 组装 messages（纯函数，便于离线校验） */
+export function buildDigitMessages(summary, label = '排列三') {
+  if (!summary) return null
+  const s = summary
+  const fmtPos = (name, p) =>
+    `- ${name}：近100期 ${s.freq[p].map((c, d) => `${d}:${c}`).join(' ')}；近30期 ${s.freq30[p]
+      .map((c, d) => `${d}:${c}`)
+      .join(' ')}；当前遗漏 ${s.omit[p].map((c, d) => `${d}:${c}`).join(' ')}；倾向数字 ${s.topDigits[p].join(
+      '、',
+    )}`
+  const lines = [
+    `${label} 近 ${s.total} 期统计（程序计算，真实数据）：`,
+    `- 最新一期：第 ${s.latest.id} 期，开奖 ${s.latest.num.join(' ')}`,
+    `- 和值：均值 ${s.sum.avg}，30%–70% 分位 ${s.sum.p30}–${s.sum.p70}，区间 ${s.sum.min}–${s.sum.max}`,
+    `- 跨度：均值 ${s.span.avg}，30%–70% 分位 ${s.span.p30}–${s.span.p70}`,
+    `- 奇数个数分布（0/1/2/3 个）：${s.oddDist.join(' / ')} 期`,
+    `- 大数(5–9)个数分布：${s.bigDist.join(' / ')} 期`,
+    `- 形态：豹子 ${s.formDist.豹子} 期、组三 ${s.formDist.组三} 期、组六 ${s.formDist.组六} 期；含重号 ${s.repeatRate}%`,
+    '位置分布：',
+    fmtPos('百位', 0),
+    fmtPos('十位', 1),
+    fmtPos('个位', 2),
+    '',
+    '候选池（程序按频率/遗漏/转移加权排序，未做任何优化）：',
+    `- 直选候选：${s.candidates.straight.map((x) => x.join('')).join('、')}`,
+    `- 组选候选：${s.candidates.group.map((x) => x.join('')).join('、')}`,
+    `- 组三候选：${s.candidates.group3.map((x) => `${x[0]}${x[0]}${x[1]}`).join('、')}`,
+    '',
+    '请按系统提示词的结构输出，推荐只从上面的候选池中选择。',
+  ]
+  return [
+    { role: 'system', content: SYSTEM_PROMPT },
+    { role: 'user', content: lines.join('\n') },
+  ]
+}
+
+/** 调用大模型：settings = { llmBaseUrl, llmKey, llmModel } */
+export async function analyzeDigit(settings, { summary, label }) {
+  if (!settings?.llmKey) throw new Error('尚未配置大模型 API Key，请先到「设置」页填写')
+  const messages = buildDigitMessages(summary, label)
+  if (!messages) throw new Error('历史数据不足，至少需要 10 期')
+  const base = String(settings.llmBaseUrl || 'https://api.deepseek.com').replace(/\/+$/, '')
+  const res = await fetch(`${base}/chat/completions`, {
+    method: 'POST',
+    headers: {
+      'Content-Type': 'application/json',
+      Authorization: `Bearer ${settings.llmKey}`,
+    },
+    body: JSON.stringify({
+      model: settings.llmModel || 'deepseek-chat',
+      messages,
+      temperature: 0.4,
+      stream: false,
+    }),
+  })
+  if (!res.ok) {
+    const detail = await res.text().catch(() => '')
+    throw new Error(`大模型接口返回 HTTP ${res.status}${detail ? `：${detail.slice(0, 200)}` : ''}`)
+  }
+  const data = await res.json()
+  const text = data?.choices?.[0]?.message?.content
+  if (!text) throw new Error('大模型接口返回内容为空')
+  return { text: String(text).trim(), model: data.model || settings.llmModel, at: new Date().toISOString() }
+}

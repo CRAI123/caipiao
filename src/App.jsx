@@ -409,9 +409,9 @@ export default function App() {
             )}
             {digitTab === 'predict' &&
               (lottery === 'pl3' ? (
-                <FC3D draws={digitDraws} engine={pl3Engine} algoInfo={PL3_ALGO_INFO} showTiers />
+                <FC3D draws={digitDraws} engine={pl3Engine} algoInfo={PL3_ALGO_INFO} showTiers label={digitLabel} />
               ) : (
-                <FC3D draws={digitDraws} />
+                <FC3D draws={digitDraws} label={digitLabel} />
               ))}
             {digitTab === 'audit' &&
               (lottery === 'pl3' ? (

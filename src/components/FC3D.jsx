@@ -2,6 +2,7 @@
 // 算法档位由 algoInfo 驱动：福彩3D 两档（v1/v2），排列三三档（v1/v2/pro）
 import React, { useMemo, useState } from 'react'
 import * as fc3dEngine from '../lib/fc3dPredict.js'
+import DigitAI from './DigitAI.jsx'
 
 function DigitBall({ d, hot, cold, omit }) {
   let cls = 'digit-ball'
@@ -29,7 +30,7 @@ const ALGO_FN = {
   v4: { predict: 'predictFC3Dv4', backtest: 'backtestFC3Dv4' },
 }
 
-export default function FC3D({ draws, engine = fc3dEngine, algoInfo = ALGO_INFO, showTiers = false }) {
+export default function FC3D({ draws, engine = fc3dEngine, algoInfo = ALGO_INFO, showTiers = false, label = '福彩3D' }) {
   const [algo, setAlgo] = useState(
     Object.keys(algoInfo).find((k) => algoInfo[k].recommend) || 'v2',
   )
@@ -716,6 +717,8 @@ export default function FC3D({ draws, engine = fc3dEngine, algoInfo = ALGO_INFO,
           </div>
         </div>
       )}
+
+      <DigitAI draws={draws} label={label} />
 
       <div className="note note-warn" style={{ marginTop: 16 }}>
         ⚠️ 彩票开奖号码完全随机，以上推算仅为历史数据的统计描述，无法预测中奖，请理性购彩！
