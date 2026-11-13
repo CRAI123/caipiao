@@ -5,6 +5,7 @@ import Overview from './components/Overview.jsx'
 import DailyCheckin from './components/DailyCheckin.jsx'
 import HotCold from './components/HotCold.jsx'
 import Patterns from './components/Patterns.jsx'
+import KlinePage from './components/KlinePage.jsx'
 import Repeats from './components/Repeats.jsx'
 import DanTuo from './components/DanTuo.jsx'
 import Predict from './components/Predict.jsx'
@@ -55,6 +56,10 @@ const PL3_ALGO_INFO = {
     name: '排列三 v3 Pro',
     desc: '9 专家 Hedge 自适应权重 + 六维结构约束 + 定位/Top 组合输出',
   },
+  v4: {
+    name: '排列三 v4 技术指标',
+    desc: 'MA5/MA10 + 布林带 + MACD 投影和值/跨度区间，仅作走势参考',
+  },
 }
 
 const TABS = [
@@ -62,6 +67,7 @@ const TABS = [
   { id: 'checkin', label: '每日打卡', en: 'CHECK-IN' },
   { id: 'hotcold', label: '冷热遗漏', en: 'HOT & COLD' },
   { id: 'patterns', label: '形态走势', en: 'PATTERNS' },
+  { id: 'kline', label: '走势K线', en: 'K-LINE' },
   { id: 'repeats', label: '重号斜连', en: 'REPEATS' },
   { id: 'dantuo', label: '复式胆拖', en: 'BETS' },
   { id: 'predict', label: '下期推荐', en: 'PREDICT' },
@@ -76,6 +82,7 @@ const FC3D_TABS = [
   { id: 'overview', label: '总览', en: 'OVERVIEW' },
   { id: 'hotcold', label: '冷热遗漏', en: 'HOT & COLD' },
   { id: 'patterns', label: '形态走势', en: 'PATTERNS' },
+  { id: 'kline', label: '走势K线', en: 'K-LINE' },
   { id: 'repeats', label: '重号分析', en: 'REPEATS' },
   { id: 'dantuo', label: '复式胆拖', en: 'BETS' },
   { id: 'prize', label: '中奖计算', en: 'PRIZE' },
@@ -89,6 +96,7 @@ const SSQ_TABS = [
   { id: 'overview', label: '总览', en: 'OVERVIEW' },
   { id: 'hotcold', label: '冷热遗漏', en: 'HOT & COLD' },
   { id: 'patterns', label: '形态走势', en: 'PATTERNS' },
+  { id: 'kline', label: '走势K线', en: 'K-LINE' },
   { id: 'repeats', label: '重号分析', en: 'REPEATS' },
   { id: 'dantuo', label: '复式胆拖', en: 'BETS' },
   { id: 'crowd', label: '选号避挤', en: 'CROWDING' },
@@ -378,6 +386,7 @@ export default function App() {
             {ssqTab === 'overview' && <SSQOverview draws={ssqDraws} />}
             {ssqTab === 'hotcold' && <SSQHotCold draws={ssqDraws} />}
             {ssqTab === 'patterns' && <SSQPatterns draws={ssqDraws} />}
+            {ssqTab === 'kline' && <KlinePage lottery="ssq" draws={ssqDraws} />}
             {ssqTab === 'repeats' && <SSQRepeats draws={ssqDraws} />}
             {ssqTab === 'dantuo' && <SSQDanTuo draws={ssqDraws} />}
             {ssqTab === 'crowd' && <SSQCrowding draws={ssqDraws} />}
@@ -392,6 +401,7 @@ export default function App() {
             {digitTab === 'overview' && <FC3DOverview draws={digitDraws} />}
             {digitTab === 'hotcold' && <FC3DHotCold draws={digitDraws} />}
             {digitTab === 'patterns' && <FC3DPatterns draws={digitDraws} />}
+            {digitTab === 'kline' && <KlinePage lottery={lottery} draws={digitDraws} />}
             {digitTab === 'repeats' && <FC3DRepeats draws={digitDraws} />}
             {digitTab === 'dantuo' && <FC3DDanTuo label={digitLabel} />}
             {digitTab === 'prize' && (
@@ -452,6 +462,7 @@ export default function App() {
             {tab === 'checkin' && <DailyCheckin draws={draws} onChanged={refresh} />}
             {tab === 'hotcold' && <HotCold draws={draws} />}
             {tab === 'patterns' && <Patterns draws={draws} />}
+            {tab === 'kline' && <KlinePage lottery="kl8" draws={draws} />}
             {tab === 'repeats' && <Repeats draws={draws} />}
             {tab === 'dantuo' && <DanTuo draws={draws} />}
             {tab === 'predict' && <Predict draws={draws} />}

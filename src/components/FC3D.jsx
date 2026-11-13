@@ -18,6 +18,7 @@ function DigitBall({ d, hot, cold, omit }) {
 const ALGO_INFO = {
   v1: { name: '经典综合评分', desc: '热冷+跨度+和值+奇偶+形态+遗漏 8 维度加权评分' },
   v2: { name: '精准模式', desc: '位置独立建模 + 马尔可夫转移 + 指数衰减 + 遗漏回补', recommend: true },
+  v4: { name: '技术指标 v4', desc: 'MA5/MA10 + 布林带 + MACD 投影和值/跨度区间，仅作走势参考' },
 }
 
 // 档位 → 引擎函数名，避免在组件里写死 if/else
@@ -25,6 +26,7 @@ const ALGO_FN = {
   v1: { predict: 'predictFC3D', backtest: 'backtestFC3D' },
   v2: { predict: 'predictFC3Dv2', backtest: 'backtestFC3Dv2' },
   pro: { predict: 'predictPL3Pro', backtest: 'backtestPL3Pro' },
+  v4: { predict: 'predictFC3Dv4', backtest: 'backtestFC3Dv4' },
 }
 
 export default function FC3D({ draws, engine = fc3dEngine, algoInfo = ALGO_INFO, showTiers = false }) {
@@ -326,6 +328,70 @@ export default function FC3D({ draws, engine = fc3dEngine, algoInfo = ALGO_INFO,
           <div className="metric-sub">近50期出现频率</div>
         </div>
       </div>
+
+      {/* 技术指标档：K 线指标投影（仅 v4 输出） */}
+      {pred.indicator && (
+        <div className="odd-card">
+          <div className="odd-card-head">
+            <h3>技术指标档 · 和值 / 跨度投影</h3>
+            <span className="muted small">
+              和值序列 {pred.indicator.window} 期 · MA5 {pred.indicator.sumProj.ma5} · 布林{' '}
+              {pred.indicator.sumProj.lower}–{pred.indicator.sumProj.upper}
+            </span>
+          </div>
+
+          <div className="metric-grid">
+            <div className="metric-card">
+              <div className="metric-name">和值投影</div>
+              <div className="metric-value">
+                {pred.indicator.sumProj.lo} – {pred.indicator.sumProj.hi}
+              </div>
+              <div className="metric-sub">
+                中枢 {pred.indicator.sumProj.center} · σ {pred.indicator.sumProj.sigma} ·{' '}
+                {pred.indicator.sumProj.bollState}
+              </div>
+            </div>
+            <div className="metric-card">
+              <div className="metric-name">跨度投影</div>
+              <div className="metric-value">
+                {pred.indicator.spanProj.lo} – {pred.indicator.spanProj.hi}
+              </div>
+              <div className="metric-sub">
+                中枢 {pred.indicator.spanProj.center} · σ {pred.indicator.spanProj.sigma}
+              </div>
+            </div>
+            <div className="metric-card">
+              <div className="metric-name">趋势方向</div>
+              <div className="metric-value">
+                {pred.indicator.sumProj.trend > 0 ? '↑ 偏强' : pred.indicator.sumProj.trend < 0 ? '↓ 偏弱' : '→ 走平'}
+              </div>
+              <div className="metric-sub">
+                MACD 柱 {pred.indicator.sumProj.hist} · 强度 {pred.indicator.sumProj.trend}
+              </div>
+            </div>
+            <div className="metric-card">
+              <div className="metric-name">布林中轨</div>
+              <div className="metric-value">{pred.indicator.sumProj.mid}</div>
+              <div className="metric-sub">上 {pred.indicator.sumProj.upper} · 下 {pred.indicator.sumProj.lower}</div>
+            </div>
+          </div>
+
+          <div className="chip-row" style={{ marginTop: 10 }}>
+            {pred.indicator.compat.map((c) => (
+              <span key={c.digit} className="chip">
+                <i>
+                  {c.digit} 号兼容 {c.rate}%
+                </i>
+              </span>
+            ))}
+          </div>
+
+          <div className="note note-info" style={{ marginTop: 12 }}>
+            这一档把和值/跨度区间换成「布林中轨 + MA5 + MACD 柱」的投影，并按两码和落在投影区间的概率给数字加减分。
+            指标只是同一条和值序列的平滑，<b>不含未来信息、也不提高命中率</b>，只是多一个观察角度。
+          </div>
+        </div>
+      )}
 
       <div className="note note-warn" style={{ marginTop: 12 }}>
         和值、跨度、奇偶的「准确率」由取值个数决定：奇偶 8 种形态真实概率各为 1/8，取 7 种的上限就是

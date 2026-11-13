@@ -1,6 +1,8 @@
 // 福彩3D 预测引擎 —— 基于术语的多维度评分
 // 分析维度：热冷号、跨度、和值、奇偶、大中小、质合、形态、遗漏
 
+import { projectNext } from './kline.js'
+
 const PRIMES = new Set([1, 2, 3, 5, 7])
 const SMALL = new Set([0, 1, 2])
 const MID = new Set([3, 4, 5, 6])
@@ -872,4 +874,133 @@ export function walkForwardAuditFC3Dv2(draws, { periods = 50, minTrain = 20 } = 
   const oddRate = total ? +(rows.filter((r) => r.oddHit).length / total * 100).toFixed(0) : 0
   const formRate = total ? +(rows.filter((r) => r.formHit).length / total * 100).toFixed(0) : 0
   return { periods: total, rows, dist, avgHits, baseline: 1.8, spanRate, sumRate, oddRate, formRate }
+}
+
+// ============================================================
+// v4 技术指标档（独立档位，v1/v2 与默认档完全不受影响）
+//
+// 与 v2 的区别只在两处：
+//   1. 和值 / 跨度区间不再用「近 50 期均值 ± zσ」，改为 K 线指标投影：
+//      中枢 = 0.5 × 布林中轨 + 0.5 × MA5，再按 MACD 柱方向偏移，宽度 = zσ；
+//   2. 数字评分叠加「和值兼容度」软约束：某个数字与两码和落在投影区间的
+//      概率越高，加分越多，权重固定为 40 分制、不做单期调参。
+//
+// 诚实说明：MA / BOLL / MACD 都是同一条和值序列的平滑，不含未来信息，
+// 这一档只是换了描述方式，命中率不会因此提高。
+// ============================================================
+
+/** 两码和分布（每期拆 3 个两码和，Laplace 平滑到 0–18） */
+function pairSumDistribution(draws, n = 120) {
+  const counts = Array(19).fill(1)
+  const m = Math.min(n, draws.length)
+  for (let i = 0; i < m; i++) {
+    const [a, b, c] = draws[i].num
+    counts[a + b]++
+    counts[a + c]++
+    counts[b + c]++
+  }
+  const total = counts.reduce((s, v) => s + v, 0)
+  return counts.map((v) => v / total)
+}
+
+export function predictFC3Dv4(draws, { coverRate = 0.8 } = {}) {
+  const base = predictFC3Dv2(draws, { coverRate })
+  if (!base || draws.length < 10) return base
+
+  const n = Math.min(120, draws.length)
+  const chrono = draws.slice(0, n).reverse()
+  const sumValues = chrono.map((d) => analyzeDraw(d.num).sum)
+  const spanValues = chrono.map((d) => analyzeDraw(d.num).span)
+  const sumProj = projectNext(sumValues, { coverRate, min: 0, max: 27 })
+  const spanProj = projectNext(spanValues, { coverRate, min: 0, max: 9 })
+
+  // 和值投影区间 → 每个数字的兼容度
+  const pair = pairSumDistribution(draws, 120)
+  const compat = Array.from({ length: 10 }, (_, d) => {
+    let p = 0
+    for (let s = 0; s <= 18; s++) {
+      if (d + s >= sumProj.lo && d + s <= sumProj.hi) p += pair[s]
+    }
+    return p
+  })
+  const avgCompat = compat.reduce((a, b) => a + b, 0) / 10
+
+  const ranked = base.ranked
+    .map((r) => ({
+      digit: r.digit,
+      score: +(r.score + (compat[r.digit] - avgCompat) * 40).toFixed(2),
+    }))
+    .sort((a, b) => b.score - a.score)
+
+  const hot = ranked.slice(0, 3).map((r) => r.digit)
+  const cold = ranked.slice(-3).map((r) => r.digit)
+  const dan = ranked.slice(0, 2).map((r) => r.digit)
+  const tuo = ranked.slice(2, 6).map((r) => r.digit)
+  const kill = ranked.slice(-2).map((r) => ({
+    digit: r.digit,
+    score: r.score,
+    omit: base.omit[r.digit],
+    reason: '和值兼容度垫底，指标档排除',
+  }))
+
+  const recentSums = draws.slice(0, 50).map((d) => analyzeDraw(d.num).sum)
+  const recentSpans = draws.slice(0, 50).map((d) => analyzeDraw(d.num).span)
+
+  return {
+    ...base,
+    hot,
+    cold,
+    dan,
+    tuo,
+    ranked,
+    kill,
+    sumRange: [sumProj.lo, sumProj.hi],
+    spanRange: [spanProj.lo, spanProj.hi],
+    sumAvg: sumProj.center,
+    spanAvg: spanProj.center,
+    sumMode: mode(recentSums),
+    spanMode: mode(recentSpans),
+    indicator: {
+      window: n,
+      sumProj,
+      spanProj,
+      compat: compat.map((c, d) => ({ digit: d, rate: Math.round(c * 100) })),
+    },
+    algorithm: 'v4',
+  }
+}
+
+/** v4 单期回算（指标档） */
+export function backtestFC3Dv4(draws) {
+  if (draws.length < 11) return null
+  const train = draws.slice(1)
+  const actual = draws[0]
+  const pred = predictFC3Dv4(train)
+  if (!pred) return null
+  const a = analyzeDraw(actual.num)
+  const allRec = [...pred.dan, ...pred.tuo]
+  const hits = actual.num.filter((d) => allRec.includes(d))
+  const spanHit = a.span >= pred.spanRange[0] && a.span <= pred.spanRange[1]
+  const sumHit = a.sum >= pred.sumRange[0] && a.sum <= pred.sumRange[1]
+  const oddHit = pred.recommendedOdd.includes(a.oddPattern)
+  const formHit = pred.recommendedForms.includes(a.form)
+  return {
+    actualDraw: actual,
+    actualAnalysis: a,
+    prediction: pred,
+    danHits: pred.dan.filter((d) => actual.num.includes(d)),
+    tuoHits: pred.tuo.filter((d) => actual.num.includes(d)),
+    digitHits: hits,
+    digitHitCount: hits.length,
+    spanHit,
+    sumHit,
+    oddHit,
+    formHit,
+    score:
+      (hits.length === 3 ? 40 : hits.length === 2 ? 20 : hits.length === 1 ? 8 : 0) +
+      (spanHit ? 15 : 0) +
+      (sumHit ? 15 : 0) +
+      (oddHit ? 15 : 0) +
+      (formHit ? 15 : 0),
+  }
 }

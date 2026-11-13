@@ -29,6 +29,7 @@ import { predictFC3Dv2 as basePredictV2 } from './fc3dPredict.js'
 
 export { analyzeDraw, buildOddEven, build012, buildRepeatNeighbor }
 export { predictFC3D, backtestFC3D, walkForwardAuditFC3D }
+export { predictFC3Dv4, backtestFC3Dv4 } from './fc3dPredict.js'
 
 /** 合成参数（在排列三 1000 期上做 800 期滚动回测挑选，未对单期做特调） */
 const CFG = {

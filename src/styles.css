@@ -1594,3 +1594,48 @@ code {
 
 .crowd-tips { margin: 0; padding-left: 22px; display: flex; flex-direction: column; gap: 6px; font-size: 13.5px; color: var(--ink-80); }
 .crowd-tips li { line-height: 1.6; }
+
+/* ---------- 走势 K 线 / 号码连线 ---------- */
+.kline-chart { display: flex; flex-direction: column; gap: 6px; }
+.kline-legend {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 12px;
+  font-size: 11.5px;
+  font-family: var(--font-mono);
+  color: var(--ink-60);
+}
+.kline-legend-item { display: inline-flex; align-items: center; gap: 4px; }
+.kline-dot { width: 8px; height: 8px; border-radius: 50%; display: inline-block; flex: 0 0 auto; }
+.kline-legend-macd { margin-left: auto; }
+
+.kline-chart-scroll {
+  overflow-x: auto;
+  border: 1px solid var(--ink-20);
+  background: #fdfaf1;
+}
+
+.kline-trend-body {
+  max-height: 560px;
+  overflow: auto;
+  border: 1px solid var(--ink-20);
+  background: #fdfaf1;
+}
+.kline-trend-grid { display: flex; align-items: flex-start; }
+.kline-trend-labels {
+  flex: 0 0 auto;
+  position: sticky;
+  left: 0;
+  z-index: 2;
+  background: var(--paper-deep);
+  border-right: 1px solid var(--ink-20);
+}
+.kline-trend-label {
+  font-family: var(--font-mono);
+  font-size: 10px;
+  text-align: center;
+  color: var(--ink-60);
+  border-bottom: 1px solid var(--ink-08);
+}
+.kline-trend-scroll { flex: 1 1 auto; }
