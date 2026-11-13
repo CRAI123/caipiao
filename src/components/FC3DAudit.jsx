@@ -57,6 +57,9 @@ export default function FC3DAudit({
 }) {
   const [periods, setPeriods] = useState(defaultPeriods)
   const [algo, setAlgo] = useState('v2')
+  // v4 只存在于 3D/排列三引擎；其他引擎（或旧引擎）没有这两个函数时不展示该档，避免调用未定义
+  const v4Enabled =
+    typeof engine.walkForwardAuditFC3Dv4 === 'function' && typeof engine.predictFC3Dv4 === 'function'
 
   const audit = useMemo(
     () => engine[AUDIT_FN[algo]](draws, { periods, minTrain: algo === 'pro' ? 40 : 20 }),
@@ -68,12 +71,12 @@ export default function FC3DAudit({
     if (draws.length < 40) return null
     const a1 = engine.walkForwardAuditFC3D(draws, { periods, minTrain: 20 })
     const a2 = engine.walkForwardAuditFC3Dv2(draws, { periods, minTrain: 20 })
-    const a4 = engine.walkForwardAuditFC3Dv4(draws, { periods, minTrain: 20 })
+    const a4 = v4Enabled ? engine.walkForwardAuditFC3Dv4(draws, { periods, minTrain: 20 }) : null
     const a3 = proEnabled
       ? engine.walkForwardAuditPL3Pro(draws, { periods, minTrain: 40 })
       : null
     return { a1, a2, a4, a3 }
-  }, [draws, periods, engine, proEnabled])
+  }, [draws, periods, engine, proEnabled, v4Enabled])
 
   // 理论上限：由实际给出的取值个数反推，与任何算法无关
   const ceiling = useMemo(() => {
@@ -137,7 +140,9 @@ export default function FC3DAudit({
         <span className="toolbar-label">算法</span>
         <button className={`tab-btn ${algo === 'v1' ? 'active' : ''}`} onClick={() => setAlgo('v1')}>经典 v1</button>
         <button className={`tab-btn ${algo === 'v2' ? 'active' : ''}`} onClick={() => setAlgo('v2')}>{v2Label}</button>
-        <button className={`tab-btn ${algo === 'v4' ? 'active' : ''}`} onClick={() => setAlgo('v4')}>v4 技术指标</button>
+        {v4Enabled && (
+          <button className={`tab-btn ${algo === 'v4' ? 'active' : ''}`} onClick={() => setAlgo('v4')}>v4 技术指标</button>
+        )}
         {proEnabled && (
           <button className={`tab-btn ${algo === 'pro' ? 'active' : ''}`} onClick={() => setAlgo('pro')}>
             {proLabel}
@@ -160,7 +165,7 @@ export default function FC3DAudit({
                   <th>指标</th>
                   <th>经典 v1</th>
                   <th>{v2Label}</th>
-                  <th>v4 技术指标</th>
+                  {v4Enabled && <th>v4 技术指标</th>}
                   {proEnabled && <th>{proLabel}</th>}
                   <th>机选基准</th>
                   <th>理论上限</th>
@@ -171,7 +176,7 @@ export default function FC3DAudit({
                   <td>平均组选命中</td>
                   <td className="mono">{compare.a1.avgHits}</td>
                   <td className="mono"><b>{compare.a2.avgHits}</b></td>
-                  <td className="mono">{compare.a4.avgHits}</td>
+                  {v4Enabled && <td className="mono">{compare.a4.avgHits}</td>}
                   {proEnabled && <td className="mono"><b>{compare.a3?.avgHits}</b></td>}
                   <td className="mono muted">{compare.a1.baseline}</td>
                   <td className="mono muted">{ceiling?.hits}</td>
@@ -180,7 +185,7 @@ export default function FC3DAudit({
                   <td>跨度命中率</td>
                   <td className="mono">{compare.a1.spanRate}%</td>
                   <td className="mono"><b>{compare.a2.spanRate}%</b></td>
-                  <td className="mono">{compare.a4.spanRate}%</td>
+                  {v4Enabled && <td className="mono">{compare.a4.spanRate}%</td>}
                   {proEnabled && <td className="mono"><b>{compare.a3?.spanRate}%</b></td>}
                   <td className="muted">—</td>
                   <td className="mono muted">{ceiling?.span}%</td>
@@ -189,7 +194,7 @@ export default function FC3DAudit({
                   <td>和值命中率</td>
                   <td className="mono">{compare.a1.sumRate}%</td>
                   <td className="mono"><b>{compare.a2.sumRate}%</b></td>
-                  <td className="mono">{compare.a4.sumRate}%</td>
+                  {v4Enabled && <td className="mono">{compare.a4.sumRate}%</td>}
                   {proEnabled && <td className="mono"><b>{compare.a3?.sumRate}%</b></td>}
                   <td className="muted">—</td>
                   <td className="mono muted">{ceiling?.sum}%</td>
@@ -198,7 +203,7 @@ export default function FC3DAudit({
                   <td>奇偶命中率</td>
                   <td className="mono">{compare.a1.oddRate}%</td>
                   <td className="mono">{compare.a2.oddRate}%</td>
-                  <td className="mono">{compare.a4.oddRate}%</td>
+                  {v4Enabled && <td className="mono">{compare.a4.oddRate}%</td>}
                   {proEnabled && <td className="mono"><b>{compare.a3?.oddRate}%</b></td>}
                   <td className="muted">—</td>
                   <td className="mono muted">{ceiling?.odd}%</td>
@@ -207,7 +212,7 @@ export default function FC3DAudit({
                   <td>形态命中率</td>
                   <td className="mono">{compare.a1.formRate}%</td>
                   <td className="mono">{compare.a2.formRate}%</td>
-                  <td className="mono">{compare.a4.formRate}%</td>
+                  {v4Enabled && <td className="mono">{compare.a4.formRate}%</td>}
                   {proEnabled && <td className="mono">{compare.a3?.formRate}%</td>}
                   <td className="muted">—</td>
                   <td className="mono muted">{ceiling?.form}%</td>
@@ -217,7 +222,7 @@ export default function FC3DAudit({
                     <td>定位至少中 1 位</td>
                     <td className="muted">—</td>
                     <td className="muted">—</td>
-                    <td className="muted">—</td>
+                    {v4Enabled && <td className="muted">—</td>}
                     <td className="mono"><b>{compare.a3?.posRate}%</b></td>
                     <td className="muted">—</td>
                     <td className="mono muted">{ceiling?.pos}%</td>
@@ -229,8 +234,12 @@ export default function FC3DAudit({
           <Note>
             {v2Label} 用四个窗口的频率 + 位置转移合成概率，再穷举 1000 种结果得到和值/跨度/奇偶的
             精确分布，区间按覆盖目标取最短段落（80% → 奇偶取 7 种，上限 87.5%）。
-            v4 技术指标档把和值/跨度区间换成 MA5 + 布林 + MACD 投影，并叠加和值兼容度与 KDJ 读数修正，
-            参数固定、不做逐期调优——它只是换了一种描述方式，和 v2 的差异属于随机波动。
+            {v4Enabled && (
+              <>
+                v4 技术指标档把和值/跨度区间换成 MA5 + 布林 + MACD 投影，并叠加和值兼容度与 KDJ 读数修正，
+                参数固定、不做逐期调优——它只是换了一种描述方式，和 v2 的差异属于随机波动。
+              </>
+            )}
             {proEnabled && (
               <>
                 {' '}
