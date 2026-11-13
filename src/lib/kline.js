@@ -106,14 +106,73 @@ export function omissionSeries(draws, isHit, n = 60) {
   })
 }
 
+/**
+ * 指标参数预设：只改平滑速度，不改数据本身。
+ * KDJ 的 (3,3) 平滑固定，只有 RSV 窗口变化；MACD 三参数整组切换；BOLL 只变中轨窗口（k 固定 2）。
+ */
+export const INDICATOR_PRESETS = {
+  short: { key: 'short', label: '短周期', boll: 10, kdj: 5, macd: { fast: 6, slow: 13, signal: 5 } },
+  standard: { key: 'standard', label: '标准', boll: 20, kdj: 9, macd: { fast: 12, slow: 26, signal: 9 } },
+  long: { key: 'long', label: '长周期', boll: 30, kdj: 18, macd: { fast: 24, slow: 52, signal: 18 } },
+}
+
+export const DEFAULT_PRESET = INDICATOR_PRESETS.standard
+
+/** KDJ 金叉 / 死叉：返回 [{ i, type: 'gold' | 'dead' }]，i 为发生交叉的下标 */
+export function crossSignals(k, d) {
+  const out = []
+  for (let i = 1; i < k.length; i++) {
+    if (k[i] > d[i] && k[i - 1] <= d[i - 1]) out.push({ i, type: 'gold' })
+    else if (k[i] < d[i] && k[i - 1] >= d[i - 1]) out.push({ i, type: 'dead' })
+  }
+  return out
+}
+
+/**
+ * 背离识别：比较相邻同类局部极值
+ *   价格新高而 DIF 未新高 → 顶背离（type: 'top'）
+ *   价格新低而 DIF 未新低 → 底背离（type: 'bottom'）
+ * window 只回看最近 window 根，pivot 为极值左右各需确认的根数。
+ */
+export function divergences(values, dif, { window = 30, pivot = 2 } = {}) {
+  const n = values.length
+  const from = Math.max(pivot, n - window)
+  const highs = []
+  const lows = []
+  for (let i = from; i < n - pivot; i++) {
+    let isHigh = true
+    let isLow = true
+    for (let j = i - pivot; j <= i + pivot; j++) {
+      if (j === i) continue
+      if (!(values[i] > values[j])) isHigh = false
+      if (!(values[i] < values[j])) isLow = false
+      if (!isHigh && !isLow) break
+    }
+    if (isHigh) highs.push(i)
+    if (isLow) lows.push(i)
+  }
+  const out = []
+  for (let t = 1; t < highs.length; t++) {
+    const a = highs[t - 1]
+    const b = highs[t]
+    if (values[b] > values[a] && dif[b] < dif[a]) out.push({ i: b, prev: a, type: 'top' })
+  }
+  for (let t = 1; t < lows.length; t++) {
+    const a = lows[t - 1]
+    const b = lows[t]
+    if (values[b] < values[a] && dif[b] > dif[a]) out.push({ i: b, prev: a, type: 'bottom' })
+  }
+  return out.sort((x, y) => x.i - y.i)
+}
+
 /** 某个号码的指标读数（K/D/J、DIF/DEA/柱、通道位置），口径同行情软件 */
-export function omissionReading(rows) {
+export function omissionReading(rows, preset = DEFAULT_PRESET) {
   if (!rows || rows.length < 2) return null
   const values = rows.map((r) => r.omission)
   const i = values.length - 1
-  const kd = kdj(values)
-  const m = macd(values)
-  const band = boll(values, Math.min(20, values.length))
+  const kd = kdj(values, preset.kdj)
+  const m = macd(values, preset.macd)
+  const band = boll(values, Math.min(preset.boll, values.length))
   const K = kd.k[i]
   const D = kd.d[i]
   const J = kd.j[i]
@@ -228,12 +287,13 @@ function round2(v) {
   return Math.round(v * 100) / 100
 }
 
-/** 计算一张图需要的全部序列 */
-export function computeIndicators(values) {
+/** 计算一张图需要的全部序列（preset 只改平滑参数，默认同行情软件口径） */
+export function computeIndicators(values, preset = DEFAULT_PRESET) {
   return {
     ma5: movingAverage(values, 5),
     ma10: movingAverage(values, 10),
-    band: boll(values, Math.min(20, values.length || 1)),
-    macd: macd(values),
+    band: boll(values, Math.min(preset.boll, values.length || 1)),
+    macd: macd(values, preset.macd),
+    kdj: kdj(values, preset.kdj),
   }
 }

@@ -2,7 +2,7 @@
 // rows 按时间正序传入，每项 { id, date, omission, hit }
 // 红柱 = 当期开出该号（遗漏归零），绿柱 = 未开出的过渡期，柱高 = 当时的遗漏期数
 import React, { useMemo } from 'react'
-import { boll, kdj, macd } from '../lib/kline.js'
+import { boll, crossSignals, divergences, kdj, macd, DEFAULT_PRESET } from '../lib/kline.js'
 
 const HIT = '#c23a2b'
 const MISS = '#1d6f3e'
@@ -33,6 +33,7 @@ function linePath(values, x, y) {
 export default function OmissionChart({
   rows,
   showBoll = true,
+  preset = DEFAULT_PRESET,
   mainHeight = 168,
   kdjHeight = 84,
   macdHeight = 78,
@@ -40,9 +41,11 @@ export default function OmissionChart({
   const view = useMemo(() => {
     const n = rows.length
     const values = rows.map((r) => r.omission)
-    const band = boll(values, Math.min(20, n))
-    const kd = kdj(values)
-    const m = macd(values)
+    const band = boll(values, Math.min(preset.boll, n))
+    const kd = kdj(values, preset.kdj)
+    const m = macd(values, preset.macd)
+    const crosses = crossSignals(kd.k, kd.d)
+    const divs = divergences(values, m.dif)
 
     const upperEdge = band.reduce((mx, b) => (b.upper == null ? mx : Math.max(mx, b.upper)), 0)
     const yMax = Math.max(1, upperEdge, ...values) + 1
@@ -98,6 +101,8 @@ export default function OmissionChart({
       band,
       kd,
       m,
+      crosses,
+      divs,
       width,
       totalH,
       x,
@@ -116,7 +121,7 @@ export default function OmissionChart({
       ticks,
       last: rows[n - 1],
     }
-  }, [rows, showBoll, mainHeight, kdjHeight, macdHeight])
+  }, [rows, showBoll, preset, mainHeight, kdjHeight, macdHeight])
 
   if (!rows.length) return null
   const v = view
@@ -135,7 +140,7 @@ export default function OmissionChart({
         {showBoll && (
           <span className="kline-legend-item">
             <i className="kline-dot" style={{ background: BOLL_COLOR }} />
-            BOLL(20,2)
+            BOLL({preset.boll},2)
           </span>
         )}
         <span className="kline-legend-item">
@@ -217,6 +222,21 @@ export default function OmissionChart({
           <path d={linePath(v.kd.d, v.x, v.yK)} fill="none" stroke={MA10_COLOR} strokeWidth="1.1" />
           <path d={linePath(v.kd.j, v.x, v.yK)} fill="none" stroke={J_COLOR} strokeWidth="0.9" opacity="0.85" />
 
+          {/* KDJ 金叉 / 死叉 */}
+          {v.crosses.map((c) => (
+            <g key={`x${c.i}`}>
+              <circle
+                cx={v.x(c.i)}
+                cy={v.yK(v.kd.k[c.i])}
+                r={2.8}
+                fill={c.type === 'gold' ? HIT : MISS}
+                stroke="var(--card)"
+                strokeWidth="0.8"
+              />
+              <title>{`第 ${rows[c.i].id} 期 · KDJ ${c.type === 'gold' ? '金叉' : '死叉'}`}</title>
+            </g>
+          ))}
+
           {/* MACD 副图 */}
           <line x1={PAD_L} x2={v.width - PAD_R} y1={v.macdTop} y2={v.macdTop} stroke="var(--ink-20)" />
           <text x={4} y={v.macdTop + 9} className="chart-tick">
@@ -246,6 +266,37 @@ export default function OmissionChart({
           })}
           <path d={linePath(v.m.dif, v.x, v.mY)} fill="none" stroke={HIT} strokeWidth="1.1" />
           <path d={linePath(v.m.dea, v.x, v.mY)} fill="none" stroke={MA10_COLOR} strokeWidth="1.1" />
+
+          {/* MACD 顶 / 底背离 */}
+          {v.divs.map((dv) => {
+            const y2 = v.mY(v.m.dif[dv.i])
+            const y1 = v.mY(v.m.dif[dv.prev])
+            const top = dv.type === 'top'
+            return (
+              <g key={`dv${dv.i}`}>
+                <title>{`第 ${rows[dv.i].id} 期 · ${top ? '价格新高但 DIF 未新高' : '价格新低但 DIF 未新低'}`}</title>
+                <line
+                  x1={v.x(dv.prev)}
+                  y1={y1}
+                  x2={v.x(dv.i)}
+                  y2={y2}
+                  stroke={top ? HIT : MISS}
+                  strokeWidth="0.8"
+                  strokeDasharray="3 2"
+                  opacity="0.8"
+                />
+                <text
+                  x={v.x(dv.i)}
+                  y={top ? y2 - 4 : y2 + 9}
+                  textAnchor="middle"
+                  className="chart-val"
+                  fill={top ? HIT : MISS}
+                >
+                  {top ? '顶' : '底'}
+                </text>
+              </g>
+            )
+          })}
           <text x={4} y={v.mZero + 3} className="chart-tick">
             0
           </text>
