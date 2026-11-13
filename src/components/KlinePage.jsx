@@ -3,6 +3,7 @@ import React, { useMemo, useState } from 'react'
 import { Card, Note, ballKindByRange } from './common.jsx'
 import KlineChart from './KlineChart.jsx'
 import NumberTrend from './NumberTrend.jsx'
+import OmissionPanel from './OmissionPanel.jsx'
 import { buildCandles, projectNext, movingAverage } from '../lib/kline.js'
 
 const WINDOWS = [30, 60, 120]
@@ -248,6 +249,8 @@ export default function KlinePage({ lottery, draws }) {
         <SeriesCard key={s.key} series={s} showBoll={showBoll} />
       ))}
 
+      <OmissionPanel lottery={lottery} draws={draws} windowN={n} />
+
       {lottery === 'kl8' && (
         <Card title="号码走势连线（1 – 80）" tag={`近 ${trendN} 期`}>
           <NumberTrend
@@ -309,8 +312,8 @@ export default function KlinePage({ lottery, draws }) {
       )}
 
       <Note tone="warn">
-        技术指标（MA / 布林带 / MACD）都是对同一条和值、跨度序列做的平滑与偏离计算，
-        <b>不产生任何关于下一期的新信息，也不会提高命中率</b>。图上「突破上轨」「金叉」之类的形态，
+        技术指标（MA / 布林带 / MACD / KDJ）都是对同一条和值、跨度或号码遗漏序列做的平滑与偏离计算，
+        <b>不产生任何关于下一期的新信息，也不会提高命中率</b>。图上「突破上轨」「金叉」「超买超卖」之类的形态，
         在独立随机序列里同样会随机出现。此页仅用于把历史数据看得更直观。
       </Note>
     </div>

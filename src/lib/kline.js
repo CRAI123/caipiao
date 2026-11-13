@@ -60,6 +60,90 @@ export function boll(values, n = 20, k = 2) {
   })
 }
 
+/**
+ * KDJ：RSV = (C − LLV(n)) / (HHV(n) − LLV(n)) × 100
+ *      K = ((kSmooth−1)K′ + RSV) / kSmooth，D 同法平滑 K，J = 3K − 2D
+ * 口径与行情软件一致（默认 9,3,3），K/D/J 初值取 50。
+ */
+export function kdj(values, n = 9, kSmooth = 3, dSmooth = 3) {
+  const k = []
+  const d = []
+  const j = []
+  let prevK = 50
+  let prevD = 50
+  for (let i = 0; i < values.length; i++) {
+    const from = Math.max(0, i - n + 1)
+    let hi = -Infinity
+    let lo = Infinity
+    for (let t = from; t <= i; t++) {
+      hi = Math.max(hi, values[t])
+      lo = Math.min(lo, values[t])
+    }
+    const rsv = hi === lo ? 50 : ((values[i] - lo) / (hi - lo)) * 100
+    const kk = ((kSmooth - 1) * prevK + rsv) / kSmooth
+    const dd = ((dSmooth - 1) * prevD + kk) / dSmooth
+    k.push(kk)
+    d.push(dd)
+    j.push(3 * kk - 2 * dd)
+    prevK = kk
+    prevD = dd
+  }
+  return { k, d, j }
+}
+
+/**
+ * 遗漏序列（按时间正序输出）：draws 最新在前。
+ * 每项 { id, date, omission, hit }，omission 为该期开出前的遗漏期数，开出当期记 0。
+ */
+export function omissionSeries(draws, isHit, n = 60) {
+  const chrono = draws.slice(0, Math.min(n, draws.length)).reverse()
+  let omit = 0
+  return chrono.map((d) => {
+    const hit = !!isHit(d)
+    const row = { id: d.id ?? d.drawId, date: d.date, omission: hit ? 0 : omit, hit }
+    omit = hit ? 1 : omit + 1
+    return row
+  })
+}
+
+/** 某个号码的指标读数（K/D/J、DIF/DEA/柱、通道位置），口径同行情软件 */
+export function omissionReading(rows) {
+  if (!rows || rows.length < 2) return null
+  const values = rows.map((r) => r.omission)
+  const i = values.length - 1
+  const kd = kdj(values)
+  const m = macd(values)
+  const band = boll(values, Math.min(20, values.length))
+  const K = kd.k[i]
+  const D = kd.d[i]
+  const J = kd.j[i]
+  const pK = kd.k[i - 1]
+  const pD = kd.d[i - 1]
+  const hist = m.hist[i]
+  const pHist = m.hist[i - 1]
+  const state = []
+  if (K > 80 || J > 80) state.push('KDJ 高位')
+  else if (K < 20) state.push('KDJ 低位')
+  else state.push('KDJ 中位')
+  if (K > D && pK <= pD) state.push('金叉')
+  else if (K < D && pK >= pD) state.push('死叉')
+  state.push(`MACD ${hist > 0 ? '红柱' : '绿柱'}${Math.abs(hist) < Math.abs(pHist) ? '收敛' : '放大'}`)
+  if (band[i].mid != null) state.push(values[i] >= band[i].mid ? '通道上沿' : '通道下沿')
+  return {
+    omission: rows[i].omission,
+    k: round1(K),
+    d: round1(D),
+    j: round1(J),
+    dif: round2(m.dif[i]),
+    dea: round2(m.dea[i]),
+    hist: round2(hist),
+    mid: band[i].mid == null ? null : round1(band[i].mid),
+    upper: band[i].upper == null ? null : round1(band[i].upper),
+    lower: band[i].lower == null ? null : round1(band[i].lower),
+    state: state.join(' · '),
+  }
+}
+
 /** MACD：DIF = EMA(fast) − EMA(slow)，DEA = EMA(DIF, signal)，柱 = (DIF − DEA) × 2 */
 export function macd(values, { fast = 12, slow = 26, signal = 9 } = {}) {
   const f = ema(values, fast)

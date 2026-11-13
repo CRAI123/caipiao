@@ -1,7 +1,7 @@
 // 福彩3D 预测引擎 —— 基于术语的多维度评分
 // 分析维度：热冷号、跨度、和值、奇偶、大中小、质合、形态、遗漏
 
-import { projectNext } from './kline.js'
+import { projectNext, kdj, macd, omissionSeries } from './kline.js'
 
 const PRIMES = new Set([1, 2, 3, 5, 7])
 const SMALL = new Set([0, 1, 2])
@@ -879,13 +879,15 @@ export function walkForwardAuditFC3Dv2(draws, { periods = 50, minTrain = 20 } = 
 // ============================================================
 // v4 技术指标档（独立档位，v1/v2 与默认档完全不受影响）
 //
-// 与 v2 的区别只在两处：
+// 与 v2 的区别只在三处：
 //   1. 和值 / 跨度区间不再用「近 50 期均值 ± zσ」，改为 K 线指标投影：
 //      中枢 = 0.5 × 布林中轨 + 0.5 × MA5，再按 MACD 柱方向偏移，宽度 = zσ；
 //   2. 数字评分叠加「和值兼容度」软约束：某个数字与两码和落在投影区间的
-//      概率越高，加分越多，权重固定为 40 分制、不做单期调参。
+//      概率越高，加分越多，权重固定为 40 分制、不做单期调参；
+//   3. 三个位置各自 0–9 的遗漏序列再做 KDJ(9,3,3) / MACD 读数，
+//      超卖区、金叉、绿柱收敛正向加分，超买区、死叉、红柱收敛负向，权重 25 分。
 //
-// 诚实说明：MA / BOLL / MACD 都是同一条和值序列的平滑，不含未来信息，
+// 诚实说明：MA / BOLL / MACD / KDJ 都是同一条序列的平滑，不含未来信息，
 // 这一档只是换了描述方式，命中率不会因此提高。
 // ============================================================
 
@@ -901,6 +903,35 @@ function pairSumDistribution(draws, n = 120) {
   }
   const total = counts.reduce((s, v) => s + v, 0)
   return counts.map((v) => v / total)
+}
+
+/**
+ * 某位置某数字的 KDJ / MACD 修正系数，取值 [-1, 1]：
+ * 低位（K<20）与金叉、绿柱收敛记为正向，高位（K>80 或 J>80）与死叉、红柱收敛记为负向。
+ * 只作为「读数归类」的温和修正，不改变任何号码的理论概率。
+ */
+function kdjSignal(draws, pos, digit) {
+  const rows = omissionSeries(draws, (d) => d.num[pos] === digit, 60)
+  if (rows.length < 12) return 0
+  const values = rows.map((r) => r.omission)
+  const kd = kdj(values)
+  const m = macd(values)
+  const i = values.length - 1
+  const K = kd.k[i]
+  const J = kd.j[i]
+  const hiK = kd.k[i - 1]
+  const hiD = kd.d[i - 1]
+  const D = kd.d[i]
+  const hist = m.hist[i]
+  const pHist = m.hist[i - 1]
+  let s = 0
+  if (K < 20) s += 0.5
+  else if (K > 80 || J > 80) s -= 0.5
+  if (K > D && hiK <= hiD) s += 0.3
+  else if (K < D && hiK >= hiD) s -= 0.3
+  if (hist < 0 && hist > pHist) s += 0.2
+  else if (hist > 0 && hist < pHist) s -= 0.2
+  return Math.max(-1, Math.min(1, s))
 }
 
 export function predictFC3Dv4(draws, { coverRate = 0.8 } = {}) {
@@ -925,10 +956,15 @@ export function predictFC3Dv4(draws, { coverRate = 0.8 } = {}) {
   })
   const avgCompat = compat.reduce((a, b) => a + b, 0) / 10
 
+  // 三个位置各自 0–9 的遗漏序列做 KDJ / MACD 读数，取平均作为温和修正（权重 25 分）
+  const kdjBias = Array.from({ length: 10 }, (_, d) =>
+    +(((kdjSignal(draws, 0, d) + kdjSignal(draws, 1, d) + kdjSignal(draws, 2, d)) / 3).toFixed(3)),
+  )
+
   const ranked = base.ranked
     .map((r) => ({
       digit: r.digit,
-      score: +(r.score + (compat[r.digit] - avgCompat) * 40).toFixed(2),
+      score: +(r.score + (compat[r.digit] - avgCompat) * 40 + kdjBias[r.digit] * 25).toFixed(2),
     }))
     .sort((a, b) => b.score - a.score)
 
@@ -965,6 +1001,7 @@ export function predictFC3Dv4(draws, { coverRate = 0.8 } = {}) {
       sumProj,
       spanProj,
       compat: compat.map((c, d) => ({ digit: d, rate: Math.round(c * 100) })),
+      kdj: kdjBias.map((bias, d) => ({ digit: d, bias })),
     },
     algorithm: 'v4',
   }

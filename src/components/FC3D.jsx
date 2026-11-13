@@ -336,7 +336,7 @@ export default function FC3D({ draws, engine = fc3dEngine, algoInfo = ALGO_INFO,
             <h3>技术指标档 · 和值 / 跨度投影</h3>
             <span className="muted small">
               和值序列 {pred.indicator.window} 期 · MA5 {pred.indicator.sumProj.ma5} · 布林{' '}
-              {pred.indicator.sumProj.lower}–{pred.indicator.sumProj.upper}
+              {pred.indicator.sumProj.lower}–{pred.indicator.sumProj.upper} · KDJ 定位修正已启用
             </span>
           </div>
 
@@ -386,9 +386,24 @@ export default function FC3D({ draws, engine = fc3dEngine, algoInfo = ALGO_INFO,
             ))}
           </div>
 
+          {pred.indicator.kdj && (
+            <div className="chip-row" style={{ marginTop: 6 }}>
+              {pred.indicator.kdj.map((k) => (
+                <span key={k.digit} className="chip">
+                  <i>
+                    {k.digit} 号 KDJ 修正 {k.bias > 0 ? '+' : ''}
+                    {k.bias}
+                  </i>
+                </span>
+              ))}
+            </div>
+          )}
+
           <div className="note note-info" style={{ marginTop: 12 }}>
-            这一档把和值/跨度区间换成「布林中轨 + MA5 + MACD 柱」的投影，并按两码和落在投影区间的概率给数字加减分。
-            指标只是同一条和值序列的平滑，<b>不含未来信息、也不提高命中率</b>，只是多一个观察角度。
+            这一档把和值/跨度区间换成「布林中轨 + MA5 + MACD 柱」的投影，并按两码和落在投影区间的概率给数字加减分；
+            再对百/十/个三个位置各自的 0–9 遗漏序列做 KDJ(9,3,3) 与 MACD 读数，超卖区、金叉、绿柱收敛轻微加分，
+            超买区、死叉、红柱收敛轻微减分。
+            指标只是同一条序列的平滑，<b>不含未来信息、也不提高命中率</b>，只是多一个观察角度。
           </div>
         </div>
       )}
