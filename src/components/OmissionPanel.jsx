@@ -4,17 +4,42 @@
 import React, { useMemo, useState } from 'react'
 import { Card, Note } from './common.jsx'
 import OmissionChart from './OmissionChart.jsx'
-import { omissionReading, omissionSeries } from '../lib/kline.js'
+import { omissionReading, omissionSeries, DEFAULT_PRESET } from '../lib/kline.js'
 
 const POS_LABEL = ['百位', '十位', '个位']
 
-export default function OmissionPanel({ lottery, draws, windowN = 60 }) {
+const SORTS = [
+  { key: 'default', label: '默认（0–9）' },
+  { key: 'omit', label: '遗漏 ↓' },
+  { key: 'k', label: 'K ↓' },
+  { key: 'j', label: 'J ↓' },
+]
+
+const FILTERS = [
+  { key: 'all', label: '全部' },
+  { key: 'high', label: '超买' },
+  { key: 'low', label: '超卖' },
+  { key: 'gold', label: '金叉' },
+  { key: 'dead', label: '死叉' },
+]
+
+function matchFilter(r, key) {
+  if (key === 'high') return (r.k ?? 0) > 80 || (r.j ?? 0) > 80
+  if (key === 'low') return (r.k ?? 100) < 20
+  if (key === 'gold') return (r.state || '').includes('金叉')
+  if (key === 'dead') return (r.state || '').includes('死叉')
+  return true
+}
+
+export default function OmissionPanel({ lottery, draws, windowN = 60, preset = DEFAULT_PRESET }) {
   const isDigit = lottery === 'fc3d' || lottery === 'pl3'
   const isSsq = lottery === 'ssq'
   const [pos, setPos] = useState(0)
   const [digit, setDigit] = useState(0)
   const [kind, setKind] = useState('red')
   const [num, setNum] = useState(1)
+  const [sortKey, setSortKey] = useState('default')
+  const [filterKey, setFilterKey] = useState('all')
 
   const maxNum = isSsq ? (kind === 'red' ? 33 : 16) : 80
   const selNum = Math.min(num, maxNum)
@@ -27,16 +52,48 @@ export default function OmissionPanel({ lottery, draws, windowN = 60 }) {
   }, [isDigit, lottery, pos, selDigit, kind])
 
   const rows = useMemo(() => omissionSeries(draws, hitFn, windowN), [draws, hitFn, windowN])
-  const reading = useMemo(() => omissionReading(rows), [rows])
+  const reading = useMemo(() => omissionReading(rows, preset), [rows, preset])
 
   // 3D / 排列三：该位置 0–9 的读数总表（与讲义附录的表 2 同口径）
   const tableRows = useMemo(() => {
     if (!isDigit) return []
     return Array.from({ length: 10 }, (_, d) => {
-      const r = omissionReading(omissionSeries(draws, (x) => x.num[pos] === d, windowN))
+      const r = omissionReading(omissionSeries(draws, (x) => x.num[pos] === d, windowN), preset)
       return { digit: d, ...(r || {}) }
     })
-  }, [isDigit, draws, pos, windowN])
+  }, [isDigit, draws, pos, windowN, preset])
+
+  // 排序 + 筛选只作用于展示，不改动任何数值
+  const viewRows = useMemo(() => {
+    const list = tableRows.filter((r) => matchFilter(r, filterKey))
+    if (sortKey === 'omit') return [...list].sort((a, b) => (b.omission ?? -1) - (a.omission ?? -1))
+    if (sortKey === 'k') return [...list].sort((a, b) => (b.k ?? -1) - (a.k ?? -1))
+    if (sortKey === 'j') return [...list].sort((a, b) => (b.j ?? -1) - (a.j ?? -1))
+    return list
+  }, [tableRows, sortKey, filterKey])
+
+  const exportCsv = () => {
+    const head = ['号码', '遗漏', 'K', 'D', 'J', 'DIF', 'MACD柱', '图形状态']
+    const lines = viewRows.map((r) =>
+      [
+        r.digit,
+        r.omission ?? '',
+        r.k ?? '',
+        r.d ?? '',
+        r.j ?? '',
+        r.dif ?? '',
+        r.hist ?? '',
+        (r.state || '').replace(/,/g, '，'),
+      ].join(','),
+    )
+    const csv = `\ufeff${[head.join(','), ...lines].join('\r\n')}`
+    const url = URL.createObjectURL(new Blob([csv], { type: 'text/csv;charset=utf-8' }))
+    const a = document.createElement('a')
+    a.href = url
+    a.download = `${lottery}-${POS_LABEL[pos]}-指标读数.csv`
+    a.click()
+    URL.revokeObjectURL(url)
+  }
 
   const title = isDigit
     ? `定位号码 K 线 · ${POS_LABEL[pos]}`
@@ -89,7 +146,7 @@ export default function OmissionPanel({ lottery, draws, windowN = 60 }) {
         )}
       </div>
 
-      <OmissionChart rows={rows} />
+      <OmissionChart rows={rows} preset={preset} />
 
       {reading && (
         <div className="metric-grid" style={{ marginTop: 10 }}>
@@ -135,6 +192,33 @@ export default function OmissionPanel({ lottery, draws, windowN = 60 }) {
           <div className="predict-sub" style={{ marginTop: 14 }}>
             {POS_LABEL[pos]} 0–9 指标读数（截图时点口径，仅描述历史）
           </div>
+          <div className="toolbar" style={{ marginBottom: 8 }}>
+            <span className="toolbar-label">排序</span>
+            {SORTS.map((s) => (
+              <button
+                key={s.key}
+                className={`tab-btn ${sortKey === s.key ? 'active' : ''}`}
+                onClick={() => setSortKey(s.key)}
+              >
+                {s.label}
+              </button>
+            ))}
+            <span className="toolbar-sep" />
+            <span className="toolbar-label">筛选</span>
+            {FILTERS.map((f) => (
+              <button
+                key={f.key}
+                className={`tab-btn ${filterKey === f.key ? 'active' : ''}`}
+                onClick={() => setFilterKey(f.key)}
+              >
+                {f.label}
+              </button>
+            ))}
+            <span className="toolbar-sep" />
+            <button className="tab-btn" onClick={exportCsv}>
+              导出 CSV
+            </button>
+          </div>
           <div className="table-scroll">
             <table className="ledger-table">
               <thead>
@@ -150,7 +234,7 @@ export default function OmissionPanel({ lottery, draws, windowN = 60 }) {
                 </tr>
               </thead>
               <tbody>
-                {tableRows.map((r) => (
+                {viewRows.map((r) => (
                   <tr key={r.digit}>
                     <td>
                       <b>{r.digit}</b>
@@ -164,12 +248,19 @@ export default function OmissionPanel({ lottery, draws, windowN = 60 }) {
                     <td className="muted small">{r.state ?? '数据不足'}</td>
                   </tr>
                 ))}
+                {!viewRows.length && (
+                  <tr>
+                    <td colSpan={8} className="muted small">
+                      当前筛选下没有符合条件的号码。
+                    </td>
+                  </tr>
+                )}
               </tbody>
             </table>
           </div>
           <Note>
-            表中 K、D、J、DIF、MACD 柱都由「该号码的遗漏序列」算出，属于历史读数的客观归类。
-            遗漏长短与下期是否开出没有因果关系，高位、低位、金叉、死叉都不改变每个号码的理论概率。
+            排序与筛选只改变展示顺序，不改变数值；表中 K、D、J、DIF、MACD 柱都由「该号码的遗漏序列」算出，
+            属于历史读数的客观归类。遗漏长短与下期是否开出没有因果关系，高位、低位、金叉、死叉都不改变每个号码的理论概率。
           </Note>
         </>
       )}

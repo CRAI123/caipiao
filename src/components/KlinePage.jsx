@@ -4,9 +4,10 @@ import { Card, Note, ballKindByRange } from './common.jsx'
 import KlineChart from './KlineChart.jsx'
 import NumberTrend from './NumberTrend.jsx'
 import OmissionPanel from './OmissionPanel.jsx'
-import { buildCandles, projectNext, movingAverage } from '../lib/kline.js'
+import { buildCandles, projectNext, movingAverage, INDICATOR_PRESETS } from '../lib/kline.js'
 
 const WINDOWS = [30, 60, 120]
+const PRESET_KEYS = ['short', 'standard', 'long']
 const POS_LABEL = ['百位', '十位', '个位']
 const RANGE_COLOR = { red: '#c23a2b', blue: '#24558f', green: '#1d6f3e', amber: '#b7791f' }
 
@@ -98,7 +99,7 @@ function buildSeries(lottery, chrono) {
   ]
 }
 
-function SeriesCard({ series, showBoll }) {
+function SeriesCard({ series, showBoll, preset }) {
   const { candles, values, proj, ma10, hint, title, tag } = series
   const last = values[values.length - 1]
   const prev = values[values.length - 2]
@@ -107,7 +108,7 @@ function SeriesCard({ series, showBoll }) {
 
   return (
     <Card title={title} tag={tag}>
-      <KlineChart candles={candles} showBoll={showBoll} />
+      <KlineChart candles={candles} showBoll={showBoll} preset={preset} />
       <div className="metric-grid" style={{ marginTop: 10 }}>
         <div className="metric-card">
           <div className="metric-name">最新值</div>
@@ -156,7 +157,10 @@ function SeriesCard({ series, showBoll }) {
 export default function KlinePage({ lottery, draws }) {
   const [windowN, setWindowN] = useState(60)
   const [showBoll, setShowBoll] = useState(true)
+  const [presetKey, setPresetKey] = useState('standard')
   const [pos, setPos] = useState(0)
+
+  const preset = INDICATOR_PRESETS[presetKey]
 
   const n = Math.min(windowN, draws.length)
 
@@ -242,14 +246,31 @@ export default function KlinePage({ lottery, draws }) {
         <button className={`tab-btn ${showBoll ? 'active' : ''}`} onClick={() => setShowBoll((v) => !v)}>
           布林带 {showBoll ? '开' : '关'}
         </button>
-        <span className="toolbar-note">K 线为合成蜡烛：开=上期值 · 收=本期值 · 影线=本期跨度折算</span>
+        <span className="toolbar-sep" />
+        <span className="toolbar-label">指标参数</span>
+        {PRESET_KEYS.map((k) => (
+          <button
+            key={k}
+            className={`tab-btn ${presetKey === k ? 'active' : ''}`}
+            onClick={() => setPresetKey(k)}
+          >
+            {INDICATOR_PRESETS[k].label}
+          </button>
+        ))}
+        <span className="toolbar-note">
+          {preset.label}：KDJ({preset.kdj}) · MACD({preset.macd.fast},{preset.macd.slow},{preset.macd.signal}) · BOLL({preset.boll},2)
+          —— 参数只改平滑速度
+        </span>
+        <span className="toolbar-note">
+          K 线为合成蜡烛：开=上期值 · 收=本期值 · 影线=本期跨度折算；圆点=KDJ 金叉/死叉，顶/底=MACD 背离
+        </span>
       </div>
 
       {series.map((s) => (
-        <SeriesCard key={s.key} series={s} showBoll={showBoll} />
+        <SeriesCard key={s.key} series={s} showBoll={showBoll} preset={preset} />
       ))}
 
-      <OmissionPanel lottery={lottery} draws={draws} windowN={n} />
+      <OmissionPanel lottery={lottery} draws={draws} windowN={n} preset={preset} />
 
       {lottery === 'kl8' && (
         <Card title="号码走势连线（1 – 80）" tag={`近 ${trendN} 期`}>

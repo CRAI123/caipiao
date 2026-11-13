@@ -1,7 +1,7 @@
 // 通用 SVG K 线图：蜡烛 + MA5/MA10 + 布林带 + MACD 副图
 // 纯手写 SVG，无图表库依赖；所有数据由调用方按时间正序传入
 import React, { useMemo } from 'react'
-import { computeIndicators } from '../lib/kline.js'
+import { computeIndicators, divergences, DEFAULT_PRESET } from '../lib/kline.js'
 
 const UP = '#c23a2b'
 const DOWN = '#1d6f3e'
@@ -34,6 +34,7 @@ function LegendDot({ color }) {
 export default function KlineChart({
   candles,
   showBoll = true,
+  preset = DEFAULT_PRESET,
   height = 200,
   macdHeight = 84,
   fmt = (v) => v,
@@ -41,7 +42,8 @@ export default function KlineChart({
   const view = useMemo(() => {
     const n = candles.length
     const values = candles.map((c) => c.close)
-    const ind = computeIndicators(values)
+    const ind = computeIndicators(values, preset)
+    const divs = divergences(values, ind.macd.dif)
 
     const lowerEdge = (arr) => arr.reduce((m, v) => (v == null ? m : Math.min(m, v)), Infinity)
     const upperEdge = (arr) => arr.reduce((m, v) => (v == null ? m : Math.max(m, v)), -Infinity)
@@ -105,6 +107,7 @@ export default function KlineChart({
     return {
       n,
       ind,
+      divs,
       width,
       totalH,
       x,
@@ -118,10 +121,10 @@ export default function KlineChart({
       ticks,
       last: candles[n - 1],
     }
-  }, [candles, showBoll, height, macdHeight])
+  }, [candles, showBoll, preset, height, macdHeight, fmt])
 
   if (!candles.length) return null
-  const { n, ind, width, totalH, x, y, mY, mZero, macdTop, macdBottom, bandArea, grid, ticks, last } = view
+  const { n, ind, divs, width, totalH, x, y, mY, mZero, macdTop, macdBottom, bandArea, grid, ticks, last } = view
 
   return (
     <div className="kline-chart">
@@ -140,7 +143,7 @@ export default function KlineChart({
         </span>
         {showBoll && (
           <span className="kline-legend-item">
-            <LegendDot color={BOLL_COLOR} />BOLL(20,2)
+            <LegendDot color={BOLL_COLOR} />BOLL({preset.boll},2)
           </span>
         )}
         <span className="kline-legend-item kline-legend-macd">
@@ -222,6 +225,39 @@ export default function KlineChart({
           {/* 均线 */}
           <path d={linePath(ind.ma5, x, y)} fill="none" stroke={MA5_COLOR} strokeWidth="1.3" />
           <path d={linePath(ind.ma10, x, y)} fill="none" stroke={MA10_COLOR} strokeWidth="1.3" />
+
+          {/* MACD 顶 / 底背离 */}
+          {divs.map((dv) => {
+            const top = dv.type === 'top'
+            const y2 = y(candles[dv.i].close)
+            const y1 = y(candles[dv.prev].close)
+            return (
+              <g key={`dv${dv.i}`}>
+                <title>
+                  {`第 ${candles[dv.i].id} 期 · ${top ? '价格新高但 DIF 未新高（顶背离）' : '价格新低但 DIF 未新低（底背离）'}`}
+                </title>
+                <line
+                  x1={x(dv.prev)}
+                  y1={y1}
+                  x2={x(dv.i)}
+                  y2={y2}
+                  stroke={top ? UP : DOWN}
+                  strokeWidth="0.8"
+                  strokeDasharray="3 2"
+                  opacity="0.75"
+                />
+                <text
+                  x={x(dv.i)}
+                  y={top ? y2 - 6 : y2 + 12}
+                  textAnchor="middle"
+                  className="chart-val"
+                  fill={top ? UP : DOWN}
+                >
+                  {top ? '顶' : '底'}
+                </text>
+              </g>
+            )
+          })}
 
           {/* 最新收盘参考线 */}
           <line

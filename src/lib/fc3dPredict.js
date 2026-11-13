@@ -1007,6 +1007,45 @@ export function predictFC3Dv4(draws, { coverRate = 0.8 } = {}) {
   }
 }
 
+/** v4 滚动回测（指标档，结构同 v2，便于同表对照） */
+export function walkForwardAuditFC3Dv4(draws, { periods = 50, minTrain = 20 } = {}) {
+  const n = Math.min(periods, draws.length - minTrain)
+  if (n <= 0) {
+    return { periods: 0, rows: [], dist: [], avgHits: 0, baseline: 0, spanRate: 0, sumRate: 0, oddRate: 0, formRate: 0 }
+  }
+  const rows = []
+  for (let i = 0; i < n; i++) {
+    const actual = draws[i]
+    const train = draws.slice(i + 1)
+    if (train.length < minTrain) break
+    const pred = predictFC3Dv4(train)
+    if (!pred) continue
+    const a = analyzeDraw(actual.num)
+    const allRec = [...pred.dan, ...pred.tuo]
+    const hits = actual.num.filter((d) => allRec.includes(d))
+    const danHits = pred.dan.filter((d) => actual.num.includes(d))
+    const spanHit = a.span >= pred.spanRange[0] && a.span <= pred.spanRange[1]
+    const sumHit = a.sum >= pred.sumRange[0] && a.sum <= pred.sumRange[1]
+    const oddHit = pred.recommendedOdd.includes(a.oddPattern)
+    const formHit = pred.recommendedForms.includes(a.form)
+    const score =
+      (hits.length === 3 ? 40 : hits.length === 2 ? 20 : hits.length === 1 ? 8 : 0) +
+      (spanHit ? 15 : 0) + (sumHit ? 15 : 0) + (oddHit ? 15 : 0) + (formHit ? 15 : 0)
+    rows.push({
+      draw: actual, prediction: pred, hits: hits.length, hitNums: hits,
+      danHits: danHits.length, spanHit, sumHit, oddHit, formHit, score,
+    })
+  }
+  const total = rows.length
+  const dist = [0, 1, 2, 3].map((k) => ({ k, count: rows.filter((r) => r.hits === k).length }))
+  const avgHits = total ? +(rows.reduce((s, r) => s + r.hits, 0) / total).toFixed(2) : 0
+  const spanRate = total ? +(rows.filter((r) => r.spanHit).length / total * 100).toFixed(0) : 0
+  const sumRate = total ? +(rows.filter((r) => r.sumHit).length / total * 100).toFixed(0) : 0
+  const oddRate = total ? +(rows.filter((r) => r.oddHit).length / total * 100).toFixed(0) : 0
+  const formRate = total ? +(rows.filter((r) => r.formHit).length / total * 100).toFixed(0) : 0
+  return { periods: total, rows, dist, avgHits, baseline: 1.8, spanRate, sumRate, oddRate, formRate }
+}
+
 /** v4 单期回算（指标档） */
 export function backtestFC3Dv4(draws) {
   if (draws.length < 11) return null
