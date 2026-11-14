@@ -10,6 +10,7 @@ import Repeats from './components/Repeats.jsx'
 import DanTuo from './components/DanTuo.jsx'
 import Predict from './components/Predict.jsx'
 import Audit from './components/Audit.jsx'
+import KL8Prize from './components/KL8Prize.jsx'
 import Journal from './components/Journal.jsx'
 import DataManager from './components/DataManager.jsx'
 import Settings from './components/Settings.jsx'
@@ -70,6 +71,7 @@ const TABS = [
   { id: 'kline', label: '走势K线', en: 'K-LINE' },
   { id: 'repeats', label: '重号斜连', en: 'REPEATS' },
   { id: 'dantuo', label: '复式胆拖', en: 'BETS' },
+  { id: 'prize', label: '概率奖金', en: 'ODDS' },
   { id: 'predict', label: '下期推荐', en: 'PREDICT' },
   { id: 'audit', label: '方法体检', en: 'AUDIT' },
   { id: 'journal', label: '购彩账本', en: 'LEDGER' },
@@ -466,6 +468,7 @@ export default function App() {
             {tab === 'repeats' && <Repeats draws={draws} />}
             {tab === 'dantuo' && <DanTuo draws={draws} />}
             {tab === 'predict' && <Predict draws={draws} />}
+            {tab === 'prize' && <KL8Prize draws={draws} />}
             {tab === 'audit' && <Audit draws={draws} />}
             {tab === 'journal' && <Journal draws={draws} />}
             {tab === 'data' && <DataManager draws={draws} setDraws={setDraws} />}
