@@ -14,6 +14,8 @@ import {
   road,
 } from '../lib/stats.js'
 import { aiPredict, storePrediction } from '../lib/api.js'
+import { v7Recommend } from '../lib/kl8V7.js'
+import { fmtPct } from '../lib/kl8Math.js'
 import BetVerify from './BetVerify.jsx'
 
 const MODES = [
@@ -53,6 +55,7 @@ export default function Predict({ draws }) {
   const [aiReasoning, setAiReasoning] = useState('')
   const [aiBusy, setAiBusy] = useState(false)
   const [aiMsg, setAiMsg] = useState(null)
+  const [showV7, setShowV7] = useState(false)
 
   const { scores, weighted, missing, window } = useMemo(
     () => scoreBalls(draws, { periods: 100, halfLife: 20, hotMode }),
@@ -91,6 +94,12 @@ export default function Predict({ draws }) {
   const nextId = latest ? latest.id + 1 : '—'
   const latestHit = new Set(latest?.nums || [])
   const danHitNow = dans.filter((n) => latestHit.has(n)).length
+
+  // v7：按期号固定的四层统计选号，点按钮才计算
+  const v7 = useMemo(
+    () => (showV7 ? v7Recommend(draws, { play, nextId: latest ? latest.id + 1 : undefined }) : null),
+    [showV7, draws, play, latest],
+  )
 
   const bet = useMemo(
     () => ({
@@ -188,6 +197,12 @@ export default function Predict({ draws }) {
         <button className="btn-primary" onClick={doAiPredict} disabled={aiBusy}>
           {aiBusy ? 'AI 分析中…' : '🤖 AI 选号'}
         </button>
+        <button
+          className={`tab-btn ${showV7 ? 'active' : ''}`}
+          onClick={() => setShowV7((v) => !v)}
+        >
+          v7 算法推荐
+        </button>
         <button className="tab-btn" onClick={exportTxt}>导出推荐方案（.txt）</button>
       </div>
 
@@ -245,6 +260,57 @@ export default function Predict({ draws }) {
           奇偶接近均衡。这让号码形态更像常见开奖，<b>但不提高中奖概率</b>。
         </Note>
       </Card>
+
+      {v7 && (
+        <Card
+          title={`v7 算法 · 第 ${v7.nextId} 期 · ${PLAY_LABEL[v7.play]} 推荐`}
+          tag={`30 码推荐池 → 动态概率抽样 · 主窗口 ${v7.primaryWindow} 期`}
+        >
+          <div className="predict-head">
+            <div>
+              <div className="predict-sub">v7 推荐 {v7.play} 码（按期号固定，重复点击结果一致）</div>
+              <span className="draw-balls predict-balls">
+                {v7.picks.map((n) => (
+                  <Ball key={n} n={n} size="md" kind="auto" />
+                ))}
+              </span>
+            </div>
+          </div>
+          <div className="predict-head" style={{ marginTop: 12 }}>
+            <div>
+              <div className="predict-sub">备选 3 码（灰色）</div>
+              <span className="draw-balls">
+                {v7.backup.map((n) => (
+                  <Ball key={n} n={n} size="sm" kind="plain" dim />
+                ))}
+              </span>
+            </div>
+          </div>
+
+          <div className="chip-row" style={{ marginTop: 14 }}>
+            <span className="chip"><i>推荐池 30 码 · 上期重号 {v7.lastHitInPool}</i></span>
+            <span className="chip"><i>排除池 30 码 · 上期重号 {v7.lastHitInKill}</i></span>
+            <span className="chip"><i>单注期望 {v7.stats.ev.toFixed(2)} 元</i></span>
+            <span className="chip"><i>返还率 {fmtPct(v7.stats.returnRate, 1)}</i></span>
+          </div>
+
+          <div className="predict-sub" style={{ marginTop: 12 }}>推荐池（30 码）</div>
+          <div className="mono small" style={{ lineHeight: 1.9 }}>
+            {v7.pool.map((x) => pad2(x.n)).join(' ')}
+          </div>
+          <div className="predict-sub" style={{ marginTop: 12 }}>排除池（30 码）</div>
+          <div className="mono small muted" style={{ lineHeight: 1.9 }}>
+            {v7.kill.map((x) => pad2(x.n)).join(' ')}
+          </div>
+
+          <Note tone="warn">
+            v7 = 组合概率层 + 100/50/30/20 期多窗口轮动 + 遗漏分档加权抽样，四个窗口权重（主窗口 55%，其余各 15%）
+            和抽样过程写死在代码里，<b>没有用历史开奖拟合参数</b>。同一期号重复点击结果相同。
+            它只是把统计偏好落成一张具体号码，<b>不提高中奖概率</b>；{PLAY_LABEL[v7.play]}头奖概率仍是
+            1 / {Math.round(comb(BALL_MAX, v7.play) / comb(20, v7.play)).toLocaleString()}。
+          </Note>
+        </Card>
+      )}
 
       {aiPicks && (
         <Card title={`🤖 AI 选号 · 第 ${nextId} 期`} tag="底层统计 + AI 分析">
