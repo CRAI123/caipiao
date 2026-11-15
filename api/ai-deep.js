@@ -35,8 +35,8 @@ const MODELS = [
 ]
 const TEMPS = [0.65, 0.85, 1.0]
 const ROUND2_WEIGHT = 1.5
-// 结果结构版本：旧版没有「终选 10 码」，命中旧版会重算
-const SCHEMA = 2
+// 结果结构版本：旧版没有「终选 10 码 / AI 终审」，命中旧版会重算
+const SCHEMA = 3
 
 const bandOf = (n) => Math.min(3, Math.floor((n - 1) / 20))
 const pad = (n) => String(n).padStart(2, '0')
@@ -49,8 +49,15 @@ function extractJson(text) {
   const start = body.indexOf('{')
   const end = body.lastIndexOf('}')
   if (start < 0 || end <= start) return null
+  const slice = body.slice(start, end + 1)
   try {
-    return JSON.parse(body.slice(start, end + 1))
+    return JSON.parse(slice)
+  } catch {
+    /* 继续尝试修复 */
+  }
+  // 模型常把号码写成 09 / 07 这种带前导零的数字，JSON 不合法：去掉前导零再解析
+  try {
+    return JSON.parse(slice.replace(/(?<![\d."'\-])0+(\d+)/g, '$1'))
   } catch {
     return null
   }
@@ -467,27 +474,65 @@ ${schemaPrompt(k)}`
     for (const { picks } of [...round1, ...round2]) {
       for (const n of picks) hitsMap[n] = (hitsMap[n] || 0) + 1
     }
-    // 第二次收敛：只买 10 个球时，用底层算法分 + AI 投票融合出正好 10 码
+    // 第二次收敛：只买 10 个球时，用底层算法分 + AI 投票融合出候选
     const ten = finalize10(v7.pool, voteMap, hitsMap, 10)
+    const wide = finalize10(v7.pool, voteMap, hitsMap, 20)
+
+    // 第三次：把 20 码算法候选交给 AI 终审，让它自己决定最终 10 码（失败则回退算法结果）
+    const candLine = wide.map((x) => `${pad(x.n)}(算法${x.algo}/票${x.ai})`).join(' ')
+    const messages3 = [
+      {
+        role: 'system',
+        content:
+          '你是快乐8研究助手，现在做第 13 步终审。候选号已按「底层算法评分 × 12 轮模型投票」排好序，' +
+          '你的任务是复核后从这 20 个候选里挑出正好 10 个（可以放弃算法排名靠后的号），并给出每注一句话理由。只能输出 JSON：' +
+          '{"picks":[1,2,3,4,5,6,7,8,9,10],"reasons":{"1":"一句话"},"summary":"80 字内"}。' +
+          'picks 必须正好 10 个、不重复、且只能来自候选；不要承诺中奖。',
+      },
+      {
+        role: 'user',
+        content: [context, '', `终审候选（算法分/票分）：${candLine}`, '', '请给出终审的 10 个号码。'].join('\n'),
+      },
+    ]
+    let finalTen = ten.map((x) => x.n)
+    let finalTenSource = 'algo'
+    let finalTenNote = ''
+    const wideNums = wide.map((x) => x.n)
+    try {
+      const judge = await askOnce(llm, MODELS[0].id, messages3, 0.3, 700)
+      const picked = [...new Set((judge?.picks || []).map(Number))].filter((n) => wideNums.includes(n))
+      if (picked.length === 10) {
+        finalTen = picked
+        finalTenSource = 'ai'
+        finalTenNote = String(judge.summary || '').slice(0, 200)
+      } else {
+        finalTenNote = '终审给出有效号码不足 10 个，已回退到算法融合结果'
+      }
+    } catch (e) {
+      finalTenNote = `终审调用失败（${e.message || e}），已回退到算法融合结果`
+    }
+
     const payload = {
       mode: 'deep',
       schema: SCHEMA,
       nextId,
       play: k,
       models: MODELS.map((m) => m.id),
-      calls: MODELS.length * TEMPS.length + MODELS.length,
+      calls: MODELS.length * TEMPS.length + MODELS.length + 1,
       round1: round1.length,
       round2: round2.length,
       elapsedMs: Date.now() - started,
       finalPicks,
-      final10: ten.map((x) => x.n),
-      final10Detail: ten.map((x) => ({
-        n: x.n,
-        ai: x.ai,
-        algo: x.algo,
-        total: Math.round(x.total * 100),
-        hits: x.hits,
-      })),
+      final10: finalTen,
+      final10Source: finalTenSource,
+      final10Note: finalTenNote,
+      algo10: ten.map((x) => x.n),
+      final10Detail: finalTen
+        .map((n) => {
+          const w = wide.find((x) => x.n === n)
+          return w ? { n, ai: w.ai, algo: w.algo, total: Math.round(w.total * 100), hits: w.hits } : null
+        })
+        .filter(Boolean),
       votes,
       report: {
         confidence: best?.obj?.confidence || '低',

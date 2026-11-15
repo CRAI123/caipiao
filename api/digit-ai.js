@@ -15,8 +15,8 @@ export const config = { maxDuration: 60 }
 
 const GAMES = { fc3d: '福彩3D', pl3: '排列三' }
 const maskId = (id) => (id ? `尾号${String(id).slice(-4)}` : '匿名设备')
-// 结果结构版本：旧版只有文字解读、没有推荐号码，命中旧版会重算
-const SCHEMA = 2
+// 结果结构版本：旧版是「只在候选池里挑号」，命中旧版会重算成全盘推算
+const SCHEMA = 3
 
 // 三轮真实分析：结构解读 → 反向质询 → 定稿合成（每轮都单独调用一次大模型）
 const ROUNDS = [
@@ -35,11 +35,12 @@ const ROUNDS = [
   {
     name: '定稿合成',
     prompt:
-      '第三轮：综合前两轮，只输出一个 JSON 对象，不要任何解释文字、不要代码块围栏。格式：' +
+      '第三轮：综合前两轮，自行推演本期号码，只输出一个 JSON 对象，不要解释文字、不要代码块围栏。格式：' +
       '{"straight":["123","456"],"group":["135","246"],"group3":["112"],"reasons":{"123":"一句话理由"},"summary":"本期结构判断，80 字内","risk":"一句风险提示"}。' +
-      '要求：straight 只能从前面给出的「直选候选」里挑，按推荐顺序，最多 3 个；' +
-      'group 只能从「组选候选」里挑，最多 2 个；group3 只能从「组三候选」里挑，最多 1 个；' +
-      'reasons 的键必须是上面出现过的号码，每个号码一句话理由；' +
+      '要求：straight 是全盘 000-999 里自行推演的 3 注直选，按推荐顺序；group 是组六（三个数字互不相同，共 220 组）里自行推演的 2 注；' +
+      'group3 是组三（两同一异，共 90 组）里自行推演的 1 注；' +
+      '前面给的统计数据和候选只是参考，不要被它限制，可以给出统计之外、你认为更合理的号码；' +
+      'reasons 的键必须是上面出现过的号码，每个号码一句话依据；' +
       '不要承诺中奖，risk 必须写明「每注直选 1/1000、组六约 1/167 不变」。',
     temperature: 0.3,
   },
@@ -53,8 +54,15 @@ function extractJson(text) {
   const start = body.indexOf('{')
   const end = body.lastIndexOf('}')
   if (start < 0 || end <= start) return null
+  const slice = body.slice(start, end + 1)
   try {
-    return JSON.parse(body.slice(start, end + 1))
+    return JSON.parse(slice)
+  } catch {
+    /* 继续尝试修复 */
+  }
+  // 模型可能把号码写成 012 这种带前导零的数字（JSON 不合法），去掉前导零再解析
+  try {
+    return JSON.parse(slice.replace(/(?<![\d."'\-])0+(\d+)/g, '$1'))
   } catch {
     return null
   }
@@ -114,7 +122,6 @@ export default async function handler(req, res) {
     const { action = 'run', game = 'fc3d', drawId, label, messages, deviceId = '' } = req.body || {}
     const id = Number(drawId)
     if (!GAMES[game]) return res.status(400).json({ error: '未知彩种' })
-    if (!Number.isInteger(id) || id <= 0) return res.status(400).json({ error: '缺少 drawId' })
 
     try {
       sqlRef = getSql()
@@ -123,6 +130,28 @@ export default async function handler(req, res) {
       if (action === 'peek') return res.status(503).json({ error: `共享数据库不可用：${e.message}` })
       sqlRef = null
     }
+
+    // ---- 只读：历史 AI 推荐，用于前端回测命中率 ----
+    if (action === 'audit') {
+      if (!sqlRef) return res.status(200).json({ ok: false, runs: [] })
+      const rows = await sqlRef`
+        SELECT draw_id, result
+        FROM digit_ai_runs
+        WHERE game = ${game} AND status = 'done' AND result IS NOT NULL
+        ORDER BY draw_id DESC
+        LIMIT 30`
+      return res.status(200).json({
+        ok: true,
+        runs: rows.map((r) => ({
+          drawId: Number(r.draw_id),
+          picks: r.result.picks || null,
+          at: r.result.at || null,
+          schema: r.result.schema || 0,
+        })),
+      })
+    }
+
+    if (!Number.isInteger(id) || id <= 0) return res.status(400).json({ error: '缺少 drawId' })
 
     // ---- 只读：本期共享解析 ----
     if (action === 'peek') {
@@ -200,7 +229,31 @@ export default async function handler(req, res) {
       rounds.push({ name: r.name, text })
       conv.push(ask, { role: 'assistant', content: text })
     }
-    const picks = normalizePicks(extractJson(rounds[rounds.length - 1].text))
+    let picks = normalizePicks(extractJson(rounds[rounds.length - 1].text))
+    // 模型偶发拒答或格式漂移：用干净的上下文再要一次纯 JSON
+    if (!picks) {
+      try {
+        const retry = await callAi(
+          llm,
+          [
+            msgs[0],
+            msgs[1],
+            {
+              role: 'user',
+              content:
+                '只输出一个 JSON 对象，不要任何解释文字、不要代码块围栏。格式：' +
+                '{"straight":["123","456","789"],"group":["135","246"],"group3":["112"],"reasons":{"123":"一句话依据"},"summary":"80 字内","risk":"一句风险提示"}。' +
+                'straight 是 3 注直选，group 是 2 注组六（三个数字互不相同），group3 是 1 注组三（两同一异）；' +
+                '号码在全盘内自行推演，不受统计参考限制。',
+            },
+          ],
+          { maxTokens: 700, temperature: 0.2 },
+        )
+        picks = normalizePicks(extractJson(retry))
+      } catch {
+        /* 重试失败按无号码处理 */
+      }
+    }
     const payload = {
       game,
       drawId: id,
@@ -212,7 +265,7 @@ export default async function handler(req, res) {
       picks,
       schema: SCHEMA,
       rounds,
-      roundCount: rounds.length,
+      roundCount: ROUNDS.length,
       model: llm.llmModel,
       at: new Date().toISOString(),
       elapsedMs: Date.now() - started,

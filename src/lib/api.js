@@ -65,6 +65,14 @@ export async function peekDigitAi({ game, drawId }) {
   })
 }
 
+/** 历史 AI 推荐（用于前端回测命中率） */
+export async function auditDigitAi({ game }) {
+  return apiFetch('/api/digit-ai', {
+    method: 'POST',
+    body: JSON.stringify({ action: 'audit', game }),
+  })
+}
+
 /** 快乐8 加奖 / 派奖监控（抓取福彩官网通知公告） */
 export async function fetchPromo() {
   return apiFetch('/api/kl8-promo')

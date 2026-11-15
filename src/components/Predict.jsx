@@ -463,12 +463,17 @@ export default function Predict({ draws, onRefreshData }) {
         >
           {deep.final10?.length ? (
             <>
-              <div className="predict-sub">🎯 终选 10 码 · 底层算法分 × AI 投票融合（结构约束后）</div>
+              <div className="predict-sub">
+                🎯 终选 10 码 · {deep.final10Source === 'ai' ? '算法候选 20 码 → AI 终审（第 13 步）' : '算法融合（AI 终审未通过，已回退）'}
+              </div>
               <span className="draw-balls predict-balls">
-                {deep.final10.map((n) => (
+                {[...deep.final10].sort((a, b) => a - b).map((n) => (
                   <Ball key={n} n={n} size="md" kind="auto" />
                 ))}
               </span>
+              {deep.final10Note && (
+                <div className="muted small" style={{ marginTop: 6 }}>{deep.final10Note}</div>
+              )}
               <div className="predict-sub" style={{ marginTop: 10 }}>融合明细（AI 票分 / 算法分 / 综合）</div>
               <div className="chip-row" style={{ marginTop: 6 }}>
                 {(deep.final10Detail || []).map((x) => (
@@ -480,8 +485,8 @@ export default function Predict({ draws, onRefreshData }) {
                 ))}
               </div>
               <Note>
-                只买 10 个球时看这一组，<b>分析完成后自动收敛，不需要再点任何按钮</b>：从 30 码推荐池里，把「底层算法评分」与「12 轮 AI 投票权重」各自归一化，
-                按 55:45 加权，再做四区间均衡（每区 ≤3、奇偶 ≤6）收敛到正好 10 码。
+                只买 10 个球时看这一组，<b>分析完成后自动收敛，不需要再点任何按钮</b>：
+                先用「底层算法评分 × 12 轮 AI 投票」加权出 20 码候选，再交给 AI 终审一次，由它挑出最终 10 码（终审失败自动回退算法结果）。
                 AI 各模型给号多出来或重复时，这一步会统一去重并压到 10 个。<b>它不提高单号命中概率（恒 25%）</b>。
               </Note>
             </>
