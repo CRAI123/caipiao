@@ -41,6 +41,8 @@ import { FC3D_DRAWS } from './data/fc3d.js'
 import { PL3_DRAWS } from './data/pl3.js'
 import { SSQ_DRAWS } from './data/ssq.js'
 import { fetchPl3Draws } from './lib/pl3.js'
+import { fetchFc3dDraws } from './lib/fc3d.js'
+import { fetchKl8Draws } from './lib/kl8.js'
 import { fetchSsqDraws } from './lib/ssq.js'
 import * as pl3Engine from './lib/pl3Predict.js'
 import { loadJournal, getRecord } from './lib/journal.js'
@@ -142,6 +144,24 @@ export default function App() {
   const [forceAdmin, setForceAdmin] = useState(false) // 门禁页直接打开后台
 
   const refresh = useCallback(() => setTick((t) => t + 1), [])
+
+  // ---------- AI 分析前置：强制同步最新开奖数据 ----------
+  const refreshDigitDraws = useCallback(async () => {
+    if (lottery === 'pl3') {
+      const list = await fetchPl3Draws(100)
+      if (list?.length) setPl3Draws(list)
+      return list || pl3Draws
+    }
+    const list = await fetchFc3dDraws(100)
+    if (list?.length) setFc3dDraws(list)
+    return list || fc3dDraws
+  }, [lottery, pl3Draws, fc3dDraws])
+
+  const refreshKl8Draws = useCallback(async () => {
+    const list = await fetchKl8Draws(100)
+    if (list?.length) setDraws(list)
+    return list || draws
+  }, [draws])
 
   // 进入站点：取设备识别码 → 查 Neon 申请状态 / 管理员身份
   useEffect(() => {
@@ -411,9 +431,17 @@ export default function App() {
             )}
             {digitTab === 'predict' &&
               (lottery === 'pl3' ? (
-                <FC3D draws={digitDraws} engine={pl3Engine} algoInfo={PL3_ALGO_INFO} showTiers label={digitLabel} />
+                <FC3D
+                  draws={digitDraws}
+                  engine={pl3Engine}
+                  algoInfo={PL3_ALGO_INFO}
+                  showTiers
+                  label={digitLabel}
+                  game="pl3"
+                  onRefreshData={refreshDigitDraws}
+                />
               ) : (
-                <FC3D draws={digitDraws} label={digitLabel} />
+                <FC3D draws={digitDraws} label={digitLabel} game="fc3d" onRefreshData={refreshDigitDraws} />
               ))}
             {digitTab === 'audit' &&
               (lottery === 'pl3' ? (
@@ -467,7 +495,7 @@ export default function App() {
             {tab === 'kline' && <KlinePage lottery="kl8" draws={draws} />}
             {tab === 'repeats' && <Repeats draws={draws} />}
             {tab === 'dantuo' && <DanTuo draws={draws} />}
-            {tab === 'predict' && <Predict draws={draws} />}
+            {tab === 'predict' && <Predict draws={draws} onRefreshData={refreshKl8Draws} />}
             {tab === 'prize' && <KL8Prize draws={draws} />}
             {tab === 'audit' && <Audit draws={draws} />}
             {tab === 'journal' && <Journal draws={draws} />}

@@ -1,7 +1,7 @@
 // 下期推荐 —— 近期加权频次 + 遗漏打分，输出结构均衡的研究用号码（多玩法 + 导出）
 // ⚠️ 仅为历史数据的加权统计结果，不改变任何号码 25% 的开出概率
 import React, { useEffect, useMemo, useState } from 'react'
-import { Card, Ball, Note, StatCard, pad2, yuan } from './common.jsx'
+import { Card, Ball, Note, StatCard, Dialog, pad2, yuan } from './common.jsx'
 import {
   scoreBalls,
   pickBalanced,
@@ -17,6 +17,7 @@ import { aiDeep, peekDeep, storePrediction } from '../lib/api.js'
 import { getDeviceId } from '../lib/device.js'
 import { v7Recommend } from '../lib/kl8V7.js'
 import { fmtPct } from '../lib/kl8Math.js'
+import { fakeAnalyze, sharedWaitSeconds } from '../lib/aiWait.js'
 import BetVerify from './BetVerify.jsx'
 
 const MODES = [
@@ -49,7 +50,7 @@ function profile(nums) {
   }
 }
 
-export default function Predict({ draws }) {
+export default function Predict({ draws, onRefreshData }) {
   const [hotMode, setHotMode] = useState('mix')
   const [play, setPlay] = useState(10)
   const [showV7, setShowV7] = useState(false)
@@ -58,6 +59,10 @@ export default function Predict({ draws }) {
   const [deepErr, setDeepErr] = useState('')
   const [deepOwner, setDeepOwner] = useState('')
   const [deepChecking, setDeepChecking] = useState(false)
+  const [phase, setPhase] = useState('')
+  const [pct, setPct] = useState(0)
+  const [elapsed, setElapsed] = useState(0)
+  const [tip, setTip] = useState('')
 
   const { scores, weighted, missing, window } = useMemo(
     () => scoreBalls(draws, { periods: 100, halfLife: 20, hotMode }),
@@ -110,13 +115,30 @@ export default function Predict({ draws }) {
     : ''
   const nextDrawId = draws[0]?.id ? draws[0].id + 1 : null
 
-  /** 读取本期已生成的共享解析（没有则保持可点击） */
-  async function loadDeep() {
+  /** 读取本期已生成的共享解析（没有则保持可点击）；simulate=true 时补一段分析等待 */
+  async function loadDeep({ simulate = false } = {}) {
     if (!nextDrawId) return
     setDeepChecking(true)
     try {
       const r = await peekDeep({ drawId: nextDrawId, play })
       if (r.exists && r.status === 'done' && r.result) {
+        if (simulate) {
+          setDeepBusy(true)
+          setPct(3)
+          setElapsed(0)
+          setPhase('正在读取本期共享解析…')
+          await fakeAnalyze({
+            seconds: sharedWaitSeconds(),
+            onTick: ({ elapsed: s, pct: p, stage }) => {
+              setElapsed(s)
+              setPct(p)
+              setPhase(stage)
+            },
+          })
+          setPct(100)
+          setPhase('分析完成')
+          setDeepBusy(false)
+        }
         setDeep({ ...r.result, cached: true, owner: r.owner, cachedAt: r.cachedAt })
         setDeepOwner(r.owner || '')
         setDeepErr('')
@@ -178,15 +200,71 @@ export default function Predict({ draws }) {
     URL.revokeObjectURL(a.href)
   }
 
-  /** AI 深度分析：9 次独立分析 + 3 模型复核 + 60 期样本外回测（每期每玩法仅首位用户可触发） */
+  /** AI 深度分析：先同步最新数据，再判断本期是否已有共享解析（每期每玩法仅首位用户可触发） */
   async function doDeep() {
+    if (deepBusy) return
     setDeepBusy(true)
     setDeepErr('')
+    setPhase('正在同步最新开奖数据…')
+    setPct(3)
+    setElapsed(0)
+    const onTick = ({ elapsed: s, pct: p, stage }) => {
+      setElapsed(s)
+      setPct(p)
+      setPhase(stage)
+    }
     try {
+      // 1. 强制刷新开奖数据，避免用页面上的旧数据
+      let fresh = draws
+      if (onRefreshData) {
+        try {
+          fresh = await onRefreshData()
+        } catch (e) {
+          throw new Error(`开奖数据更新失败：${e.message || e}`)
+        }
+      }
+      if (!Array.isArray(fresh) || !fresh.length) throw new Error('没有取到开奖数据，请稍后重试')
+
+      const prevId = draws?.[0]?.id
+      const freshId = fresh[0].id
+      const hasNew = !prevId || Number(freshId) > Number(prevId)
+      const drawId = Number(freshId) + 1
+
+      // 2. 本期是否已有共享解析
+      let cached = null
+      try {
+        const p = await peekDeep({ drawId, play })
+        if (p?.exists && p.status === 'done' && p.result) cached = p
+      } catch {
+        /* 数据库不可用时继续走实时分析 */
+      }
+
+      // 3. 没有新一期开奖，本期也还没有解析 → 提示
+      if (!hasNew && !cached) {
+        setTip(`第 ${drawId - 1} 期已经是目前最新一期，暂时没有新数据。\n新一期开奖后再来点「AI 深度分析」即可。`)
+        return
+      }
+
+      // 4. 已有共享解析：模拟一段分析等待，让后看的人也有体验
+      if (cached) {
+        setPhase('正在读取本期共享解析…')
+        await fakeAnalyze({ seconds: sharedWaitSeconds(), onTick })
+        setDeep({ ...cached.result, cached: true, owner: cached.owner, cachedAt: cached.cachedAt })
+        setDeepOwner(cached.owner || '')
+        setPct(100)
+        setPhase('分析完成')
+        return
+      }
+
+      // 5. 首位用户：真实分析（至少保留 10 秒进度）
       const dev = getDeviceId()
-      const result = await aiDeep({ draws, play, deviceId: dev?.id || '' })
+      const timer = fakeAnalyze({ seconds: 10, onTick })
+      const result = await aiDeep({ draws: fresh, play, deviceId: dev?.id || '' })
+      await timer
       setDeep(result)
       setDeepOwner(result.owner || '')
+      setPct(100)
+      setPhase('分析完成')
       try {
         await storePrediction({
           drawId: result.nextId,
@@ -202,6 +280,7 @@ export default function Predict({ draws }) {
       }
     } catch (e) {
       setDeepErr(e.message || 'AI 深度分析失败')
+      setPhase('')
     } finally {
       setDeepBusy(false)
     }
@@ -229,19 +308,19 @@ export default function Predict({ draws }) {
         <button
           className="btn-primary"
           onClick={doDeep}
-          disabled={deepBusy || deepChecking || Boolean(deep?.cached)}
-          title={deep?.cached ? '本期解析已由首位用户生成，所有人都能查看' : ''}
+          disabled={deepBusy || deepChecking}
+          title="点击后会自动同步最新开奖数据；每期仅首位用户真实调用 AI，其他人读取共享解析"
         >
           {deepBusy
             ? '🔬 深度分析中…'
             : deepChecking
               ? '检查本期解析…'
               : deep?.cached
-                ? '本期解析已生成'
+                ? '🔬 查看本期解析'
                 : '🔬 AI 深度分析'}
         </button>
         {(deep?.cached || deepOwner) && (
-          <button className="btn-primary" onClick={loadDeep} disabled={deepBusy || deepChecking}>
+          <button className="btn-primary" onClick={() => loadDeep({ simulate: true })} disabled={deepBusy || deepChecking}>
             🔄 刷新解析
           </button>
         )}
@@ -253,6 +332,24 @@ export default function Predict({ draws }) {
         </button>
         <button className="tab-btn" onClick={exportTxt}>导出推荐方案（.txt）</button>
       </div>
+
+      {deepBusy && (
+        <div style={{ marginBottom: 10 }}>
+          <div style={{ height: 6, borderRadius: 3, background: '#ece6da', overflow: 'hidden' }}>
+            <div
+              style={{
+                height: '100%',
+                width: `${pct}%`,
+                background: 'linear-gradient(90deg, #c23a2b, #e0a24a)',
+                transition: 'width 0.4s ease',
+              }}
+            />
+          </div>
+          <div className="muted small" style={{ marginTop: 6 }}>
+            {phase} · 已用 {elapsed} 秒
+          </div>
+        </div>
+      )}
 
       <Card title={`第 ${nextId} 期 · ${PLAY_LABEL[play]} 研究推荐`} tag="评分前列 + 结构约束 · 三张单式票">
         {tickets.map((t, i) => (
@@ -572,6 +669,8 @@ export default function Predict({ draws }) {
       </Card>
 
       <BetVerify bet={bet} draws={draws} />
+
+      <Dialog open={Boolean(tip)} text={tip} onClose={() => setTip('')} />
     </div>
   )
 }

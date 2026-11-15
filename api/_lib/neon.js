@@ -55,6 +55,18 @@ export async function ensureTables(sql) {
       updated_at timestamptz NOT NULL DEFAULT now(),
       PRIMARY KEY (draw_id, play)
     )`
+  // 3D / 排列三 AI 解读：同一期同一彩种只允许首位用户触发，结果全站共享
+  await sql`
+    CREATE TABLE IF NOT EXISTS digit_ai_runs (
+      game text NOT NULL,
+      draw_id integer NOT NULL,
+      status text NOT NULL DEFAULT 'running',
+      device_id text,
+      result jsonb,
+      created_at timestamptz NOT NULL DEFAULT now(),
+      updated_at timestamptz NOT NULL DEFAULT now(),
+      PRIMARY KEY (game, draw_id)
+    )`
 }
 
 /** 读取 admin_config 表的共享配置 */

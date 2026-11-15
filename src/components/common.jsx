@@ -53,6 +53,48 @@ export function Card({ title, tag, children, className = '' }) {
   )
 }
 
+/** 轻量弹窗：用于「暂时没有新数据」这类需要用户确认的提示 */
+export function Dialog({ open, title = '提示', text, onClose }) {
+  if (!open) return null
+  return (
+    <div
+      role="presentation"
+      onClick={onClose}
+      style={{
+        position: 'fixed',
+        inset: 0,
+        background: 'rgba(28, 24, 18, 0.45)',
+        display: 'flex',
+        alignItems: 'center',
+        justifyContent: 'center',
+        zIndex: 9999,
+      }}
+    >
+      <div
+        role="dialog"
+        aria-modal="true"
+        onClick={(e) => e.stopPropagation()}
+        style={{
+          background: '#fffdf7',
+          borderRadius: 12,
+          padding: '20px 22px',
+          width: 'min(88vw, 320px)',
+          boxShadow: '0 18px 48px rgba(0,0,0,0.22)',
+          border: '1px solid #e7e0d3',
+        }}
+      >
+        <div style={{ fontSize: 15, fontWeight: 700, marginBottom: 8 }}>{title}</div>
+        <div style={{ fontSize: 13, lineHeight: 1.7, color: '#4a453c' }}>{text}</div>
+        <div style={{ textAlign: 'right', marginTop: 16 }}>
+          <button className="btn-primary" onClick={onClose}>
+            知道了
+          </button>
+        </div>
+      </div>
+    </div>
+  )
+}
+
 export function StatCard({ label, value, unit, note, tone = 'ink' }) {
   return (
     <div className={`stat-card tone-${tone}`}>

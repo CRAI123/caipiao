@@ -25,7 +25,11 @@ async function apiFetch(path, options = {}) {
     ...options,
   })
   const data = await res.json().catch(() => ({}))
-  if (!res.ok) throw new Error(data.error || `HTTP ${res.status}`)
+  if (!res.ok) {
+    const err = new Error(data.error || `HTTP ${res.status}`)
+    err.status = res.status
+    throw err
+  }
   return data
 }
 
@@ -42,6 +46,22 @@ export async function peekDeep({ drawId, play = 10 }) {
   return apiFetch('/api/ai-deep', {
     method: 'POST',
     body: JSON.stringify({ action: 'peek', drawId, play }),
+  })
+}
+
+/** 3D / 排列三 AI 解读：每期每彩种仅首位用户触发，结果全站共享 */
+export async function runDigitAi({ game, drawId, label, messages, deviceId = '' }) {
+  return apiFetch('/api/digit-ai', {
+    method: 'POST',
+    body: JSON.stringify({ action: 'run', game, drawId, label, messages, deviceId }),
+  })
+}
+
+/** 读取 3D / 排列三 本期已生成的共享解析 */
+export async function peekDigitAi({ game, drawId }) {
+  return apiFetch('/api/digit-ai', {
+    method: 'POST',
+    body: JSON.stringify({ action: 'peek', game, drawId }),
   })
 }
 
