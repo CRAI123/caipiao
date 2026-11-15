@@ -5,7 +5,7 @@
 //   1. 先强制拉取最新开奖数据（不用页面上的旧数据）
 //   2. 若期号没有前进且本期还没有共享解析 → 弹「暂时没有新数据」
 //   3. 本期解析全站共享：首位用户真实调用，后续用户读取并模拟一段分析等待
-import React, { useMemo, useState } from 'react'
+import React, { useEffect, useMemo, useRef, useState } from 'react'
 import { Card, Note, Dialog } from './common.jsx'
 import { summarizeDigit, buildDigitMessages } from '../lib/digitAi.js'
 import { runDigitAi, peekDigitAi } from '../lib/api.js'
@@ -28,6 +28,67 @@ export default function DigitAI({ draws, label = '福彩3D', game = 'fc3d', onRe
   const [tip, setTip] = useState('')
 
   const summary = useMemo(() => summarizeDigit(draws, 100), [draws])
+  const busyRef = useRef(false)
+  const latestId = Number(draws?.[0]?.id) || 0
+
+  // 切到别的页面再回来时组件会重新挂载，本地状态会丢：从共享缓存恢复本期解析。
+  // 若本期分析还在跑（可能是自己刚点的），继续等待并显示进度。
+  useEffect(() => {
+    if (!latestId) return undefined
+    let alive = true
+    const applyResult = (r, owner) => {
+      setText(r.text)
+      setMeta({
+        model: r.model,
+        at: r.at,
+        cached: true,
+        owner,
+        rounds: r.rounds,
+        roundCount: r.roundCount || r.rounds?.length || 3,
+      })
+    }
+    const restore = async () => {
+      let p = null
+      try {
+        p = await peekDigitAi({ game, drawId: latestId })
+      } catch {
+        return
+      }
+      if (!alive || busyRef.current || !p?.exists) return
+      if (p.status === 'done' && p.result?.text) {
+        applyResult(p.result, p.owner)
+        return
+      }
+      if (p.status !== 'running') return
+      setBusy(true)
+      setPct(8)
+      setElapsed(0)
+      setPhase('本期分析仍在进行，正在等待结果…')
+      for (let i = 0; i < 24; i++) {
+        await sleep(5000)
+        if (!alive) return
+        const q = await peekDigitAi({ game, drawId: latestId }).catch(() => null)
+        if (!alive) return
+        if (q?.exists && q.status === 'done' && q.result?.text) {
+          applyResult(q.result, q.owner)
+          setPct(100)
+          setPhase('分析完成')
+          setBusy(false)
+          return
+        }
+        setPct(Math.min(96, 8 + (i + 1) * 4))
+        setElapsed((i + 1) * 5)
+      }
+      if (!alive) return
+      setBusy(false)
+      setPhase('')
+      setError('本期分析仍未完成，请稍后再点一次查看')
+    }
+    restore()
+    return () => {
+      alive = false
+    }
+  }, [game, latestId])
 
   if (!summary || summary.total < 10) return null
 
@@ -39,6 +100,7 @@ export default function DigitAI({ draws, label = '福彩3D', game = 'fc3d', onRe
 
   const run = async () => {
     if (busy) return
+    busyRef.current = true
     setBusy(true)
     setError('')
     setText('')
@@ -151,6 +213,7 @@ export default function DigitAI({ draws, label = '福彩3D', game = 'fc3d', onRe
       setError(e?.message || String(e))
       setPhase('')
     } finally {
+      busyRef.current = false
       setBusy(false)
     }
   }
