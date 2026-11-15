@@ -2,9 +2,9 @@
 // 抓取中国福彩网「通知公告」列表，筛出含「派奖 / 加奖 / 促销」的官方公告。
 // 只有派奖期，部分玩法的实际返还率才可能超过 100%；平时固定奖金表返还率约 57.5%。
 //
-// 数据源有两个，按顺序降级：
-// 1. 官网 HTML：国内节点可直连，Vercel 等海外机房常被 WAF 返 403
-// 2. r.jina.ai 文本镜像：海外节点可用，用来绕过 WAF（国内网络反而不通）
+// 数据源：官网「通知公告」列表页。
+// 注意：福彩官网对海外 / 机房 IP 有 WAF，Vercel 节点通常返回 403，
+// 所以失败时返回 ok:false，并用 lastKnown 提供最近一次派奖的可核查记录。
 import { applyCors } from './_lib/http.js'
 
 const LIST = 'https://www.cwl.gov.cn/xxgk/tzgg/'
@@ -13,7 +13,15 @@ const UA =
 
 const ITEM_RE =
   /<a[^>]+href="(\/c\/\d{4}\/\d{2}\/\d{2}\/\d+\.shtml)"[^>]*>\s*<li>[\s\S]*?class="[^"]*txt\s+lg[^"]*">([\s\S]*?)<\/div>[\s\S]*?class="ul-date">\s*([\d-]+)\s*<\/div>/g
-const MD_RE = /\[([^\]\n]{6,140})\]\((https?:\/\/[^\s)]+\/c\/\d{4}\/\d{2}\/\d{2}\/\d+\.shtml)\)/g
+
+// 最近一次快乐8 派奖（据官网公告人工核对，仅作兜底展示）
+const LAST_KNOWN = {
+  start: '2026-08-21',
+  end: '2026-10-06',
+  startTitle: '关于开展2026年中国福利彩票快乐8游戏派奖活动的公告',
+  endTitle: '关于2026年中国福利彩票快乐8游戏派奖活动结束的公告',
+  checkedOn: '2026-11-15',
+}
 
 /** 去掉标签与 HTML 实体 */
 function clean(html) {
@@ -53,38 +61,13 @@ function parseHtml(html) {
   return out
 }
 
-/** 从 r.jina.ai 的 markdown 里提取公告 */
-function parseMarkdown(text) {
-  const out = []
-  const seen = new Set()
-  let m
-  while ((m = MD_RE.exec(text)) && out.length < 12) {
-    const title = clean(m[1])
-    if (!title || seen.has(m[2])) continue
-    seen.add(m[2])
-    const d = m[2].match(/\/c\/(\d{4})\/(\d{2})\/(\d{2})\//)
-    out.push({ title, date: d ? `${d[1]}-${d[2]}-${d[3]}` : '', url: m[2] })
-  }
-  return out
-}
-
-/** 依次尝试数据源，取第一个有结果的 */
+/** 抓取官网列表页并提取公告 */
 async function loadAnnouncements() {
-  const sources = [
-    { name: 'cwl', run: async () => parseHtml(await fetchText(LIST)) },
-    { name: 'jina', run: async () => parseMarkdown(await fetchText(`https://r.jina.ai/${LIST}`)) },
-  ]
-  const errors = []
-  for (const s of sources) {
-    try {
-      const all = await s.run()
-      if (all.length) return { source: s.name, all }
-      errors.push(`${s.name}: 无公告条目`)
-    } catch (e) {
-      errors.push(`${s.name}: ${e.message}`)
-    }
-  }
-  throw new Error(`公告源均不可用（${errors.join('；')}）`)
+  const html = await fetchText(LIST)
+  if (!html) throw new Error('官网无响应')
+  const all = parseHtml(html)
+  if (!all.length) throw new Error('未解析到公告条目（页面结构可能已变）')
+  return all
 }
 
 export default async function handler(req, res) {
@@ -92,7 +75,7 @@ export default async function handler(req, res) {
 
   res.setHeader('Content-Type', 'application/json; charset=utf-8')
   try {
-    const { source, all } = await loadAnnouncements()
+    const all = await loadAnnouncements()
 
     const items = []
     const seen = new Set()
@@ -115,9 +98,9 @@ export default async function handler(req, res) {
     return res.status(200).json({
       ok: true,
       checkedAt: new Date().toISOString(),
-      source,
       active: active.length > 0,
       items,
+      lastKnown: LAST_KNOWN,
       officialUrl: LIST,
       baseReturnRate: 0.5753,
     })
@@ -126,8 +109,9 @@ export default async function handler(req, res) {
     return res.status(200).json({
       ok: false,
       checkedAt: new Date().toISOString(),
-      message: e.message || '官方公告抓取失败',
+      message: `官网公告自动抓取失败（${e.message}）：福彩官网限制海外服务器访问`,
       items: [],
+      lastKnown: LAST_KNOWN,
       officialUrl: LIST,
       baseReturnRate: 0.5753,
     })
