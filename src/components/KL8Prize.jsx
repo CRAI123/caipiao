@@ -125,7 +125,17 @@ export default function KL8Prize({ draws }) {
         ) : !promo ? (
           <Note>正在读取官方公告…</Note>
         ) : !promo.ok ? (
-          <Note tone="warn">{promo.message || '官方公告暂时无法获取'}；不影响下方概率计算。</Note>
+          <Note tone="warn">
+            {promo.message || '官方公告暂时无法获取'}。
+            <a
+              href={promo.officialUrl || 'https://www.cwl.gov.cn/xxgk/tzgg/'}
+              target="_blank"
+              rel="noopener noreferrer"
+            >
+              点此查看官方通知公告
+            </a>
+            ；不影响下方概率计算。
+          </Note>
         ) : promo.items.length === 0 ? (
           <Note>近 12 条派奖类公告里没有快乐8 相关内容，按固定奖金表计算返还率即可。</Note>
         ) : (
