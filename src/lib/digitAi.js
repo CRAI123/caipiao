@@ -124,24 +124,56 @@ export function summarizeDigit(draws, n = 100) {
     },
     straightAll: straight,
     groupAll: group,
+    posScore: score,
     digitScore,
     share,
   }
 }
 
-const SYSTEM_PROMPT = `你是「研彩室」的彩票数据分析助手，服务对象是研究者本人。你只做两件事：解读最近 100 期的历史统计，以及在全盘范围内自行推演号码并说明依据。
+/**
+ * 全盘评分排序（算法层）：
+ * - 直选 1000 注：三位位置分相加
+ * - 组六 120 组（三个数字互不相同）：数字综合分相加
+ * - 组三 90 组（两同一异）：两倍重复数字分 + 单数字分
+ * 返回完整排序数组，供 AI 复核、前端对照与回测使用。
+ */
+export function rankDigitCandidates(summary) {
+  if (!summary?.posScore || !summary?.digitScore) return null
+  const ps = summary.posScore
+  const ds = summary.digitScore
+  const straight = []
+  for (let a = 0; a < 10; a++)
+    for (let b = 0; b < 10; b++)
+      for (let c = 0; c < 10; c++) straight.push({ num: `${a}${b}${c}`, v: ps[0][a] + ps[1][b] + ps[2][c] })
+  straight.sort((x, y) => y.v - x.v)
+  const group = []
+  for (let a = 0; a < 10; a++)
+    for (let b = a + 1; b < 10; b++)
+      for (let c = b + 1; c < 10; c++) group.push({ num: `${a}${b}${c}`, v: ds[a] + ds[b] + ds[c] })
+  group.sort((x, y) => y.v - x.v)
+  const group3 = []
+  for (let d = 0; d < 10; d++)
+    for (let e = 0; e < 10; e++) {
+      if (e === d) continue
+      group3.push({ num: `${d}${d}${e}`, v: 2 * ds[d] + ds[e] })
+    }
+  group3.sort((x, y) => y.v - x.v)
+  return { straight, group, group3 }
+}
+
+const SYSTEM_PROMPT = `你是「研彩室」的彩票数据分析助手，服务对象是研究者本人。你只做两件事：解读最近 100 期的历史统计，以及结合底层算法的全盘评分复核号码并说明依据。
 
 【铁律】
 1. 只能使用用户消息里给出的统计数据，不得编造统计数字，不得引入外部资料。
 2. 福彩3D/排列三每期从 000–999 等概率产生，直选单注中奖概率恒为 1/1000，组六约 1/167，与你选什么号无关。开奖相互独立，不存在可利用的「规律」「趋势」「必出胆码」。
 3. 你不得声称任何组合更容易中奖，不得承诺命中，不得鼓励加大投入或追号。
-4. 推演号码不受统计候选的限制：直选可在全盘 000–999 内自行选择，组六在 220 组内、组三在 90 组内自行选择；程序给出的统计候选只是参考，不是候选池。
+4. 号码必须与底层算法结合：程序已按频率/遗漏/同位转移对全盘打分排序（直选 1000 注、组六 120 组、组三 90 组），你必须以算法评分前列为基础做取舍；可以给出算法排序之外、结构理由更强的号，但要明确说明为什么放弃高分号。
 5. 必须明确说明：以下是历史分布下的参考组合，不改变中奖概率，彩票期望回报为负。
 
 【输出结构】（简体中文，纯文本，不要 Markdown 表格）
 1. 结构概览：近 100 期和值/跨度区间、奇偶与大小分布、形态（豹子/组三/组六）与重号比例
 2. 位置观察：百/十/个位的高频与遗漏情况，一句话即可，不做预测
-3. 组合参考：给出 3 注直选、2 注组六、1 注组三，说明每注的依据（统计参考 + 你自己的结构判断）
+3. 组合参考：给出 3 注直选、2 注组六、1 注组三，逐注写明「算法排名 + 结构依据」
 4. 风险提示：预算上限与理性购彩提醒`
 
 /** 组装 messages（纯函数，便于离线校验） */
@@ -154,6 +186,12 @@ export function buildDigitMessages(summary, label = '排列三') {
       .join(' ')}；当前遗漏 ${s.omit[p].map((c, d) => `${d}:${c}`).join(' ')}；倾向数字 ${s.topDigits[p].join(
       '、',
     )}`
+  const rank = rankDigitCandidates(s)
+  const fmtAlgo = (arr, n) =>
+    (arr || [])
+      .slice(0, n)
+      .map((x) => `${x.num}(${x.v.toFixed(2)})`)
+      .join(' ')
   const lines = [
     `${label} 近 ${s.total} 期统计（程序计算，真实数据）：`,
     `- 最新一期：第 ${s.latest.id} 期，开奖 ${s.latest.num.join(' ')}`,
@@ -167,12 +205,13 @@ export function buildDigitMessages(summary, label = '排列三') {
     fmtPos('十位', 1),
     fmtPos('个位', 2),
     '',
-    '统计参考（程序按频率/遗漏/转移加权排序，只作参照，不是候选池限制）：',
-    `- 直选参考：${s.candidates.straight.map((x) => x.join('')).join('、')}`,
-    `- 组选参考：${s.candidates.group.map((x) => x.join('')).join('、')}`,
-    `- 组三参考：${s.candidates.group3.map((x) => `${x[0]}${x[0]}${x[1]}`).join('、')}`,
+    '底层算法全盘评分（频率35% + 近30期30% + 遗漏15% + 同位转移20%，已对全盘排序）：',
+    `- 直选 1000 注评分前列：${fmtAlgo(rank?.straight, 40)}`,
+    `- 组六 120 组评分前列：${fmtAlgo(rank?.group, 30)}`,
+    `- 组三 90 组评分前列：${fmtAlgo(rank?.group3, 15)}`,
+    `- 统计参考（仅展示 top5/top3/1 注）：直选 ${s.candidates.straight.map((x) => x.join('')).join('、')}；组六 ${s.candidates.group.map((x) => x.join('')).join('、')}`,
     '',
-    '请按系统提示词的结构输出。号码不受上面的参考限制，可以在全盘范围内自行推演。',
+    '请按系统提示词的结构输出：以算法评分前列为基础复核取舍，可给排序外但理由更强的号并说明原因。',
   ]
   return [
     { role: 'system', content: SYSTEM_PROMPT },
