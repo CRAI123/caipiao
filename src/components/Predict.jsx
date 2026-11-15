@@ -461,9 +461,35 @@ export default function Predict({ draws, onRefreshData }) {
           title={`🔬 AI 深度分析 · 第 ${deep.nextId} 期 · ${deep.stats.label}`}
           tag={`${deep.cached ? '全站共享 · 首位生成' : '本期首位生成'} · 共 ${deep.calls} 轮 AI 分析（独立 ${deep.round1}/9 + 复核 ${deep.round2}/3）· ${(deep.elapsedMs / 1000).toFixed(1)} 秒`}
         >
-          <div className="predict-head">
+          {deep.final10?.length ? (
+            <>
+              <div className="predict-sub">🎯 终选 10 码 · 底层算法分 × AI 投票融合（结构约束后）</div>
+              <span className="draw-balls predict-balls">
+                {deep.final10.map((n) => (
+                  <Ball key={n} n={n} size="md" kind="auto" />
+                ))}
+              </span>
+              <div className="predict-sub" style={{ marginTop: 10 }}>融合明细（AI 票分 / 算法分 / 综合）</div>
+              <div className="chip-row" style={{ marginTop: 6 }}>
+                {(deep.final10Detail || []).map((x) => (
+                  <span key={x.n} className="chip">
+                    <i>
+                      {pad2(x.n)} AI {x.ai} · 算法 {x.algo} · 综合 {x.total}
+                    </i>
+                  </span>
+                ))}
+              </div>
+              <Note>
+                只买 10 个球时看这一组：从 30 码推荐池里，把「底层算法评分」与「12 轮 AI 投票权重」各自归一化，
+                按 55:45 加权，再做四区间均衡（每区 ≤3、奇偶 ≤6）收敛到正好 10 码。
+                AI 各模型给号多出来或重复时，这一步会统一去重并压到 10 个。<b>它不提高单号命中概率（恒 25%）</b>。
+              </Note>
+            </>
+          ) : null}
+
+          <div className="predict-head" style={{ marginTop: deep.final10?.length ? 14 : 0 }}>
             <div>
-              <div className="predict-sub">最终推荐 {deep.play} 码（3 模型 × 3 温度 + 复核轮加权聚合）</div>
+              <div className="predict-sub">AI 投票聚合 {deep.play} 码（未经算法融合）</div>
               <span className="draw-balls predict-balls">
                 {deep.finalPicks.map((n) => (
                   <Ball key={n} n={n} size="md" kind="auto" />

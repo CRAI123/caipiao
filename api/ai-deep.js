@@ -35,6 +35,8 @@ const MODELS = [
 ]
 const TEMPS = [0.65, 0.85, 1.0]
 const ROUND2_WEIGHT = 1.5
+// 结果结构版本：旧版没有「终选 10 码」，命中旧版会重算
+const SCHEMA = 2
 
 const bandOf = (n) => Math.min(3, Math.floor((n - 1) / 20))
 const pad = (n) => String(n).padStart(2, '0')
@@ -174,6 +176,57 @@ function aggregate(pool, voteMap, play) {
   return picked.sort((a, b) => a - b)
 }
 
+/**
+ * 终选 10 码：底层算法分（v7 池内评分）× AI 投票分 融合后，再做结构约束收敛到 10 个
+ * - ai：12 轮投票权重归一化
+ * - algo：底层算法评分归一化
+ * - total：55% AI + 45% 算法
+ */
+function finalize10(pool, voteMap, hitsMap, play = 10) {
+  const maxAi = Math.max(1, ...pool.map((x) => voteMap[x.n] || 0))
+  const maxAlgo = Math.max(1, ...pool.map((x) => x.score || 0))
+  const scored = pool.map((x) => {
+    const ai = (voteMap[x.n] || 0) / maxAi
+    const algo = (x.score || 0) / maxAlgo
+    return {
+      n: x.n,
+      ai: Math.round(ai * 100),
+      algo: Math.round(algo * 100),
+      total: 0.55 * ai + 0.45 * algo,
+      hits: hitsMap[x.n] || 0,
+    }
+  })
+  const ordered = scored.sort((a, b) => b.total - a.total)
+  const bandLimit = Math.max(2, Math.ceil(play / 4) + 1)
+  const oddLimit = Math.ceil(play / 2) + 1
+  const picked = []
+  const bandCount = [0, 0, 0, 0]
+  let odd = 0
+  const tryPush = (x, strict) => {
+    if (picked.some((p) => p.n === x.n)) return false
+    const b = bandOf(x.n)
+    if (strict && bandCount[b] >= bandLimit) return false
+    if (strict) {
+      const oddFull = isOdd(x.n) ? odd >= oddLimit : picked.length - odd >= oddLimit
+      if (oddFull) return false
+    }
+    picked.push(x)
+    bandCount[b]++
+    if (isOdd(x.n)) odd++
+    return true
+  }
+  // 先按结构约束取号，凑不满再放宽
+  for (const x of ordered) {
+    if (picked.length >= play) break
+    tryPush(x, true)
+  }
+  for (const x of ordered) {
+    if (picked.length >= play) break
+    tryPush(x, false)
+  }
+  return picked.sort((a, b) => a.n - b.n)
+}
+
 /** 单次调用，解析失败降温度重试一次 */
 async function askOnce(llm, model, messages, temperature, maxTokens = 900) {
   for (let attempt = 0; attempt < 2; attempt++) {
@@ -256,6 +309,11 @@ export default async function handler(req, res) {
       let row = await read()
       // 卡在 running 超过 5 分钟视为失败，允许重新领取
       if (row && row.status === 'running' && Date.now() - new Date(row.created_at).getTime() > 5 * 60 * 1000) {
+        await sqlRef`DELETE FROM kl8_ai_deep_runs WHERE draw_id = ${nextId} AND play = ${k}`
+        row = undefined
+      }
+      // 旧版结果（没有终选 10 码）直接重算
+      if (row && row.status === 'done' && row.result && row.result.schema !== SCHEMA) {
         await sqlRef`DELETE FROM kl8_ai_deep_runs WHERE draw_id = ${nextId} AND play = ${k}`
         row = undefined
       }
@@ -405,8 +463,15 @@ ${schemaPrompt(k)}`
       )[0] || round1[0]
 
     const stats = kl8PlayStats(k)
+    const hitsMap = {}
+    for (const { picks } of [...round1, ...round2]) {
+      for (const n of picks) hitsMap[n] = (hitsMap[n] || 0) + 1
+    }
+    // 第二次收敛：只买 10 个球时，用底层算法分 + AI 投票融合出正好 10 码
+    const ten = finalize10(v7.pool, voteMap, hitsMap, 10)
     const payload = {
       mode: 'deep',
+      schema: SCHEMA,
       nextId,
       play: k,
       models: MODELS.map((m) => m.id),
@@ -415,6 +480,14 @@ ${schemaPrompt(k)}`
       round2: round2.length,
       elapsedMs: Date.now() - started,
       finalPicks,
+      final10: ten.map((x) => x.n),
+      final10Detail: ten.map((x) => ({
+        n: x.n,
+        ai: x.ai,
+        algo: x.algo,
+        total: Math.round(x.total * 100),
+        hits: x.hits,
+      })),
       votes,
       report: {
         confidence: best?.obj?.confidence || '低',
