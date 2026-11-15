@@ -17,6 +17,34 @@ const sleep = (ms) => new Promise((r) => setTimeout(r, ms))
 // 与服务端 api/digit-ai.js 的 ROUNDS 一一对应
 const ROUND_STAGES = ['第 1/3 轮 · 结构解读', '第 2/3 轮 · 反向质询', '第 3/3 轮 · 定稿合成']
 
+// 结果结构版本：与服务端 SCHEMA 对齐，旧版没有推荐号码
+const SCHEMA = 2
+
+const digitsOf = (s) => String(s).replace(/\D/g, '').slice(0, 3)
+
+const inPool = (num, list) => {
+  const key = [...new Set(num.split(''))].sort().join('')
+  return list.some((x) => [...new Set(x)].sort().join('') === key)
+}
+
+/** 校验并筛选 AI 给的号码：必须 3 位、必须在统计候选池内，避免模型自己造号 */
+function sanitizePicks(raw, pool) {
+  if (!raw || !pool) return null
+  const take = (arr, max, kinds) =>
+    (Array.isArray(arr) ? arr : [])
+      .map(digitsOf)
+      .filter((n) => n.length === 3)
+      .filter((n) => kinds.includes(new Set(n).size))
+      .filter((n) => inPool(n, pool))
+      .filter((n, i, a) => a.indexOf(n) === i)
+      .slice(0, max)
+  const straight = take(raw.straight, 5, [1, 2, 3])
+  const group = take(raw.group, 5, [3])
+  const group3 = take(raw.group3, 3, [2])
+  if (!straight.length && !group.length && !group3.length) return null
+  return { straight, group, group3, reasons: raw.reasons || {}, summary: raw.summary || '', risk: raw.risk || '' }
+}
+
 export default function DigitAI({ draws, label = '福彩3D', game = 'fc3d', onRefreshData }) {
   const [busy, setBusy] = useState(false)
   const [text, setText] = useState('')
@@ -26,6 +54,7 @@ export default function DigitAI({ draws, label = '福彩3D', game = 'fc3d', onRe
   const [pct, setPct] = useState(0)
   const [elapsed, setElapsed] = useState(0)
   const [tip, setTip] = useState('')
+  const [stale, setStale] = useState(false)
 
   const summary = useMemo(() => summarizeDigit(draws, 100), [draws])
   const busyRef = useRef(false)
@@ -45,7 +74,9 @@ export default function DigitAI({ draws, label = '福彩3D', game = 'fc3d', onRe
         owner,
         rounds: r.rounds,
         roundCount: r.roundCount || r.rounds?.length || 3,
+        picks: r.picks,
       })
+      if (r.schema !== SCHEMA) setStale(true)
     }
     const restore = async () => {
       let p = null
@@ -90,6 +121,11 @@ export default function DigitAI({ draws, label = '福彩3D', game = 'fc3d', onRe
     }
   }, [game, latestId])
 
+  const picks = useMemo(
+    () => (summary ? sanitizePicks(meta?.picks, summary.candidates) : null),
+    [summary, meta],
+  )
+
   if (!summary || summary.total < 10) return null
 
   const onTick = ({ elapsed: s, pct: p, stage }) => {
@@ -98,13 +134,14 @@ export default function DigitAI({ draws, label = '福彩3D', game = 'fc3d', onRe
     setPhase(stage)
   }
 
-  const run = async () => {
+  const run = async ({ force = false } = {}) => {
     if (busy) return
     busyRef.current = true
     setBusy(true)
     setError('')
     setText('')
     setMeta(null)
+    setStale(false)
     setPhase('正在同步最新开奖数据…')
     setPct(3)
     setElapsed(0)
@@ -127,17 +164,21 @@ export default function DigitAI({ draws, label = '福彩3D', game = 'fc3d', onRe
       const hasNew = !prevLatest || Number(latestFresh.id) > Number(prevLatest.id)
       const drawId = Number(latestFresh.id)
 
-      // 2. 本期是否已有共享解析
+      // 2. 本期是否已有共享解析（旧版结构没有号码，视为需要重算）
       let cached = null
+      let old = null
       try {
         const p = await peekDigitAi({ game, drawId })
-        if (p?.exists && p.status === 'done' && p.result?.text) cached = p
+        if (p?.exists && p.status === 'done' && p.result?.text) {
+          if (p.result.schema === SCHEMA) cached = p
+          else old = p
+        }
       } catch {
         /* 数据库不可用时继续走实时分析 */
       }
 
-      // 3. 没有新数据、也没有已生成的解析 → 提示
-      if (!hasNew && !cached) {
+      // 3. 没有新数据、也没有可用的解析 → 提示
+      if (!hasNew && !cached && !old && !force) {
         setTip(`第 ${drawId} 期开奖数据已经是最新的，还没有新一期开奖，暂时没有新数据。\n新一期开奖后再来点「AI 分析」即可。`)
         return
       }
@@ -154,6 +195,7 @@ export default function DigitAI({ draws, label = '福彩3D', game = 'fc3d', onRe
           owner: cached.owner,
           rounds: cached.result.rounds,
           roundCount: cached.result.roundCount || cached.result.rounds?.length || 3,
+          picks: cached.result.picks,
         })
         setPct(100)
         setPhase('分析完成')
@@ -179,7 +221,9 @@ export default function DigitAI({ draws, label = '福彩3D', game = 'fc3d', onRe
           owner: r.owner,
           rounds: r.rounds,
           roundCount: r.roundCount || r.rounds?.length || 3,
+          picks: r.picks,
         })
+        if (r.schema !== SCHEMA) setStale(true)
         setPct(100)
         setPhase('分析完成')
       } catch (e) {
@@ -198,7 +242,9 @@ export default function DigitAI({ draws, label = '福彩3D', game = 'fc3d', onRe
                 owner: p.owner,
                 rounds: p.result.rounds,
                 roundCount: p.result.roundCount || p.result.rounds?.length || 3,
+                picks: p.result.picks,
               })
+              if (p.result.schema !== SCHEMA) setStale(true)
               setPct(100)
               setPhase('分析完成')
               return
@@ -219,9 +265,13 @@ export default function DigitAI({ draws, label = '福彩3D', game = 'fc3d', onRe
   }
 
   return (
-    <Card title={`近 ${summary.total} 期 AI 分析 · ${label}`} tag={meta?.cached ? '全站共享' : 'AI'}>
+    <Card title={`AI 推算下期号码 · ${label}`} tag={meta?.cached ? '全站共享' : 'AI'}>
+      <div className="predict-sub" style={{ marginTop: 2, marginBottom: 4 }}>
+        下面三行是统计候选池（近 {summary.total} 期频率 / 遗漏 / 位置转移加权），
+        AI 只从这个池子里挑号、不自己造号；点按钮后给出本期推荐的直选、组选、组三号码。
+      </div>
       <div className="predict-row">
-        <div className="predict-label">直选候选</div>
+        <div className="predict-label">候选池 · 直选</div>
         <div className="predict-value">
           {summary.candidates.straight.map((x) => (
             <span key={x.join('')} className="draw-num">
@@ -232,7 +282,7 @@ export default function DigitAI({ draws, label = '福彩3D', game = 'fc3d', onRe
         </div>
       </div>
       <div className="predict-row">
-        <div className="predict-label">组选候选</div>
+        <div className="predict-label">候选池 · 组选</div>
         <div className="predict-value">
           {summary.candidates.group.map((x) => (
             <span key={`g${x.join('')}`} className="draw-num">
@@ -243,7 +293,7 @@ export default function DigitAI({ draws, label = '福彩3D', game = 'fc3d', onRe
         </div>
       </div>
       <div className="predict-row">
-        <div className="predict-label">组三候选</div>
+        <div className="predict-label">候选池 · 组三</div>
         <div className="predict-value">
           {summary.candidates.group3.map((x) => (
             <span key={`g3${x.join('')}`} className="draw-num">
@@ -256,11 +306,11 @@ export default function DigitAI({ draws, label = '福彩3D', game = 'fc3d', onRe
       </div>
 
       <div className="toolbar" style={{ marginTop: 8 }}>
-        <button className="tab-btn active" onClick={run} disabled={busy}>
-          {busy ? 'AI 分析中…' : text ? '重新分析' : 'AI 解读近 100 期'}
+        <button className="tab-btn active" onClick={() => run()} disabled={busy}>
+          {busy ? 'AI 推算中…' : picks ? '重新推算' : 'AI 推算本期号码'}
         </button>
         <span className="muted small">
-          共 3 轮 AI 分析（结构解读 → 反向质询 → 定稿合成）；点击会先同步最新开奖数据，每期仅首位用户真实调用
+          3 轮 AI 分析（结构解读 → 反向质询 → 定稿合成），结果全站共享；点击会先同步最新开奖数据
         </span>
       </div>
 
@@ -323,7 +373,70 @@ export default function DigitAI({ draws, label = '福彩3D', game = 'fc3d', onRe
             {meta?.at ? new Date(meta.at).toLocaleString('zh-CN') : ''}
             {meta?.cached ? ' · 本期共享解析' : ' · 本期首位生成'}
           </div>
-          <div className="ai-report-body">{text}</div>
+
+          {stale && !picks && (
+            <div className="note note-warn" style={{ marginTop: 8 }}>
+              这一版解析只有文字、没有推荐号码。
+              <button
+                className="tab-btn active"
+                style={{ marginLeft: 8 }}
+                onClick={() => run({ force: true })}
+                disabled={busy}
+              >
+                重新生成号码
+              </button>
+            </div>
+          )}
+
+          {picks && (
+            <div style={{ marginTop: 8 }}>
+              {[
+                ['直选推荐', picks.straight, '每注 1/1000'],
+                ['组选推荐 · 组六', picks.group, '约 1/167'],
+                ['组三推荐', picks.group3, '约 1/167'],
+              ].map(([name, list, odds]) =>
+                list.length ? (
+                  <div className="predict-row" key={name}>
+                    <div className="predict-label">{name}</div>
+                    <div className="predict-value">
+                      {list.map((n) => (
+                        <span key={n} className="draw-num" title={picks.reasons[n] || ''}>
+                          {n}
+                        </span>
+                      ))}
+                      <span className="muted small">{list.length} 注 · {odds}</span>
+                    </div>
+                  </div>
+                ) : null,
+              )}
+
+              {(() => {
+                const all = [...picks.straight, ...picks.group, ...picks.group3].filter(
+                  (n) => picks.reasons[n],
+                )
+                if (!all.length) return null
+                return (
+                  <ul className="small muted" style={{ margin: '4px 0 0 18px', lineHeight: 1.8 }}>
+                    {all.map((n) => (
+                      <li key={n}>
+                        <b className="mono">{n}</b> {picks.reasons[n]}
+                      </li>
+                    ))}
+                  </ul>
+                )
+              })()}
+
+              {picks.summary && (
+                <div className="note note-info" style={{ marginTop: 10 }}>{picks.summary}</div>
+              )}
+              {picks.risk && (
+                <div className="note note-warn" style={{ marginTop: 8 }}>{picks.risk}</div>
+              )}
+            </div>
+          )}
+
+          {!picks && <div className="ai-report-body">{text}</div>}
+
           {meta?.rounds?.length > 1 && (
             <details style={{ marginTop: 10 }}>
               <summary className="small muted" style={{ cursor: 'pointer' }}>
@@ -345,8 +458,8 @@ export default function DigitAI({ draws, label = '福彩3D', game = 'fc3d', onRe
       )}
 
       <Note>
-        候选组合只描述近 100 期的历史分布（频率、遗漏、位置转移），不是预测。
-        每注直选中奖概率恒为 1/1000，组六约 1/167，AI 解读不会改变这一点。
+        推荐号码是从上面的候选池里挑的，候选池只描述近 100 期的历史分布（频率、遗漏、位置转移），不是预测。
+        每注直选中奖概率恒为 1/1000，组六约 1/167，AI 选号不会改变这一点。
       </Note>
 
       <Dialog open={Boolean(tip)} text={tip} onClose={() => setTip('')} />
