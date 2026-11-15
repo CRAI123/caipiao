@@ -43,6 +43,18 @@ export async function ensureTables(sql) {
       ai_summary text,
       created_at timestamptz NOT NULL DEFAULT now()
     )`
+  // AI 深度分析：同一期同一玩法只允许首位用户触发，结果全站共享
+  await sql`
+    CREATE TABLE IF NOT EXISTS kl8_ai_deep_runs (
+      draw_id integer NOT NULL,
+      play integer NOT NULL DEFAULT 10,
+      status text NOT NULL DEFAULT 'running',
+      device_id text,
+      result jsonb,
+      created_at timestamptz NOT NULL DEFAULT now(),
+      updated_at timestamptz NOT NULL DEFAULT now(),
+      PRIMARY KEY (draw_id, play)
+    )`
 }
 
 /** 读取 admin_config 表的共享配置 */

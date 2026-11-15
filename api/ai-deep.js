@@ -24,6 +24,7 @@ import { kl8PlayStats, KL8_PLAY_LABEL } from '../src/lib/kl8Math.js'
 import { kl8Calibration } from '../src/lib/kl8Calib.js'
 import { resolveLlmSettings, callAi } from './_lib/ai.js'
 import { applyCors } from './_lib/http.js'
+import { getSql, ensureTables } from './_lib/neon.js'
 
 export const config = { maxDuration: 60 }
 
@@ -37,6 +38,7 @@ const ROUND2_WEIGHT = 1.5
 
 const bandOf = (n) => Math.min(3, Math.floor((n - 1) / 20))
 const pad = (n) => String(n).padStart(2, '0')
+const maskId = (id) => (id ? `尾号${String(id).slice(-4)}` : '匿名设备')
 
 function extractJson(text) {
   const raw = String(text || '')
@@ -195,8 +197,39 @@ export default async function handler(req, res) {
   if (req.method !== 'POST') return res.status(405).json({ error: 'Method not allowed' })
 
   const started = Date.now()
+  let sqlRef = null
+  let claimedKey = null
   try {
-    const { draws = [], play = 10 } = req.body || {}
+    const { draws = [], play = 10, action = 'run', deviceId = '', drawId } = req.body || {}
+
+    // ---- 只读：取本期已生成的解析（所有人可见） ----
+    if (action === 'peek') {
+      const id = Number(drawId)
+      const k = Math.min(10, Math.max(1, Number(play) || 10))
+      if (!Number.isInteger(id)) return res.status(400).json({ error: '缺少 drawId' })
+      let sql
+      try {
+        sql = getSql()
+        await ensureTables(sql)
+      } catch (e) {
+        return res.status(503).json({ error: `共享数据库不可用：${e.message}` })
+      }
+      const rows = await sql`
+        SELECT status, device_id, result, created_at
+        FROM kl8_ai_deep_runs
+        WHERE draw_id = ${id} AND play = ${k}`
+      const row = rows[0]
+      if (!row) return res.status(200).json({ exists: false })
+      return res.status(200).json({
+        exists: true,
+        status: row.status,
+        owner: row.device_id,
+        cachedAt: row.created_at,
+        result: row.result || null,
+      })
+    }
+
+    // ---- 分析：同一期同一玩法只允许首位用户触发 ----
     if (!Array.isArray(draws) || draws.length < 60) {
       return res.status(400).json({ error: '深度分析至少需要 60 期历史数据' })
     }
@@ -204,8 +237,75 @@ export default async function handler(req, res) {
     const history = draws.slice(0, 200)
     const nextId = history[0].id + 1
 
+    try {
+      sqlRef = getSql()
+      await ensureTables(sqlRef)
+    } catch (e) {
+      console.warn('ai-deep: 数据库不可用，跳过共享缓存', e.message)
+      sqlRef = null
+    }
+
+    if (sqlRef) {
+      const read = async () => {
+        const rows = await sqlRef`
+          SELECT status, device_id, result, created_at
+          FROM kl8_ai_deep_runs
+          WHERE draw_id = ${nextId} AND play = ${k}`
+        return rows[0]
+      }
+      let row = await read()
+      // 卡在 running 超过 5 分钟视为失败，允许重新领取
+      if (row && row.status === 'running' && Date.now() - new Date(row.created_at).getTime() > 5 * 60 * 1000) {
+        await sqlRef`DELETE FROM kl8_ai_deep_runs WHERE draw_id = ${nextId} AND play = ${k}`
+        row = undefined
+      }
+      if (row) {
+        if (row.status === 'done' && row.result) {
+          return res.status(200).json({
+            cached: true,
+            owner: row.device_id,
+            cachedAt: row.created_at,
+            ...row.result,
+          })
+        }
+        return res.status(409).json({
+          error: '本期已有用户正在分析，请稍后刷新查看结果',
+          running: true,
+          owner: row.device_id,
+        })
+      }
+      const claim = await sqlRef`
+        INSERT INTO kl8_ai_deep_runs (draw_id, play, status, device_id)
+        VALUES (${nextId}, ${k}, 'running', ${maskId(deviceId)})
+        ON CONFLICT (draw_id, play) DO NOTHING
+        RETURNING draw_id`
+      if (!claim.length) {
+        const again = await read()
+        if (again?.status === 'done' && again.result) {
+          return res.status(200).json({
+            cached: true,
+            owner: again.device_id,
+            cachedAt: again.created_at,
+            ...again.result,
+          })
+        }
+        return res.status(409).json({
+          error: '本期已有用户正在分析，请稍后刷新查看结果',
+          running: true,
+          owner: again?.device_id,
+        })
+      }
+      claimedKey = { drawId: nextId, play: k }
+    }
+
+
     const v7 = v7Recommend(history, { play: k, nextId })
-    if (!v7) return res.status(400).json({ error: '历史数据不足，无法生成推荐池' })
+    if (!v7) {
+      if (sqlRef && claimedKey) {
+        await sqlRef`DELETE FROM kl8_ai_deep_runs WHERE draw_id = ${claimedKey.drawId} AND play = ${claimedKey.play}`
+      }
+      return res.status(400).json({ error: '历史数据不足，无法生成推荐池' })
+    }
     const calib = kl8Calibration(history, 300)
     const bt = walkForward(history, { periods: 60, play: k })
     const context = buildContext(history, k, v7, calib, bt)
@@ -305,7 +405,7 @@ ${schemaPrompt(k)}`
       )[0] || round1[0]
 
     const stats = kl8PlayStats(k)
-    return res.status(200).json({
+    const payload = {
       mode: 'deep',
       nextId,
       play: k,
@@ -343,9 +443,25 @@ ${schemaPrompt(k)}`
         returnRate: +(stats.returnRate * 100).toFixed(2),
         firstPrize: Math.round(comb(BALL_MAX, k) / comb(20, k)),
       },
-    })
+    }
+
+    if (sqlRef && claimedKey) {
+      await sqlRef`
+        UPDATE kl8_ai_deep_runs
+        SET status = 'done', result = ${JSON.stringify(payload)}::jsonb, updated_at = now()
+        WHERE draw_id = ${claimedKey.drawId} AND play = ${claimedKey.play}`
+    }
+
+    return res.status(200).json({ ...payload, cached: false, owner: maskId(deviceId) })
   } catch (e) {
     console.error('ai-deep error:', e)
+    if (sqlRef && claimedKey) {
+      try {
+        await sqlRef`DELETE FROM kl8_ai_deep_runs WHERE draw_id = ${claimedKey.drawId} AND play = ${claimedKey.play} AND status = 'running'`
+      } catch {
+        /* 清理失败不阻塞报错 */
+      }
+    }
     return res.status(500).json({ error: e.message || 'AI 深度分析失败' })
   }
 }

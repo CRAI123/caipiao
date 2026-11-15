@@ -1,6 +1,6 @@
 // 下期推荐 —— 近期加权频次 + 遗漏打分，输出结构均衡的研究用号码（多玩法 + 导出）
 // ⚠️ 仅为历史数据的加权统计结果，不改变任何号码 25% 的开出概率
-import React, { useMemo, useState } from 'react'
+import React, { useEffect, useMemo, useState } from 'react'
 import { Card, Ball, Note, StatCard, pad2, yuan } from './common.jsx'
 import {
   scoreBalls,
@@ -13,7 +13,8 @@ import {
   isBig,
   road,
 } from '../lib/stats.js'
-import { aiDeep, storePrediction } from '../lib/api.js'
+import { aiDeep, peekDeep, storePrediction } from '../lib/api.js'
+import { getDeviceId } from '../lib/device.js'
 import { v7Recommend } from '../lib/kl8V7.js'
 import { fmtPct } from '../lib/kl8Math.js'
 import BetVerify from './BetVerify.jsx'
@@ -55,6 +56,8 @@ export default function Predict({ draws }) {
   const [deep, setDeep] = useState(null)
   const [deepBusy, setDeepBusy] = useState(false)
   const [deepErr, setDeepErr] = useState('')
+  const [deepOwner, setDeepOwner] = useState('')
+  const [deepChecking, setDeepChecking] = useState(false)
 
   const { scores, weighted, missing, window } = useMemo(
     () => scoreBalls(draws, { periods: 100, halfLife: 20, hotMode }),
@@ -102,6 +105,38 @@ export default function Predict({ draws }) {
 
   const deepVotes = deep?.votes || []
   const deepOverlap = deep ? deep.finalPicks.filter((n) => deep.v7.picks.includes(n)).length : 0
+  const deepCachedAt = deep?.cachedAt
+    ? new Date(deep.cachedAt).toLocaleString('zh-CN', { hour12: false })
+    : ''
+  const nextDrawId = draws[0]?.id ? draws[0].id + 1 : null
+
+  /** 读取本期已生成的共享解析（没有则保持可点击） */
+  async function loadDeep() {
+    if (!nextDrawId) return
+    setDeepChecking(true)
+    try {
+      const r = await peekDeep({ drawId: nextDrawId, play })
+      if (r.exists && r.status === 'done' && r.result) {
+        setDeep({ ...r.result, cached: true, owner: r.owner, cachedAt: r.cachedAt })
+        setDeepOwner(r.owner || '')
+        setDeepErr('')
+      } else if (r.exists && r.status === 'running') {
+        setDeepOwner(r.owner || '')
+      } else {
+        setDeep(null)
+        setDeepOwner('')
+      }
+    } catch {
+      /* 数据库不可用时静默降级，仍允许点击 */
+    } finally {
+      setDeepChecking(false)
+    }
+  }
+
+  useEffect(() => {
+    loadDeep()
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [nextDrawId, play])
 
   const bet = useMemo(
     () => ({
@@ -143,13 +178,15 @@ export default function Predict({ draws }) {
     URL.revokeObjectURL(a.href)
   }
 
-  /** AI 深度分析：9 次独立分析 + 3 模型复核 + 60 期样本外回测 */
+  /** AI 深度分析：9 次独立分析 + 3 模型复核 + 60 期样本外回测（每期每玩法仅首位用户可触发） */
   async function doDeep() {
     setDeepBusy(true)
     setDeepErr('')
     try {
-      const result = await aiDeep({ draws, play })
+      const dev = getDeviceId()
+      const result = await aiDeep({ draws, play, deviceId: dev?.id || '' })
       setDeep(result)
+      setDeepOwner(result.owner || '')
       try {
         await storePrediction({
           drawId: result.nextId,
@@ -189,9 +226,25 @@ export default function Predict({ draws }) {
         ))}
         <span className="toolbar-note">样本 {window} 期 · {hotMode === 'multi' ? '四窗口加权 25/30/30/15' : '半衰期 20 期'}</span>
         <span className="toolbar-sep" />
-        <button className="btn-primary" onClick={doDeep} disabled={deepBusy}>
-          {deepBusy ? '🔬 深度分析中…' : '🔬 AI 深度分析'}
+        <button
+          className="btn-primary"
+          onClick={doDeep}
+          disabled={deepBusy || deepChecking || Boolean(deep?.cached)}
+          title={deep?.cached ? '本期解析已由首位用户生成，所有人都能查看' : ''}
+        >
+          {deepBusy
+            ? '🔬 深度分析中…'
+            : deepChecking
+              ? '检查本期解析…'
+              : deep?.cached
+                ? '本期解析已生成'
+                : '🔬 AI 深度分析'}
         </button>
+        {(deep?.cached || deepOwner) && (
+          <button className="btn-primary" onClick={loadDeep} disabled={deepBusy || deepChecking}>
+            🔄 刷新解析
+          </button>
+        )}
         <button
           className={`tab-btn ${showV7 ? 'active' : ''}`}
           onClick={() => setShowV7((v) => !v)}
@@ -259,7 +312,7 @@ export default function Predict({ draws }) {
       {deep && (
         <Card
           title={`🔬 AI 深度分析 · 第 ${deep.nextId} 期 · ${deep.stats.label}`}
-          tag={`${deep.calls} 次调用 · 第一轮 ${deep.round1}/9 · 复核 ${deep.round2}/3 · ${(deep.elapsedMs / 1000).toFixed(1)} 秒`}
+          tag={`${deep.cached ? '全站共享 · 首位生成' : '本期首位生成'} · ${deep.calls} 次调用 · 第一轮 ${deep.round1}/9 · 复核 ${deep.round2}/3 · ${(deep.elapsedMs / 1000).toFixed(1)} 秒`}
         >
           <div className="predict-head">
             <div>
@@ -364,6 +417,12 @@ export default function Predict({ draws }) {
             </div>
           )}
 
+          <Note tone="info">
+            {deep.cached
+              ? `本期解析由首位用户（${deep.owner || deepOwner || '匿名设备'}）于 ${deepCachedAt} 生成，已存入数据库，全站共享同一份结果；后续用户直接查看，不会再重复调用 AI。`
+              : `你是本期「${deep.stats.label}」的首位分析者，结果已存入数据库，后续用户直接查看，不再重复消耗 AI 调用。`}
+          </Note>
+
           <Note tone="warn">
             深度分析共调用 {deep.calls} 次大模型（3 模型 × 3 温度 + 3 次复核），并附 60 期严格前推回测。
             轮次和耗时增加的是<b>结论的稳定性与可核查性</b>，不是中奖概率；每期每号仍是 25%，
@@ -424,6 +483,11 @@ export default function Predict({ draws }) {
       )}
 
       {deepErr && <Note tone="warn">AI 深度分析失败：{deepErr}</Note>}
+      {deepOwner && !deep && !deepBusy && (
+        <Note tone="info">
+          本期已有用户（{deepOwner}）正在分析，完成后点「🔄 刷新解析」即可查看，无需重复点击。
+        </Note>
+      )}
 
       <div className="stat-grid stat-grid-4">
         <StatCard label="参与打分号码" value={BALL_MAX} note="全部 80 个号码" />

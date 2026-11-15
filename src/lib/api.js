@@ -29,12 +29,25 @@ async function apiFetch(path, options = {}) {
   return data
 }
 
-/** AI 深度分析：3 模型 × 3 温度 + 复核轮 + 60 期样本外回测 */
-export async function aiDeep({ draws, play = 10 }) {
+/** AI 深度分析：3 模型 × 3 温度 + 复核轮 + 60 期样本外回测（每期每玩法仅首位用户可触发） */
+export async function aiDeep({ draws, play = 10, deviceId = '' }) {
   return apiFetch('/api/ai-deep', {
     method: 'POST',
-    body: JSON.stringify({ draws, play }),
+    body: JSON.stringify({ draws, play, deviceId, action: 'run' }),
   })
+}
+
+/** 读取本期已有的深度解析（所有人可看） */
+export async function peekDeep({ drawId, play = 10 }) {
+  return apiFetch('/api/ai-deep', {
+    method: 'POST',
+    body: JSON.stringify({ action: 'peek', drawId, play }),
+  })
+}
+
+/** 快乐8 加奖 / 派奖监控（抓取福彩官网通知公告） */
+export async function fetchPromo() {
+  return apiFetch('/api/kl8-promo')
 }
 
 /** 存储一期预测号码（供每日 cron 复盘对比） */
