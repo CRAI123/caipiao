@@ -23,29 +23,30 @@ const SCHEMA = 2
 const digitsOf = (s) => String(s).replace(/\D/g, '').slice(0, 3)
 
 const inPool = (num, list) => {
+  const pool = Array.isArray(list) ? list : []
   const key = [...new Set(num.split(''))].sort().join('')
-  return list.some((x) => [...new Set(x)].sort().join('') === key)
+  return pool.some((x) => [...new Set(x)].sort().join('') === key)
 }
 
 /** 校验并筛选 AI 给的号码：必须 3 位、必须在统计候选池内，避免模型自己造号 */
 function sanitizePicks(raw, pool) {
   if (!raw || !pool) return null
-  const take = (arr, max, kinds) =>
+  const take = (arr, max, kinds, list) =>
     (Array.isArray(arr) ? arr : [])
       .map(digitsOf)
       .filter((n) => n.length === 3)
       .filter((n) => kinds.includes(new Set(n).size))
-      .filter((n) => inPool(n, pool))
+      .filter((n) => inPool(n, list))
       .filter((n, i, a) => a.indexOf(n) === i)
       .slice(0, max)
-  const straight = take(raw.straight, 5, [1, 2, 3])
-  const group = take(raw.group, 5, [3])
-  const group3 = take(raw.group3, 3, [2])
+  const straight = take(raw.straight, 5, [1, 2, 3], pool.straight)
+  const group = take(raw.group, 5, [3], pool.group)
+  const group3 = take(raw.group3, 3, [2], pool.group3)
   if (!straight.length && !group.length && !group3.length) return null
   return { straight, group, group3, reasons: raw.reasons || {}, summary: raw.summary || '', risk: raw.risk || '' }
 }
 
-export default function DigitAI({ draws, label = '福彩3D', game = 'fc3d', onRefreshData }) {
+function DigitAIInner({ draws, label = '福彩3D', game = 'fc3d', onRefreshData }) {
   const [busy, setBusy] = useState(false)
   const [text, setText] = useState('')
   const [meta, setMeta] = useState(null)
@@ -56,7 +57,10 @@ export default function DigitAI({ draws, label = '福彩3D', game = 'fc3d', onRe
   const [tip, setTip] = useState('')
   const [stale, setStale] = useState(false)
 
-  const summary = useMemo(() => summarizeDigit(draws, 100), [draws])
+  const summary = useMemo(
+    () => (Array.isArray(draws) && draws.length ? summarizeDigit(draws, 100) : null),
+    [draws],
+  )
   const busyRef = useRef(false)
   const latestId = Number(draws?.[0]?.id) || 0
 
@@ -273,7 +277,7 @@ export default function DigitAI({ draws, label = '福彩3D', game = 'fc3d', onRe
       <div className="predict-row">
         <div className="predict-label">候选池 · 直选</div>
         <div className="predict-value">
-          {summary.candidates.straight.map((x) => (
+          {(summary.candidates?.straight || []).map((x) => (
             <span key={x.join('')} className="draw-num">
               {x.join('')}
             </span>
@@ -284,7 +288,7 @@ export default function DigitAI({ draws, label = '福彩3D', game = 'fc3d', onRe
       <div className="predict-row">
         <div className="predict-label">候选池 · 组选</div>
         <div className="predict-value">
-          {summary.candidates.group.map((x) => (
+          {(summary.candidates?.group || []).map((x) => (
             <span key={`g${x.join('')}`} className="draw-num">
               {x.join('')}
             </span>
@@ -295,7 +299,7 @@ export default function DigitAI({ draws, label = '福彩3D', game = 'fc3d', onRe
       <div className="predict-row">
         <div className="predict-label">候选池 · 组三</div>
         <div className="predict-value">
-          {summary.candidates.group3.map((x) => (
+          {(summary.candidates?.group3 || []).map((x) => (
             <span key={`g3${x.join('')}`} className="draw-num">
               {x[0]}
               {x[0]}
@@ -400,7 +404,7 @@ export default function DigitAI({ draws, label = '福彩3D', game = 'fc3d', onRe
                     <div className="predict-label">{name}</div>
                     <div className="predict-value">
                       {list.map((n) => (
-                        <span key={n} className="draw-num" title={picks.reasons[n] || ''}>
+                        <span key={n} className="draw-num" title={String(picks.reasons?.[n] || '')}>
                           {n}
                         </span>
                       ))}
@@ -412,14 +416,14 @@ export default function DigitAI({ draws, label = '福彩3D', game = 'fc3d', onRe
 
               {(() => {
                 const all = [...picks.straight, ...picks.group, ...picks.group3].filter(
-                  (n) => picks.reasons[n],
+                  (n) => picks.reasons?.[n],
                 )
                 if (!all.length) return null
                 return (
                   <ul className="small muted" style={{ margin: '4px 0 0 18px', lineHeight: 1.8 }}>
                     {all.map((n) => (
                       <li key={n}>
-                        <b className="mono">{n}</b> {picks.reasons[n]}
+                        <b className="mono">{n}</b> {String(picks.reasons[n])}
                       </li>
                     ))}
                   </ul>
@@ -427,10 +431,10 @@ export default function DigitAI({ draws, label = '福彩3D', game = 'fc3d', onRe
               })()}
 
               {picks.summary && (
-                <div className="note note-info" style={{ marginTop: 10 }}>{picks.summary}</div>
+                <div className="note note-info" style={{ marginTop: 10 }}>{String(picks.summary)}</div>
               )}
               {picks.risk && (
-                <div className="note note-warn" style={{ marginTop: 8 }}>{picks.risk}</div>
+                <div className="note note-warn" style={{ marginTop: 8 }}>{String(picks.risk)}</div>
               )}
             </div>
           )}
@@ -464,5 +468,44 @@ export default function DigitAI({ draws, label = '福彩3D', game = 'fc3d', onRe
 
       <Dialog open={Boolean(tip)} text={tip} onClose={() => setTip('')} />
     </Card>
+  )
+}
+
+// 局部兜底：AI 卡片自身渲染出错时只影响这张卡，不会让整页白屏
+class DigitAIBoundary extends React.Component {
+  constructor(props) {
+    super(props)
+    this.state = { err: null }
+  }
+
+  static getDerivedStateFromError(err) {
+    return { err }
+  }
+
+  componentDidCatch(err, info) {
+    console.error('AI 卡片渲染出错：', err, info)
+  }
+
+  render() {
+    if (this.state.err) {
+      return (
+        <Card title="AI 推算">
+          <div className="note note-warn">
+            AI 卡片渲染出错：{String(this.state.err?.message || this.state.err)}
+            <br />
+            页面其他内容不受影响，可刷新后重试。
+          </div>
+        </Card>
+      )
+    }
+    return this.props.children
+  }
+}
+
+export default function DigitAI(props) {
+  return (
+    <DigitAIBoundary>
+      <DigitAIInner {...props} />
+    </DigitAIBoundary>
   )
 }

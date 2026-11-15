@@ -335,7 +335,7 @@ export default function Predict({ draws, onRefreshData }) {
               ? '检查本期解析…'
               : deep?.cached
                 ? '🔬 查看本期解析'
-                : '🔬 AI 深度分析'}
+                : '🔬 AI 深度分析（自动收敛 10 码）'}
         </button>
         {(deep?.cached || deepOwner) && (
           <button className="btn-primary" onClick={() => loadDeep({ simulate: true })} disabled={deepBusy || deepChecking}>
@@ -480,32 +480,37 @@ export default function Predict({ draws, onRefreshData }) {
                 ))}
               </div>
               <Note>
-                只买 10 个球时看这一组：从 30 码推荐池里，把「底层算法评分」与「12 轮 AI 投票权重」各自归一化，
+                只买 10 个球时看这一组，<b>分析完成后自动收敛，不需要再点任何按钮</b>：从 30 码推荐池里，把「底层算法评分」与「12 轮 AI 投票权重」各自归一化，
                 按 55:45 加权，再做四区间均衡（每区 ≤3、奇偶 ≤6）收敛到正好 10 码。
                 AI 各模型给号多出来或重复时，这一步会统一去重并压到 10 个。<b>它不提高单号命中概率（恒 25%）</b>。
               </Note>
             </>
           ) : null}
 
-          <div className="predict-head" style={{ marginTop: deep.final10?.length ? 14 : 0 }}>
-            <div>
-              <div className="predict-sub">AI 投票聚合 {deep.play} 码（未经算法融合）</div>
-              <span className="draw-balls predict-balls">
-                {deep.finalPicks.map((n) => (
-                  <Ball key={n} n={n} size="md" kind="auto" />
-                ))}
-              </span>
+          <details style={{ marginTop: 14 }}>
+            <summary className="small muted" style={{ cursor: 'pointer' }}>
+              查看 AI 原始投票（{deep.play} 码，未经算法收敛的中间结果）
+            </summary>
+            <div className="predict-head" style={{ marginTop: 10 }}>
+              <div>
+                <div className="predict-sub">AI 投票聚合 {deep.play} 码（未经算法融合）</div>
+                <span className="draw-balls predict-balls">
+                  {deep.finalPicks.map((n) => (
+                    <Ball key={n} n={n} size="md" kind="auto" />
+                  ))}
+                </span>
+              </div>
             </div>
-          </div>
 
-          <div className="predict-sub" style={{ marginTop: 12 }}>加权得票（第二轮 ×1.5）</div>
-          <div className="chip-row" style={{ marginTop: 6 }}>
-            {deepVotes.map((v) => (
-              <span key={v.n} className="chip">
-                <i>{pad2(v.n)} {v.score ? `权重 ${v.score}` : '结构补位'}{v.hits ? ` · ${v.hits}/12 张票` : ''}</i>
-              </span>
-            ))}
-          </div>
+            <div className="predict-sub" style={{ marginTop: 12 }}>加权得票（第二轮 ×1.5）</div>
+            <div className="chip-row" style={{ marginTop: 6 }}>
+              {deepVotes.map((v) => (
+                <span key={v.n} className="chip">
+                  <i>{pad2(v.n)} {v.score ? `权重 ${v.score}` : '结构补位'}{v.hits ? ` · ${v.hits}/12 张票` : ''}</i>
+                </span>
+              ))}
+            </div>
+          </details>
 
           <div className="chip-row" style={{ marginTop: 12 }}>
             <span className="chip"><i>与 v7 推荐重合 {deepOverlap} 码</i></span>
