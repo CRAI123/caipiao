@@ -14,6 +14,9 @@ import { fakeAnalyze, sharedWaitSeconds } from '../lib/aiWait.js'
 
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms))
 
+// 与服务端 api/digit-ai.js 的 ROUNDS 一一对应
+const ROUND_STAGES = ['第 1/3 轮 · 结构解读', '第 2/3 轮 · 反向质询', '第 3/3 轮 · 定稿合成']
+
 export default function DigitAI({ draws, label = '福彩3D', game = 'fc3d', onRefreshData }) {
   const [busy, setBusy] = useState(false)
   const [text, setText] = useState('')
@@ -79,18 +82,25 @@ export default function DigitAI({ draws, label = '福彩3D', game = 'fc3d', onRe
 
       // 4. 已有共享结果：模拟一段分析等待，让后面看的人也有体验
       if (cached) {
-        setPhase('正在读取本期共享解析…')
-        await fakeAnalyze({ seconds: sharedWaitSeconds(), onTick })
+        setPhase(ROUND_STAGES[0])
+        await fakeAnalyze({ seconds: sharedWaitSeconds(), stages: ROUND_STAGES, onTick })
         setText(cached.result.text)
-        setMeta({ model: cached.result.model, at: cached.result.at, cached: true, owner: cached.owner })
+        setMeta({
+          model: cached.result.model,
+          at: cached.result.at,
+          cached: true,
+          owner: cached.owner,
+          rounds: cached.result.rounds,
+          roundCount: cached.result.roundCount || cached.result.rounds?.length || 3,
+        })
         setPct(100)
         setPhase('分析完成')
         return
       }
 
-      // 5. 首位用户：真实调用（至少保留 8 秒进度，避免瞬间跳变）
-      setPhase('AI 正在分析…')
-      const timer = fakeAnalyze({ seconds: 8, onTick })
+      // 5. 首位用户：真实三轮分析（进度按轮次推进，不等待模拟计时结束）
+      setPhase(ROUND_STAGES[0])
+      fakeAnalyze({ seconds: 45, stages: ROUND_STAGES, onTick })
       try {
         const r = await runDigitAi({
           game,
@@ -99,9 +109,15 @@ export default function DigitAI({ draws, label = '福彩3D', game = 'fc3d', onRe
           messages: buildDigitMessages(freshSummary, label),
           deviceId: getDeviceId()?.id || '',
         })
-        await timer
         setText(r.text)
-        setMeta({ model: r.model, at: r.at, cached: Boolean(r.cached), owner: r.owner })
+        setMeta({
+          model: r.model,
+          at: r.at,
+          cached: Boolean(r.cached),
+          owner: r.owner,
+          rounds: r.rounds,
+          roundCount: r.roundCount || r.rounds?.length || 3,
+        })
         setPct(100)
         setPhase('分析完成')
       } catch (e) {
@@ -113,7 +129,14 @@ export default function DigitAI({ draws, label = '福彩3D', game = 'fc3d', onRe
             const p = await peekDigitAi({ game, drawId }).catch(() => null)
             if (p?.exists && p.status === 'done' && p.result?.text) {
               setText(p.result.text)
-              setMeta({ model: p.result.model, at: p.result.at, cached: true, owner: p.owner })
+              setMeta({
+                model: p.result.model,
+                at: p.result.at,
+                cached: true,
+                owner: p.owner,
+                rounds: p.result.rounds,
+                roundCount: p.result.roundCount || p.result.rounds?.length || 3,
+              })
               setPct(100)
               setPhase('分析完成')
               return
@@ -174,16 +197,22 @@ export default function DigitAI({ draws, label = '福彩3D', game = 'fc3d', onRe
           {busy ? 'AI 分析中…' : text ? '重新分析' : 'AI 解读近 100 期'}
         </button>
         <span className="muted small">
-          点击后会自动同步最新开奖数据；每期仅首位用户调用 AI，结果全站共享
+          共 3 轮 AI 分析（结构解读 → 反向质询 → 定稿合成）；点击会先同步最新开奖数据，每期仅首位用户真实调用
         </span>
       </div>
 
       {busy && (
-        <div style={{ marginTop: 12 }}>
+        <div style={{ marginTop: 14 }}>
+          <div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: 6 }}>
+            <span className="small" style={{ fontWeight: 700 }}>
+              {phase || ROUND_STAGES[0]}
+            </span>
+            <span className="mono small muted">已用 {elapsed} 秒</span>
+          </div>
           <div
             style={{
-              height: 6,
-              borderRadius: 3,
+              height: 10,
+              borderRadius: 5,
               background: '#ece6da',
               overflow: 'hidden',
             }}
@@ -197,8 +226,27 @@ export default function DigitAI({ draws, label = '福彩3D', game = 'fc3d', onRe
               }}
             />
           </div>
-          <div className="muted small" style={{ marginTop: 6 }}>
-            {phase} · 已用 {elapsed} 秒
+          <div style={{ display: 'flex', gap: 8, marginTop: 8, flexWrap: 'wrap' }}>
+            {ROUND_STAGES.map((s, i) => {
+              const current = phase === s
+              const passed = pct >= Math.round(((i + 1) / ROUND_STAGES.length) * 100) - 1
+              return (
+                <span
+                  key={s}
+                  className="chip"
+                  style={{
+                    opacity: current || passed ? 1 : 0.45,
+                    borderColor: current ? '#c23a2b' : undefined,
+                    color: current ? '#c23a2b' : undefined,
+                  }}
+                >
+                  <i>{passed ? '✓ ' : ''}{s}</i>
+                </span>
+              )
+            })}
+          </div>
+          <div className="mono small muted" style={{ marginTop: 6 }}>
+            {pct}%
           </div>
         </div>
       )}
@@ -208,11 +256,28 @@ export default function DigitAI({ draws, label = '福彩3D', game = 'fc3d', onRe
       {text && (
         <>
           <div className="predict-sub" style={{ marginTop: 12 }}>
-            AI 分析 · {meta?.model} ·{' '}
+            {meta?.roundCount || 3} 轮 AI 分析 · {meta?.model} ·{' '}
             {meta?.at ? new Date(meta.at).toLocaleString('zh-CN') : ''}
             {meta?.cached ? ' · 本期共享解析' : ' · 本期首位生成'}
           </div>
           <div className="ai-report-body">{text}</div>
+          {meta?.rounds?.length > 1 && (
+            <details style={{ marginTop: 10 }}>
+              <summary className="small muted" style={{ cursor: 'pointer' }}>
+                查看 {meta.rounds.length} 轮分析过程
+              </summary>
+              <div style={{ marginTop: 8, display: 'grid', gap: 8 }}>
+                {meta.rounds.map((r, i) => (
+                  <div key={i} className="note">
+                    <b>
+                      第 {i + 1} 轮 · {r.name}
+                    </b>
+                    <div style={{ marginTop: 4, whiteSpace: 'pre-wrap' }}>{r.text}</div>
+                  </div>
+                ))}
+              </div>
+            </details>
+          )}
         </>
       )}
 

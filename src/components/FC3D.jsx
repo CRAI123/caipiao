@@ -100,6 +100,9 @@ export default function FC3D({
         </div>
       </div>
 
+      {/* AI 分析放在最上方，和推荐结果一起看 */}
+      <DigitAI draws={draws} label={label} game={game} onRefreshData={onRefreshData} />
+
       {/* 上期开奖 */}
       <div className="predict-row">
         <div className="predict-label">上期开奖</div>
@@ -725,8 +728,6 @@ export default function FC3D({
           </div>
         </div>
       )}
-
-      <DigitAI draws={draws} label={label} game={game} onRefreshData={onRefreshData} />
 
       <div className="note note-warn" style={{ marginTop: 16 }}>
         ⚠️ 彩票开奖号码完全随机，以上推算仅为历史数据的统计描述，无法预测中奖，请理性购彩！

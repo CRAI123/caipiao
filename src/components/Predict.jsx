@@ -28,6 +28,23 @@ const MODES = [
 ]
 const PLAYS = [3, 4, 5, 6, 7, 8, 9, 10]
 
+// 与服务端 api/ai-deep.js 一致：9 次独立分析（3 模型 × 3 温度）+ 3 次交叉复核 = 12 轮
+const KL8_STAGES = [
+  '同步开奖数据 · 清洗 100 期样本',
+  '第 1/12 轮 · Opus 5.5 低温独立分析',
+  '第 2/12 轮 · Opus 5.5 中温独立分析',
+  '第 3/12 轮 · Opus 5.5 高温独立分析',
+  '第 4/12 轮 · Opus 5 低温独立分析',
+  '第 5/12 轮 · Opus 5 中温独立分析',
+  '第 6/12 轮 · Opus 5 高温独立分析',
+  '第 7/12 轮 · Sonnet 5 低温独立分析',
+  '第 8/12 轮 · Sonnet 5 中温独立分析',
+  '第 9/12 轮 · Sonnet 5 高温独立分析',
+  '第 10/12 轮 · Opus 5.5 交叉复核',
+  '第 11/12 轮 · Opus 5 交叉复核',
+  '第 12/12 轮 · Sonnet 5 交叉复核',
+]
+
 const bandOf = (n) => Math.min(3, Math.floor((n - 1) / 20))
 
 function profile(nums) {
@@ -129,6 +146,7 @@ export default function Predict({ draws, onRefreshData }) {
           setPhase('正在读取本期共享解析…')
           await fakeAnalyze({
             seconds: sharedWaitSeconds(),
+            stages: KL8_STAGES,
             onTick: ({ elapsed: s, pct: p, stage }) => {
               setElapsed(s)
               setPct(p)
@@ -248,7 +266,7 @@ export default function Predict({ draws, onRefreshData }) {
       // 4. 已有共享解析：模拟一段分析等待，让后看的人也有体验
       if (cached) {
         setPhase('正在读取本期共享解析…')
-        await fakeAnalyze({ seconds: sharedWaitSeconds(), onTick })
+        await fakeAnalyze({ seconds: sharedWaitSeconds(), stages: KL8_STAGES, onTick })
         setDeep({ ...cached.result, cached: true, owner: cached.owner, cachedAt: cached.cachedAt })
         setDeepOwner(cached.owner || '')
         setPct(100)
@@ -256,9 +274,9 @@ export default function Predict({ draws, onRefreshData }) {
         return
       }
 
-      // 5. 首位用户：真实分析（至少保留 10 秒进度）
+      // 5. 首位用户：真实分析（12 次大模型调用，进度按轮次推进）
       const dev = getDeviceId()
-      const timer = fakeAnalyze({ seconds: 10, onTick })
+      const timer = fakeAnalyze({ seconds: 40, stages: KL8_STAGES, onTick })
       const result = await aiDeep({ draws: fresh, play, deviceId: dev?.id || '' })
       await timer
       setDeep(result)
@@ -335,7 +353,13 @@ export default function Predict({ draws, onRefreshData }) {
 
       {deepBusy && (
         <div style={{ marginBottom: 10 }}>
-          <div style={{ height: 6, borderRadius: 3, background: '#ece6da', overflow: 'hidden' }}>
+          <div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: 6 }}>
+            <span className="small" style={{ fontWeight: 700 }}>
+              {phase || KL8_STAGES[0]}
+            </span>
+            <span className="mono small muted">已用 {elapsed} 秒</span>
+          </div>
+          <div style={{ height: 10, borderRadius: 5, background: '#ece6da', overflow: 'hidden' }}>
             <div
               style={{
                 height: '100%',
@@ -345,8 +369,34 @@ export default function Predict({ draws, onRefreshData }) {
               }}
             />
           </div>
-          <div className="muted small" style={{ marginTop: 6 }}>
-            {phase} · 已用 {elapsed} 秒
+          <div className="chip-row" style={{ marginTop: 8 }}>
+            {[
+              { name: '独立分析 9 轮', from: 1, to: 9 },
+              { name: '交叉复核 3 轮', from: 10, to: 12 },
+            ].map((g) => {
+              const cur = Math.max(0, Math.min(12, Math.round((pct / 100) * 13) - 1))
+              const passed = cur > g.to
+              const active = cur >= g.from && cur <= g.to
+              return (
+                <span
+                  key={g.name}
+                  className="chip"
+                  style={{
+                    opacity: active || passed ? 1 : 0.45,
+                    borderColor: active ? '#c23a2b' : undefined,
+                    color: active ? '#c23a2b' : undefined,
+                  }}
+                >
+                  <i>
+                    {passed ? '✓ ' : ''}
+                    {g.name}
+                  </i>
+                </span>
+              )
+            })}
+            <span className="mono small muted" style={{ alignSelf: 'center' }}>
+              共 12 轮 · {pct}%
+            </span>
           </div>
         </div>
       )}
@@ -409,7 +459,7 @@ export default function Predict({ draws, onRefreshData }) {
       {deep && (
         <Card
           title={`🔬 AI 深度分析 · 第 ${deep.nextId} 期 · ${deep.stats.label}`}
-          tag={`${deep.cached ? '全站共享 · 首位生成' : '本期首位生成'} · ${deep.calls} 次调用 · 第一轮 ${deep.round1}/9 · 复核 ${deep.round2}/3 · ${(deep.elapsedMs / 1000).toFixed(1)} 秒`}
+          tag={`${deep.cached ? '全站共享 · 首位生成' : '本期首位生成'} · 共 ${deep.calls} 轮 AI 分析（独立 ${deep.round1}/9 + 复核 ${deep.round2}/3）· ${(deep.elapsedMs / 1000).toFixed(1)} 秒`}
         >
           <div className="predict-head">
             <div>

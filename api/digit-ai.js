@@ -16,6 +16,28 @@ export const config = { maxDuration: 60 }
 const GAMES = { fc3d: '福彩3D', pl3: '排列三' }
 const maskId = (id) => (id ? `尾号${String(id).slice(-4)}` : '匿名设备')
 
+// 三轮真实分析：结构解读 → 反向质询 → 定稿合成（每轮都单独调用一次大模型）
+const ROUNDS = [
+  {
+    name: '结构解读',
+    prompt:
+      '第一轮：只依据前面给出的统计数据，解读本期号码结构（位置频率、遗漏、和值/跨度区间、形态倾向）。不要编造数据，不要承诺中奖。控制在 300 字内。',
+    temperature: 0.5,
+  },
+  {
+    name: '反向质询',
+    prompt:
+      '第二轮：请以严格质疑者的身份审查第一轮结论——指出其中过度解读、样本不足或自相矛盾之处，并给出更保守的表述。控制在 250 字内。',
+    temperature: 0.3,
+  },
+  {
+    name: '定稿合成',
+    prompt:
+      '第三轮：综合前两轮，输出最终解读：1) 直选/组选候选及理由（引用统计事实）；2) 本期结构判断；3) 一句风险提示（每注直选 1/1000、组六约 1/167 不变）。语言简洁，不要重复前两轮原文。',
+    temperature: 0.4,
+  },
+]
+
 /** 校验客户端传来的 messages，避免把接口当任意代理用 */
 function sanitizeMessages(messages) {
   if (!Array.isArray(messages) || messages.length === 0 || messages.length > 4) return null
@@ -114,12 +136,21 @@ export default async function handler(req, res) {
 
     const started = Date.now()
     const llm = await resolveLlmSettings()
-    const text = await callAi(llm, msgs, { maxTokens: 1800, temperature: 0.4 })
+    const conv = [...msgs]
+    const rounds = []
+    for (const r of ROUNDS) {
+      const ask = { role: 'user', content: r.prompt }
+      const text = await callAi(llm, [...conv, ask], { maxTokens: 1200, temperature: r.temperature })
+      rounds.push({ name: r.name, text })
+      conv.push(ask, { role: 'assistant', content: text })
+    }
     const payload = {
       game,
       drawId: id,
       label: String(label || GAMES[game]).slice(0, 20),
-      text,
+      text: rounds[rounds.length - 1].text,
+      rounds,
+      roundCount: rounds.length,
       model: llm.llmModel,
       at: new Date().toISOString(),
       elapsedMs: Date.now() - started,
