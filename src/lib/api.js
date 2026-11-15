@@ -29,11 +29,11 @@ async function apiFetch(path, options = {}) {
   return data
 }
 
-/** AI 选号：底层统计逻辑之后，调用 AI 辅助选号 */
-export async function aiPredict({ draws, play = 10, mode = 'mix' }) {
-  return apiFetch('/api/ai-predict', {
+/** AI 深度分析：3 模型 × 3 温度 + 复核轮 + 60 期样本外回测 */
+export async function aiDeep({ draws, play = 10 }) {
+  return apiFetch('/api/ai-deep', {
     method: 'POST',
-    body: JSON.stringify({ draws, play, mode }),
+    body: JSON.stringify({ draws, play }),
   })
 }
 

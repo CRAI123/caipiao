@@ -13,7 +13,7 @@ import {
   isBig,
   road,
 } from '../lib/stats.js'
-import { aiPredict, storePrediction } from '../lib/api.js'
+import { aiDeep, storePrediction } from '../lib/api.js'
 import { v7Recommend } from '../lib/kl8V7.js'
 import { fmtPct } from '../lib/kl8Math.js'
 import BetVerify from './BetVerify.jsx'
@@ -51,11 +51,10 @@ function profile(nums) {
 export default function Predict({ draws }) {
   const [hotMode, setHotMode] = useState('mix')
   const [play, setPlay] = useState(10)
-  const [aiPicks, setAiPicks] = useState(null)
-  const [aiReasoning, setAiReasoning] = useState('')
-  const [aiBusy, setAiBusy] = useState(false)
-  const [aiMsg, setAiMsg] = useState(null)
   const [showV7, setShowV7] = useState(false)
+  const [deep, setDeep] = useState(null)
+  const [deepBusy, setDeepBusy] = useState(false)
+  const [deepErr, setDeepErr] = useState('')
 
   const { scores, weighted, missing, window } = useMemo(
     () => scoreBalls(draws, { periods: 100, halfLife: 20, hotMode }),
@@ -101,6 +100,9 @@ export default function Predict({ draws }) {
     [showV7, draws, play, latest],
   )
 
+  const deepVotes = deep?.votes || []
+  const deepOverlap = deep ? deep.finalPicks.filter((n) => deep.v7.picks.includes(n)).length : 0
+
   const bet = useMemo(
     () => ({
       ok: true,
@@ -141,37 +143,30 @@ export default function Predict({ draws }) {
     URL.revokeObjectURL(a.href)
   }
 
-  /** AI 选号：底层统计逻辑之后，调用 AI 辅助分析选号，并自动存储预测 */
-  async function doAiPredict() {
-    setAiBusy(true)
-    setAiMsg(null)
+  /** AI 深度分析：9 次独立分析 + 3 模型复核 + 60 期样本外回测 */
+  async function doDeep() {
+    setDeepBusy(true)
+    setDeepErr('')
     try {
-      const result = await aiPredict({ draws, play, mode: hotMode })
-      setAiPicks(result.aiPicks)
-      setAiReasoning(result.aiReasoning)
-      // 自动存储预测，供每日 cron 复盘对比
-      const latest = draws[0]
-      const nextId = latest ? latest.id + 1 : null
-      if (nextId) {
-        try {
-          await storePrediction({
-            drawId: nextId,
-            play,
-            mode: hotMode,
-            picks: mainNums,
-            dans,
-            tuos,
-            aiPicks: result.aiPicks,
-          })
-          setAiMsg({ tone: 'info', text: `AI 选号已生成，预测已自动存档（第 ${nextId} 期）` })
-        } catch {
-          setAiMsg({ tone: 'info', text: 'AI 选号已生成（存档失败，不影响使用）' })
-        }
+      const result = await aiDeep({ draws, play })
+      setDeep(result)
+      try {
+        await storePrediction({
+          drawId: result.nextId,
+          play,
+          mode: hotMode,
+          picks: mainNums,
+          dans,
+          tuos,
+          aiPicks: result.finalPicks,
+        })
+      } catch {
+        /* 存档失败不影响展示 */
       }
     } catch (e) {
-      setAiMsg({ tone: 'warn', text: `AI 选号失败：${e.message}` })
+      setDeepErr(e.message || 'AI 深度分析失败')
     } finally {
-      setAiBusy(false)
+      setDeepBusy(false)
     }
   }
 
@@ -194,8 +189,8 @@ export default function Predict({ draws }) {
         ))}
         <span className="toolbar-note">样本 {window} 期 · {hotMode === 'multi' ? '四窗口加权 25/30/30/15' : '半衰期 20 期'}</span>
         <span className="toolbar-sep" />
-        <button className="btn-primary" onClick={doAiPredict} disabled={aiBusy}>
-          {aiBusy ? 'AI 分析中…' : '🤖 AI 选号'}
+        <button className="btn-primary" onClick={doDeep} disabled={deepBusy}>
+          {deepBusy ? '🔬 深度分析中…' : '🔬 AI 深度分析'}
         </button>
         <button
           className={`tab-btn ${showV7 ? 'active' : ''}`}
@@ -261,6 +256,122 @@ export default function Predict({ draws }) {
         </Note>
       </Card>
 
+      {deep && (
+        <Card
+          title={`🔬 AI 深度分析 · 第 ${deep.nextId} 期 · ${deep.stats.label}`}
+          tag={`${deep.calls} 次调用 · 第一轮 ${deep.round1}/9 · 复核 ${deep.round2}/3 · ${(deep.elapsedMs / 1000).toFixed(1)} 秒`}
+        >
+          <div className="predict-head">
+            <div>
+              <div className="predict-sub">最终推荐 {deep.play} 码（3 模型 × 3 温度 + 复核轮加权聚合）</div>
+              <span className="draw-balls predict-balls">
+                {deep.finalPicks.map((n) => (
+                  <Ball key={n} n={n} size="md" kind="auto" />
+                ))}
+              </span>
+            </div>
+          </div>
+
+          <div className="predict-sub" style={{ marginTop: 12 }}>加权得票（第二轮 ×1.5）</div>
+          <div className="chip-row" style={{ marginTop: 6 }}>
+            {deepVotes.map((v) => (
+              <span key={v.n} className="chip">
+                <i>{pad2(v.n)} {v.score ? `权重 ${v.score}` : '结构补位'}{v.hits ? ` · ${v.hits}/12 张票` : ''}</i>
+              </span>
+            ))}
+          </div>
+
+          <div className="chip-row" style={{ marginTop: 12 }}>
+            <span className="chip"><i>与 v7 推荐重合 {deepOverlap} 码</i></span>
+            <span className="chip"><i>置信度 {deep.report.confidence}</i></span>
+            <span className="chip"><i>单注期望 {deep.stats.ev} 元 · 返还 {deep.stats.returnRate}%</i></span>
+            <span className="chip"><i>头奖 1 / {deep.stats.firstPrize.toLocaleString()}</i></span>
+          </div>
+
+          <div className="predict-sub" style={{ marginTop: 14 }}>
+            样本外回测（近 {deep.backtest.n} 期，逐期只用该期之前的数据建池）
+          </div>
+          <div className="table-scroll">
+            <table className="ledger-table">
+              <thead>
+                <tr>
+                  <th>项目</th>
+                  <th>实际平均命中</th>
+                  <th>随机期望</th>
+                  <th>z 值</th>
+                </tr>
+              </thead>
+              <tbody>
+                <tr>
+                  <td>推荐池 30 码</td>
+                  <td className="mono">{deep.backtest.poolMean}</td>
+                  <td className="mono">{deep.backtest.poolExp}</td>
+                  <td className="mono">{deep.backtest.z}</td>
+                </tr>
+                <tr>
+                  <td>排除池 30 码</td>
+                  <td className="mono">{deep.backtest.killMean}</td>
+                  <td className="mono">{deep.backtest.poolExp}</td>
+                  <td className="mono muted">—</td>
+                </tr>
+                <tr>
+                  <td>结构选号 {deep.play} 码</td>
+                  <td className="mono">{deep.backtest.pickMean}</td>
+                  <td className="mono">{deep.backtest.pickExp}</td>
+                  <td className="mono">{deep.backtest.zPick}</td>
+                </tr>
+              </tbody>
+            </table>
+          </div>
+          <Note tone={deep.backtest.significant ? 'info' : 'warn'}>
+            回测结论：推荐池平均命中 {deep.backtest.poolMean} 个，随机期望 {deep.backtest.poolExp} 个，z={deep.backtest.z}
+            （|z| ≥ 1.96 才算 5% 显著）。{deep.backtest.significant
+              ? '这一档达到显著，但连续多档检验时需警惕多重比较带来的假阳性。'
+              : '当前与随机无显著差异，说明多轮 AI 分析不产生预测优势。'}
+          </Note>
+
+          <div className="predict-sub" style={{ marginTop: 14 }}>各模型给号</div>
+          <div className="mono small" style={{ lineHeight: 1.9, whiteSpace: 'pre-wrap' }}>
+            {`第一轮：\n${deep.round1Picks.map((r) => `${r.model}  ${r.picks.map(pad2).join(' ')}`).join('\n')}`}
+            {deep.round2Picks.length ? `\n复核轮：\n${deep.round2Picks.map((r) => `${r.model}  ${r.picks.map(pad2).join(' ')}`).join('\n')}` : ''}
+          </div>
+
+          <div className="settings-guide" style={{ marginTop: 12 }}>
+            <b>AI 分析要点</b>
+            <ul style={{ margin: '6px 0 10px 18px' }}>
+              {deep.report.key_points.map((t, i) => (
+                <li key={i} className="small">{t}</li>
+              ))}
+            </ul>
+            {deep.report.risks.length > 0 && (
+              <>
+                <b>风险与限制</b>
+                <ul style={{ margin: '6px 0 10px 18px' }}>
+                  {deep.report.risks.map((t, i) => (
+                    <li key={i} className="small">{t}</li>
+                  ))}
+                </ul>
+              </>
+            )}
+            {deep.report.review && <div className="small"><b>结论：</b>{deep.report.review}</div>}
+          </div>
+
+          {deep.calibration && (
+            <div className="chip-row" style={{ marginTop: 10 }}>
+              <span className="chip"><i>动态分组 log-loss {deep.calibration.logLossDyn}</i></span>
+              <span className="chip"><i>恒定 25% {deep.calibration.logLossBase}</i></span>
+              <span className="chip"><i>差值 {deep.calibration.diff > 0 ? '+' : ''}{deep.calibration.diff}</i></span>
+            </div>
+          )}
+
+          <Note tone="warn">
+            深度分析共调用 {deep.calls} 次大模型（3 模型 × 3 温度 + 3 次复核），并附 60 期严格前推回测。
+            轮次和耗时增加的是<b>结论的稳定性与可核查性</b>，不是中奖概率；每期每号仍是 25%，
+            {deep.stats.label}头奖概率仍是 1 / {deep.stats.firstPrize.toLocaleString()}。回测若显示无优势，就按无优势理解。
+          </Note>
+        </Card>
+      )}
+
       {v7 && (
         <Card
           title={`v7 算法 · 第 ${v7.nextId} 期 · ${PLAY_LABEL[v7.play]} 推荐`}
@@ -312,31 +423,7 @@ export default function Predict({ draws }) {
         </Card>
       )}
 
-      {aiPicks && (
-        <Card title={`🤖 AI 选号 · 第 ${nextId} 期`} tag="底层统计 + AI 分析">
-          <div className="predict-head">
-            <div>
-              <div className="predict-sub">AI 推荐 {play} 码</div>
-              <span className="draw-balls predict-balls">
-                {aiPicks.map((n) => (
-                  <Ball key={n} n={n} size="md" kind="auto" />
-                ))}
-              </span>
-            </div>
-          </div>
-          {aiReasoning && (
-            <div className="settings-guide" style={{ marginTop: 12, whiteSpace: 'pre-wrap' }}>
-              <b>AI 分析理由：</b>
-              {'\n'}{aiReasoning}
-            </div>
-          )}
-          <Note tone="warn">
-            AI 选号仅基于历史数据统计做参考分析，开奖为独立随机事件，不提高中奖概率。理性购彩，量力而行。
-          </Note>
-        </Card>
-      )}
-
-      {aiMsg && <Note tone={aiMsg.tone === 'warn' ? 'warn' : 'info'}>{aiMsg.text}</Note>}
+      {deepErr && <Note tone="warn">AI 深度分析失败：{deepErr}</Note>}
 
       <div className="stat-grid stat-grid-4">
         <StatCard label="参与打分号码" value={BALL_MAX} note="全部 80 个号码" />
