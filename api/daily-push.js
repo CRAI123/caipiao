@@ -573,9 +573,8 @@ function digitAiLines(ai) {
   return [
     HR,
     line(grey(`算法池 ${ai.pool.straight.length}/${ai.pool.group.length}/${ai.pool.group3.length} 注（直选/组六/组三）`)),
-    line(
-      `**${tag}** 直选 ${red(p.straight.join(' '))}　组六 ${red(p.group.join(' '))}　组三 ${red(p.group3.join(' '))}`,
-    ),
+    line(`**${tag}** 直选 ${red(p.straight.join(' '))}`),
+    line(`组六 ${red(p.group.join(' '))}　组三 ${red(p.group3.join(' '))}`),
     ai.cached ? line(grey('复用站内已生成结果')) : null,
   ].filter(Boolean)
 }
@@ -589,9 +588,8 @@ function buildFc3dCard(digit, title, { template = 'red', extra = [], warning = n
     template,
     warning,
     blocks: [
-      line(
-        `上期开奖：${grey(digit.latest.num.join(' '))}　概率 直选 1/1000 · 组六 1/167 · 组三 1/333`,
-      ),
+      line(`上期开奖：${grey(digit.latest.num.join(' '))}`),
+      line(grey('概率 直选 1/1000 · 组六 1/167 · 组三 1/333')),
       hits
         ? line(
             `**上期命中**（第 ${hits.drawId} 期，直选/组六/组三）：算法 ${hits.algo.straight}/${hits.algo.group}/${hits.algo.group3}　AI ${
@@ -600,15 +598,10 @@ function buildFc3dCard(digit, title, { template = 'red', extra = [], warning = n
           )
         : line(grey('上期命中：暂无上期推荐记录，下次推送起显示')),
       HR,
-      line(
-        `**直选复式** ${bets} 注 · ${bets * 2} 元　百 ${red(bai.join('/'))}　十 ${red(shi.join('/'))}　个 ${red(
-          ge.join('/'),
-        )}`,
-      ),
-      line(
-        `**双胆** ${red(p.dan.join('/'))}　拖码 ${p.tuo.join('/')}　和值 ${p.sumRange[0]}~${p.sumRange[1]}　跨度 ${p.spanRange[0]}~${p.spanRange[1]}`,
-      ),
-      line(`杀号 ${grey(p.kill.map((k) => k.digit).join('/'))}`),
+      line(`**直选复式** ${bets} 注 · ${bets * 2} 元`),
+      line(`百 ${red(bai.join('/'))}　十 ${red(shi.join('/'))}　个 ${red(ge.join('/'))}`),
+      line(`**双胆** ${red(p.dan.join('/'))}　拖码 ${p.tuo.join('/')}`),
+      line(`和值 ${p.sumRange[0]}~${p.sumRange[1]}　跨度 ${p.spanRange[0]}~${p.spanRange[1]}　杀号 ${grey(p.kill.map((k) => k.digit).join('/'))}`),
       ...extra,
       ...digitAiLines(ai),
     ],
