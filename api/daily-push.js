@@ -19,7 +19,7 @@ import { fetchFc3dDraws } from './_lib/fc3d.js'
 import { fetchPl3Draws } from './_lib/pl3.js'
 import { fetchSsqDraws } from './_lib/ssq.js'
 import { resolveLlmSettings, callAi } from './_lib/ai.js'
-import { scoreBalls, pickBalanced, BALL_MAX } from '../src/lib/stats.js'
+import { scoreBalls, pickBalanced, BALL_MAX, comb } from '../src/lib/stats.js'
 import { v7Recommend } from '../src/lib/kl8V7.js'
 import { summarizeDigit, digitCandidatePool, buildDigitMessages } from '../src/lib/digitAi.js'
 import { predictFC3Dv2 } from '../src/lib/fc3dPredict.js'
@@ -31,6 +31,8 @@ export const config = { maxDuration: 60 }
 
 const CONFIG_KEY = 'daily_push_config'
 const STATUS_KEY = 'daily_push_last'
+// 上期推送记录（用于「上期中奖几个」的 AI 结果对照，算法部分直接用历史数据重算）
+const HISTORY_KEY = 'daily_push_history'
 const FRESH_RETRY_MS = 1500
 // AI 终选与站内共用同一套结构版本号，只有同版本的历史结果才复用
 const DIGIT_SCHEMA = 5
@@ -373,6 +375,123 @@ async function buildKl8Ai({ draws, built, sql, llm }) {
   }
 }
 
+// ============================================================
+// 上期中奖对照：算法部分用「上期之前」的数据严格前推重算（不偷未来数据），
+// AI 部分优先读站内共享结果，其次读上一次推送存下的号码。
+// ============================================================
+
+async function loadHistory() {
+  if (!process.env.DATABASE_URL) return null
+  try {
+    const raw = await readConfig(getSql(), HISTORY_KEY)
+    return raw ? JSON.parse(raw) : null
+  } catch {
+    return null
+  }
+}
+
+async function saveHistory(history) {
+  if (!process.env.DATABASE_URL) return
+  try {
+    await writeConfig(getSql(), HISTORY_KEY, JSON.stringify(history))
+  } catch (e) {
+    console.error('[daily-push] 记录上期推送失败：', e.message)
+  }
+}
+
+/** 3D / 排列三：把一组推荐对照实际开奖，返回各玩法命中注数 */
+function digitHitOf(picks, num) {
+  const actual = (num || []).join('')
+  if (actual.length !== 3) return null
+  const key = [...actual].sort().join('')
+  const uniq = new Set(actual).size
+  const hit = (list, test) => (Array.isArray(list) ? list.filter(test).length : 0)
+  return {
+    actual,
+    straight: hit(picks?.straight, (n) => n === actual),
+    group: uniq === 3 ? hit(picks?.group, (n) => [...n].sort().join('') === key) : 0,
+    group3: uniq === 2 ? hit(picks?.group3, (n) => [...n].sort().join('') === key) : 0,
+  }
+}
+
+/** 上期算法推荐（严格前推：只用上期及更早的数据） */
+function kl8AlgoPrev(draws) {
+  const latest = draws?.[0]
+  const hist = draws?.slice(1) || []
+  if (!latest || hist.length < 20) return null
+  const v7 = v7Recommend(hist, { play: 10, nextId: latest.id })
+  if (!v7) return null
+  const drawn = new Set(latest.nums)
+  return { drawId: Number(latest.id), picks: v7.picks, hits: v7.picks.filter((n) => drawn.has(n)).length }
+}
+
+function digitAlgoPrev(draws) {
+  const latest = draws?.[0]
+  const hist = draws?.slice(1) || []
+  if (!latest || hist.length < 10) return null
+  const summary = summarizeDigit(hist, 100)
+  const pool = summary ? digitCandidatePool(summary) : null
+  if (!pool?.straight.length) return null
+  const picks = {
+    straight: pool.straight.slice(0, 3),
+    group: pool.group.slice(0, 2),
+    group3: pool.group3.slice(0, 1),
+  }
+  const h = digitHitOf(picks, latest.num)
+  return h ? { drawId: Number(latest.id), ...h } : null
+}
+
+function ssqAlgoPrev(draws) {
+  const latest = draws?.[0]
+  const hist = draws?.slice(1) || []
+  if (!latest || hist.length < 10) return null
+  const p = predictSSQ(hist)
+  if (!p) return null
+  return {
+    drawId: Number(latest.id),
+    red: p.red.filter((n) => latest.red.includes(n)).length,
+    blue: p.blue === latest.blue,
+  }
+}
+
+/** 上期 AI 推荐：站内共享结果 → 上一次推送存下的号码 */
+async function kl8AiPrev(sql, draws, prev) {
+  const latest = draws?.[0]
+  if (!latest) return null
+  if (sql) {
+    try {
+      const rows = await sql`
+        SELECT result FROM kl8_ai_deep_runs
+        WHERE draw_id = ${Number(latest.id)} AND play = 10 AND status = 'done'`
+      const r = rows[0]?.result
+      if (r?.schema === KL8_SCHEMA && Array.isArray(r.final10)) return r.final10
+    } catch {
+      /* 读缓存失败继续看推送记录 */
+    }
+  }
+  const rec = prev?.kl8
+  return rec && Number(rec.targetId) === Number(latest.id) && Array.isArray(rec.ai10) ? rec.ai10 : null
+}
+
+async function digitAiPrev(sql, game, draws, prev) {
+  const latest = draws?.[0]
+  const prevDraw = draws?.[1]
+  if (!latest) return null
+  if (sql && prevDraw) {
+    try {
+      const rows = await sql`
+        SELECT result FROM digit_ai_runs
+        WHERE game = ${game} AND draw_id = ${Number(prevDraw.id)} AND status = 'done'`
+      const r = rows[0]?.result
+      if (r?.schema === DIGIT_SCHEMA && r.picks?.straight?.length === 3) return r.picks
+    } catch {
+      /* 读缓存失败继续看推送记录 */
+    }
+  }
+  const rec = prev?.[game]
+  return rec && Number(rec.targetId) === Number(latest.id) && rec.ai?.straight?.length ? rec.ai : null
+}
+
 const DISCLAIMER = {
   tag: 'note',
   elements: [
@@ -403,14 +522,23 @@ const line = (content) => ({ tag: 'div', text: { tag: 'lark_md', content } })
 
 const HR = { tag: 'hr' }
 
-function buildKl8Card(kl8, ai, title, warning) {
+function buildKl8Card(kl8, ai, title, warning, hits = null) {
   const picks = kl8.picks.map(pad).join(' ')
+  const firstPrize = Math.round(comb(BALL_MAX, 10) / comb(20, 10))
   return buildCard({
     title,
     template: 'blue',
     warning,
     blocks: [
       line(`上期开奖：${grey(kl8.latest.nums.map(pad).join(' '))}`),
+      line(`**概率** 每号每期恒 25%；选十中十约 1/${firstPrize.toLocaleString('en-US')}（单注 2 元）`),
+      hits
+        ? line(
+            `**上期命中**（第 ${hits.drawId} 期）：算法十码 ${hits.algo}/10 · AI 终审 ${
+              hits.ai === null || hits.ai === undefined ? '无记录' : `${hits.ai}/10`
+            }`,
+          )
+        : line(grey('上期命中：暂无上期推荐记录，下次推送起显示')),
       HR,
       line(`**算法推荐十码**（v7 多窗口加权评分）\n<font color='red'>${picks}</font>`),
       HR,
@@ -456,7 +584,7 @@ function digitAiLines(ai) {
   ].filter(Boolean)
 }
 
-function buildFc3dCard(digit, title, { template = 'red', extra = [], warning = null, ai = null } = {}) {
+function buildFc3dCard(digit, title, { template = 'red', extra = [], warning = null, ai = null, hits = null } = {}) {
   const p = digit.pred
   const [bai, shi, ge] = p.posTop
   const bets = bai.length * shi.length * ge.length
@@ -466,6 +594,15 @@ function buildFc3dCard(digit, title, { template = 'red', extra = [], warning = n
     warning,
     blocks: [
       line(`上期开奖：${grey(digit.latest.num.join(' '))}`),
+      line('**概率** 直选 1/1000 · 组六约 1/167 · 组三约 1/333'),
+      hits
+        ? line(
+            `**上期命中**（第 ${hits.drawId} 期开奖 ${hits.actual}）：算法 直选 ${hits.algo.straight}/3 · 组六 ${hits.algo.group}/2 · 组三 ${hits.algo.group3}/1` +
+              (hits.ai
+                ? `　AI 直选 ${hits.ai.straight}/3 · 组六 ${hits.ai.group}/2 · 组三 ${hits.ai.group3}/1`
+                : '　AI 无记录'),
+          )
+        : line(grey('上期命中：暂无上期推荐记录，下次推送起显示')),
       HR,
       line(`**直选复式** ${bets} 注 · ${bets * 2} 元`),
       line(`百　${red(bai.join('/'))}`),
@@ -483,7 +620,7 @@ function buildFc3dCard(digit, title, { template = 'red', extra = [], warning = n
 }
 
 /** 排列三卡：在 3D 版式上补一行覆盖档位（命中与成本） */
-function buildPl3Card(pl3, title, warning, ai = null) {
+function buildPl3Card(pl3, title, warning, ai = null, hits = null) {
   const tiers = pl3.pred.tiers || []
   const extra = [
     ...(tiers.length
@@ -498,14 +635,15 @@ function buildPl3Card(pl3, title, warning, ai = null) {
       : []),
     line(grey('算法 v3 Pro · 9 专家 Hedge 自适应权重 + 六维结构约束')),
   ]
-  return buildFc3dCard(pl3, title, { template: 'orange', extra, warning, ai })
+  return buildFc3dCard(pl3, title, { template: 'orange', extra, warning, ai, hits })
 }
 
 /** 双色球卡：绿头，6 红 + 1 蓝 + 结构 + 覆盖档位 */
-function buildSsqCard(ssq, title, warning) {
+function buildSsqCard(ssq, title, warning, hits = null) {
   const p = ssq.pred
   const s = p.structure
   const tiers = p.tiers || []
+  const firstPrize = Math.round(comb(33, 6) * 16)
   return buildCard({
     title,
     template: 'green',
@@ -514,6 +652,12 @@ function buildSsqCard(ssq, title, warning) {
       line(
         `上期开奖：红 ${grey(ssq.latest.red.map(pad).join(' '))}　蓝 ${grey(pad(ssq.latest.blue))}`,
       ),
+      line(`**概率** 一等奖 1/${firstPrize.toLocaleString('en-US')}（红球 6/33 + 蓝球 1/16）`),
+      hits
+        ? line(
+            `**上期命中**（第 ${hits.drawId} 期）：红球 ${hits.red}/6 · 蓝球 ${hits.blue ? '命中' : '未中'}`,
+          )
+        : line(grey('上期命中：暂无上期推荐记录，下次推送起显示')),
       HR,
       line(`**推荐 6 红**\n<font color='red'>${p.red.map(pad).join(' ')}</font>`),
       line(
@@ -652,6 +796,51 @@ export default async function handler(req, res) {
         ])
       : [null, null, null]
 
+    // 上期命中：算法部分用「上期及更早」的数据严格前推重算，AI 部分读站内共享结果/上次推送记录
+    const prevHistory = await loadHistory()
+    const kl8Draws = drawsOf(kl8Res)
+    const fc3dDraws = drawsOf(fc3dRes)
+    const pl3Draws = drawsOf(pl3Res)
+    const ssqDraws = drawsOf(ssqRes)
+    const hits = { kl8: null, fc3d: null, pl3: null, ssq: null }
+    if (kl8 && kl8Draws) {
+      const algo = kl8AlgoPrev(kl8Draws)
+      const aiPicks = await kl8AiPrev(sqlAi, kl8Draws, prevHistory)
+      const drawn = new Set(kl8Draws[0]?.nums || [])
+      hits.kl8 = algo
+        ? {
+            drawId: algo.drawId,
+            algo: algo.hits,
+            ai: aiPicks ? aiPicks.filter((n) => drawn.has(n)).length : null,
+          }
+        : null
+    }
+    if (fc3d && fc3dDraws) {
+      const algo = digitAlgoPrev(fc3dDraws)
+      const aiPicks = await digitAiPrev(sqlAi, 'fc3d', fc3dDraws, prevHistory)
+      hits.fc3d = algo
+        ? {
+            drawId: algo.drawId,
+            actual: algo.actual,
+            algo: { straight: algo.straight, group: algo.group, group3: algo.group3 },
+            ai: aiPicks ? digitHitOf(aiPicks, fc3dDraws[0].num) : null,
+          }
+        : null
+    }
+    if (pl3 && pl3Draws) {
+      const algo = digitAlgoPrev(pl3Draws)
+      const aiPicks = await digitAiPrev(sqlAi, 'pl3', pl3Draws, prevHistory)
+      hits.pl3 = algo
+        ? {
+            drawId: algo.drawId,
+            actual: algo.actual,
+            algo: { straight: algo.straight, group: algo.group, group3: algo.group3 },
+            ai: aiPicks ? digitHitOf(aiPicks, pl3Draws[0].num) : null,
+          }
+        : null
+    }
+    if (ssq && ssqDraws) hits.ssq = ssqAlgoPrev(ssqDraws)
+
     const fresh = {
       kl8: kl8 ? freshness(kl8.latest) : null,
       fc3d: fc3d ? freshness(fc3d.latest) : null,
@@ -686,20 +875,28 @@ export default async function handler(req, res) {
     const cards = []
     if (kl8)
       cards.push(
-        buildKl8Card(kl8, kl8Ai, `${prefix}快乐8 推荐 · ${dateText}`, staleWarning(fresh.kl8, '快乐8')),
+        buildKl8Card(kl8, kl8Ai, `${prefix}快乐8 推荐 · ${dateText}`, staleWarning(fresh.kl8, '快乐8'), hits.kl8),
       )
     if (fc3d)
       cards.push(
         buildFc3dCard(fc3d, `${prefix}福彩3D 推荐 · ${dateText}`, {
           warning: staleWarning(fresh.fc3d, '福彩3D'),
           ai: fc3dAi,
+          hits: hits.fc3d,
         }),
       )
     if (pl3)
       cards.push(
-        buildPl3Card(pl3, `${prefix}排列三 v3 Pro 推荐 · ${dateText}`, staleWarning(fresh.pl3, '排列三'), pl3Ai),
+        buildPl3Card(
+          pl3,
+          `${prefix}排列三 v3 Pro 推荐 · ${dateText}`,
+          staleWarning(fresh.pl3, '排列三'),
+          pl3Ai,
+          hits.pl3,
+        ),
       )
-    if (ssq) cards.push(buildSsqCard(ssq, `${prefix}双色球 推荐 · ${dateText}`, staleWarning(fresh.ssq, '双色球')))
+    if (ssq)
+      cards.push(buildSsqCard(ssq, `${prefix}双色球 推荐 · ${dateText}`, staleWarning(fresh.ssq, '双色球'), hits.ssq))
 
     const timestamp = Math.floor(Date.now() / 1000)
     const signPart = feishuSign(cfg.secret, timestamp)
@@ -720,6 +917,19 @@ export default async function handler(req, res) {
       sent++
     }
 
+    // 记录本次推送号码，供下一次推送计算「上期命中」
+    await saveHistory({
+      at: new Date().toISOString(),
+      kl8: kl8
+        ? { targetId: kl8.nextId, picks: kl8.picks, ai10: kl8Ai?.ten || null }
+        : prevHistory?.kl8 || null,
+      fc3d: fc3dAi ? { targetId: Number(fc3dAi.drawId) + 1, ai: fc3dAi.picks } : prevHistory?.fc3d || null,
+      pl3: pl3Ai ? { targetId: Number(pl3Ai.drawId) + 1, ai: pl3Ai.picks } : prevHistory?.pl3 || null,
+      ssq: ssq
+        ? { targetId: Number(ssq.latest.id) + 1, red: ssq.pred.red, blue: ssq.pred.blue }
+        : prevHistory?.ssq || null,
+    })
+
     await savePushStatus({
       at: new Date().toISOString(),
       ok: true,
@@ -727,6 +937,7 @@ export default async function handler(req, res) {
       sent,
       pushed: { kl8: !!kl8, fc3d: !!fc3d, pl3: !!pl3, ssq: !!ssq },
       ai: { kl8: !!kl8Ai, fc3d: !!fc3dAi, pl3: !!pl3Ai },
+      hits,
       fresh,
     })
 
@@ -740,6 +951,7 @@ export default async function handler(req, res) {
         pl3: pl3Ai ? { source: pl3Ai.source, cached: pl3Ai.cached, picks: pl3Ai.picks } : null,
       },
       messages: cards.length,
+      hits,
       fresh,
       skipped,
     })
