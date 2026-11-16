@@ -269,23 +269,36 @@ async function buildDigitAi({ game, label, draws, sql, llm }) {
       AI_TIMEOUT_MS,
     )
     const obj = extractJson(raw)
+    if (!obj) return { ...base, note: 'AI 输出无法解析，已回退算法前三' }
     const take = (arr, max) =>
       [...new Set((Array.isArray(arr) ? arr : []).map((x) => String(x).replace(/\D/g, '')))]
         .filter((n) => n.length === 3)
         .slice(0, max)
-    const straight = pickInPool(take(obj?.straight, 12), pool.straight, 3)
-    const group = pickInPool(take(obj?.group, 8), pool.group, 2)
-    const group3 = pickInPool(take(obj?.group3, 5), pool.group3, 1)
-    if (straight.length === 3 && group.length === 2 && group3.length === 1) {
-      return {
-        ...base,
-        picks: { straight, group, group3 },
-        source: 'ai',
-        note: 'AI 已在算法候选池内完成终选',
-        summary: String(obj?.summary || '').slice(0, 200),
+    // AI 选中的（先过滤到池内），不足的用算法池顺序补齐——不因为缺一两注就整份作废
+    const sAi = pickInPool(take(obj?.straight, 12), pool.straight, 3)
+    const gAi = pickInPool(take(obj?.group, 8), pool.group, 2)
+    const g3Ai = pickInPool(take(obj?.group3, 5), pool.group3, 1)
+    const fillTo = (have, poolList, need) => {
+      const out = [...have]
+      for (const n of poolList) {
+        if (out.length >= need) break
+        if (!out.includes(n)) out.push(n)
       }
+      return out.slice(0, need)
     }
-    return { ...base, note: 'AI 终选未全部落在候选池内，已回退算法前三' }
+    const straight = fillTo(sAi, pool.straight, 3)
+    const group = fillTo(gAi, pool.group, 2)
+    const group3 = fillTo(g3Ai, pool.group3, 1)
+    const missing = 3 - sAi.length + (2 - gAi.length) + (1 - g3Ai.length)
+    return {
+      ...base,
+      picks: { straight, group, group3 },
+      source: 'ai',
+      note: missing
+        ? `AI 终选 ${6 - missing}/6 注在池内，其余 ${missing} 注由算法候选补齐`
+        : 'AI 已在算法候选池内完成终选',
+      summary: String(obj?.summary || '').slice(0, 200),
+    }
   } catch (e) {
     return { ...base, note: `AI 终选失败（${e.message || e}），已回退算法前三` }
   }

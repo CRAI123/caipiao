@@ -293,28 +293,37 @@ export default async function handler(req, res) {
     let finalNote = ''
     if (algoPool) {
       const restricted = restrictToPool(picks, algoPool)
-      const ok =
-        restricted &&
-        restricted.straight.length === 3 &&
-        restricted.group.length === 2 &&
-        restricted.group3.length === 1
-      if (ok) {
-        picks = restricted
-        finalNote = 'AI 已在算法候选池内完成终选'
-      } else {
-        const hadPicks = Boolean(picks)
+      if (!restricted) {
         picks = {
           straight: algoPool.straight.slice(0, 3),
           group: algoPool.group.slice(0, 2),
           group3: algoPool.group3.slice(0, 1),
-          reasons: picks?.reasons || {},
-          summary: picks?.summary || '',
-          risk: picks?.risk || '每注直选 1/1000、组六约 1/167、组三约 1/333 不变。',
+          reasons: {},
+          summary: '',
+          risk: '每注直选 1/1000、组六约 1/167、组三约 1/333 不变。',
         }
         finalSource = 'algo'
-        finalNote = hadPicks
-          ? 'AI 终选未全部落在算法候选池内，已回退到算法前三'
-          : 'AI 终选解析失败，已回退到算法前三'
+        finalNote = 'AI 终选解析失败，已回退到算法前三'
+      } else {
+        // AI 的池内终选保留，缺的注数用算法候选池顺序补齐，避免整份作废
+        const fillTo = (have, poolList, need) => {
+          const out = [...have]
+          for (const n of poolList) {
+            if (out.length >= need) break
+            if (!out.includes(n)) out.push(n)
+          }
+          return out.slice(0, need)
+        }
+        const straight = fillTo(restricted.straight, algoPool.straight, 3)
+        const group = fillTo(restricted.group, algoPool.group, 2)
+        const group3 = fillTo(restricted.group3, algoPool.group3, 1)
+        const missing =
+          3 - restricted.straight.length + (2 - restricted.group.length) + (1 - restricted.group3.length)
+        picks = { ...restricted, straight, group, group3 }
+        finalSource = 'ai'
+        finalNote = missing
+          ? `AI 终选 ${6 - missing}/6 注在池内，其余 ${missing} 注由算法候选补齐`
+          : 'AI 已在算法候选池内完成终选'
       }
     } else {
       finalNote = '客户端未提供算法候选池，按 AI 原始结果展示'
