@@ -565,22 +565,18 @@ function kl8AiLines(ai) {
   ].filter(Boolean)
 }
 
-/** 3D / 排列三 AI 终选区块：算法候选池 → AI 终选 3 + 2 + 1 */
+/** 3D / 排列三 AI 终选区块（精简版）：算法池规模 + AI 终选 3 + 2 + 1 */
 function digitAiLines(ai) {
   if (!ai) return []
   const p = ai.picks
-  const tag = ai.source === 'ai' ? 'AI 终选' : '算法前三（AI 未通过校验收敛）'
+  const tag = ai.source === 'ai' ? 'AI 终选' : '算法前三（AI 未过校验）'
   return [
     HR,
-    line('**算法候选池**（全盘评分：频率 35% + 近 30 期 30% + 遗漏 15% + 同位转移 20%）'),
-    line(grey(`直选 ${ai.pool.straight.length} 注：${ai.pool.straight.join(' ')}`)),
-    line(grey(`组六 ${ai.pool.group.length} 组：${ai.pool.group.join(' ')}`)),
-    line(grey(`组三 ${ai.pool.group3.length} 组：${ai.pool.group3.join(' ')}`)),
-    HR,
-    line(`**${tag}**`),
-    line(`直选 ${red(p.straight.join(' '))}　组六 ${red(p.group.join(' '))}　组三 ${red(p.group3.join(' '))}`),
-    ai.summary ? line(grey(ai.summary)) : null,
-    line(grey(`${ai.note || ''}${ai.cached ? ' · 复用站内已生成结果' : ''}　概率仍是直选 1/1000、组六 1/167、组三 1/333`)),
+    line(grey(`算法池 ${ai.pool.straight.length}/${ai.pool.group.length}/${ai.pool.group3.length} 注（直选/组六/组三）`)),
+    line(
+      `**${tag}** 直选 ${red(p.straight.join(' '))}　组六 ${red(p.group.join(' '))}　组三 ${red(p.group3.join(' '))}`,
+    ),
+    ai.cached ? line(grey('复用站内已生成结果')) : null,
   ].filter(Boolean)
 }
 
@@ -593,25 +589,25 @@ function buildFc3dCard(digit, title, { template = 'red', extra = [], warning = n
     template,
     warning,
     blocks: [
-      line(`上期开奖：${grey(digit.latest.num.join(' '))}`),
-      line('**概率** 直选 1/1000 · 组六约 1/167 · 组三约 1/333'),
+      line(
+        `上期开奖：${grey(digit.latest.num.join(' '))}　概率 直选 1/1000 · 组六 1/167 · 组三 1/333`,
+      ),
       hits
         ? line(
-            `**上期命中**（第 ${hits.drawId} 期开奖 ${hits.actual}）：算法 直选 ${hits.algo.straight}/3 · 组六 ${hits.algo.group}/2 · 组三 ${hits.algo.group3}/1` +
-              (hits.ai
-                ? `　AI 直选 ${hits.ai.straight}/3 · 组六 ${hits.ai.group}/2 · 组三 ${hits.ai.group3}/1`
-                : '　AI 无记录'),
+            `**上期命中**（第 ${hits.drawId} 期，直选/组六/组三）：算法 ${hits.algo.straight}/${hits.algo.group}/${hits.algo.group3}　AI ${
+              hits.ai ? `${hits.ai.straight}/${hits.ai.group}/${hits.ai.group3}` : '无记录'
+            }`,
           )
         : line(grey('上期命中：暂无上期推荐记录，下次推送起显示')),
       HR,
-      line(`**直选复式** ${bets} 注 · ${bets * 2} 元`),
-      line(`百　${red(bai.join('/'))}`),
-      line(`十　${red(shi.join('/'))}`),
-      line(`个　${red(ge.join('/'))}`),
-      HR,
-      line(`**双胆** ${red(p.dan.join('/'))}　**拖码** ${p.tuo.join('/')}`),
-      HR,
-      line(`和值 ${p.sumRange[0]}~${p.sumRange[1]}　跨度 ${p.spanRange[0]}~${p.spanRange[1]}`),
+      line(
+        `**直选复式** ${bets} 注 · ${bets * 2} 元　百 ${red(bai.join('/'))}　十 ${red(shi.join('/'))}　个 ${red(
+          ge.join('/'),
+        )}`,
+      ),
+      line(
+        `**双胆** ${red(p.dan.join('/'))}　拖码 ${p.tuo.join('/')}　和值 ${p.sumRange[0]}~${p.sumRange[1]}　跨度 ${p.spanRange[0]}~${p.spanRange[1]}`,
+      ),
       line(`杀号 ${grey(p.kill.map((k) => k.digit).join('/'))}`),
       ...extra,
       ...digitAiLines(ai),
@@ -622,19 +618,15 @@ function buildFc3dCard(digit, title, { template = 'red', extra = [], warning = n
 /** 排列三卡：在 3D 版式上补一行覆盖档位（命中与成本） */
 function buildPl3Card(pl3, title, warning, ai = null, hits = null) {
   const tiers = pl3.pred.tiers || []
-  const extra = [
-    ...(tiers.length
-      ? [
-          HR,
-          line(
-            `**覆盖档位** 期望命中 ${tiers
-              .map((t) => `${t.cover}码 ${t.expectHits}个/${t.groupCost}元`)
-              .join('　')}`,
-          ),
-        ]
-      : []),
-    line(grey('算法 v3 Pro · 9 专家 Hedge 自适应权重 + 六维结构约束')),
-  ]
+  const extra = tiers.length
+    ? [
+        line(
+          `**覆盖档位** ${tiers
+            .map((t) => `${t.cover}码 ${t.expectHits}个/${t.groupCost}元`)
+            .join('　')}`,
+        ),
+      ]
+    : []
   return buildFc3dCard(pl3, title, { template: 'orange', extra, warning, ai, hits })
 }
 
@@ -901,12 +893,7 @@ export default async function handler(req, res) {
     const timestamp = Math.floor(Date.now() / 1000)
     const signPart = feishuSign(cfg.secret, timestamp)
 
-    // 每天先发一条分割线，把当天这组推送和前一天隔开
-    const divider = {
-      msg_type: 'text',
-      content: { text: `━━━━━━━━ ${dateText} 每日推荐 ━━━━━━━━` },
-    }
-    const payloads = [divider, ...cards]
+    const payloads = cards
 
     let sent = 0
     for (const payload of payloads) {
