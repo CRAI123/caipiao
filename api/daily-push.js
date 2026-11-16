@@ -700,11 +700,18 @@ export default async function handler(req, res) {
 
   try {
     const cfg = await loadConfig()
-    if (!cfg.webhook) {
+    const isDry = req.query?.dry === '1'
+    if (!cfg.webhook && !isDry) {
       await savePushStatus({ at: new Date().toISOString(), ok: false, error: '未配置飞书 Webhook' })
       return res.status(400).json({
         error: '还没有配置飞书机器人 Webhook。请到「设置 → 每日推荐推送」里填写并保存。',
       })
+    }
+
+    // 机器人查询用：only 只算单个彩种；dry=1 只返回卡片内容，不往群里发
+    const only = String(req.query?.only || '').trim()
+    if (only) {
+      for (const k of ['kl8', 'fc3d', 'pl3', 'ssq']) if (k !== only) cfg[k] = false
     }
 
     // 并行走四个数据源，单个失败不影响其它
@@ -882,6 +889,11 @@ export default async function handler(req, res) {
       )
     if (ssq)
       cards.push(buildSsqCard(ssq, `${prefix}双色球 推荐 · ${dateText}`, staleWarning(fresh.ssq, '双色球'), hits.ssq))
+
+    // 机器人：只取卡片内容用于回复，不群发、不覆盖推送记录
+    if (isDry) {
+      return res.status(200).json({ ok: true, cards, hits })
+    }
 
     const timestamp = Math.floor(Date.now() / 1000)
     const signPart = feishuSign(cfg.secret, timestamp)
