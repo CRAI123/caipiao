@@ -38,13 +38,17 @@ export default function FC3D({
   label = '福彩3D',
   game = 'fc3d',
   onRefreshData,
+  positions = ['百', '十', '个'],
+  digitCount = 3,
+  algoFn = ALGO_FN,
+  defaultCover = 6,
 }) {
   const [algo, setAlgo] = useState(
     Object.keys(algoInfo).find((k) => algoInfo[k].recommend) || 'v2',
   )
-  const [cover, setCover] = useState(6)
+  const [cover, setCover] = useState(defaultCover)
   const [coverRate, setCoverRate] = useState(0.8)
-  const fn = ALGO_FN[algo] || ALGO_FN.v2
+  const fn = algoFn[algo] || Object.values(algoFn)[0]
   const pred = useMemo(
     () => engine[fn.predict](draws, { cover, coverRate }),
     [draws, engine, fn.predict, cover, coverRate],
@@ -101,7 +105,13 @@ export default function FC3D({
       </div>
 
       {/* AI 分析放在最上方，和推荐结果一起看 */}
-      <DigitAI draws={draws} label={label} game={game} onRefreshData={onRefreshData} />
+      <DigitAI
+        draws={draws}
+        label={label}
+        game={game}
+        digitCount={digitCount}
+        onRefreshData={onRefreshData}
+      />
 
       {/* 上期开奖 */}
       <div className="predict-row">
@@ -156,7 +166,7 @@ export default function FC3D({
         <div className="odd-card">
           <div className="odd-card-head">
             <h3>覆盖档位 · 命中与成本</h3>
-            <span className="muted small">期望命中 = 覆盖码数 × 30%</span>
+            <span className="muted small">期望命中 = 覆盖码数 × {digitCount * 10}%</span>
           </div>
           <div className="table-scroll">
             <table className="ledger-table">
@@ -164,8 +174,8 @@ export default function FC3D({
                 <tr>
                   <th>档位</th>
                   <th>平均命中</th>
-                  <th>3 码全覆盖</th>
-                  <th>组选复式</th>
+                  <th>{digitCount} 码全覆盖</th>
+                  <th>{pred.tiers[0]?.groupBets !== undefined ? '组选复式' : '直选复式'}</th>
                   <th>成本</th>
                   <th>每命中 1 个号</th>
                 </tr>
@@ -181,8 +191,8 @@ export default function FC3D({
                     </td>
                     <td className="mono">{t.expectHits} 个</td>
                     <td className="mono">{t.fullCoverRate}%</td>
-                    <td className="mono">{t.groupBets} 注</td>
-                    <td className="mono">{t.groupCost} 元</td>
+                    <td className="mono">{t.groupBets !== undefined ? `${t.groupBets} 注` : `${t.directBets} 注`}</td>
+                    <td className="mono">{t.groupBets !== undefined ? `${t.groupCost} 元` : `${t.directCost} 元`}</td>
                     <td className="mono">{t.costPerHit} 元</td>
                   </tr>
                 ))}
@@ -190,7 +200,8 @@ export default function FC3D({
             </table>
           </div>
           <div className="note note-info" style={{ marginTop: 12 }}>
-            档位越高，平均命中越多（6 码 1.8 个 → 8 码 2.4 个），但每命中 1 个号的代价同步上升，
+            档位越高，平均命中越多（{pred.tiers[0]?.cover} 码 {pred.tiers[0]?.expectHits} 个 →{' '}
+            {pred.tiers[pred.tiers.length - 1]?.cover} 码 {pred.tiers[pred.tiers.length - 1]?.expectHits} 个），但每命中 1 个号的代价同步上升，
             单注中奖概率本身不变。选哪档只取决于你愿意花多少钱，不存在“更划算的选号”。
           </div>
         </div>
@@ -201,7 +212,7 @@ export default function FC3D({
         <div className="predict-row">
           <div className="predict-label">定位推荐</div>
           <div className="predict-value">
-            {['百', '十', '个'].map((label, i) => (
+            {positions.map((label, i) => (
               <span key={label} className="pos-rec">
                 <b>{label}</b>
                 {pred.posTop[i].map((d) => (
@@ -260,7 +271,7 @@ export default function FC3D({
                 直选方案 {pred.directPlan.bets} 注 · {pred.directPlan.cost} 元
               </i>
             </span>
-            {['百', '十', '个'].map((label, i) => (
+            {positions.map((label, i) => (
               <span key={label} className="chip">
                 <i>
                   {label}位 {pred.directPlan.pos[i].join(' ')}
@@ -331,7 +342,7 @@ export default function FC3D({
           <div className="metric-name">奇偶形态</div>
           <div className="metric-value">{pred.recommendedOdd.slice(0, 2).join(' / ')}</div>
           <div className="metric-sub">
-            取 {pred.recommendedOdd.length} 种 · 上限 {((pred.recommendedOdd.length / 8) * 100).toFixed(1)}%
+            取 {pred.recommendedOdd.length} 种 · 上限 {((pred.recommendedOdd.length / (pred.oddTotal || 8)) * 100).toFixed(1)}%
           </div>
         </div>
         <div className="metric-card">
@@ -700,9 +711,9 @@ export default function FC3D({
             </div>
             <div className="backtest-divider" />
             <div className="backtest-metrics">
-              <div className={`bt-metric ${backtest.digitHitCount === 3 ? 'hit' : ''}`}>
-                <div className="bt-name">组选命中</div>
-                <div className="bt-val">{backtest.digitHitCount}/3</div>
+              <div className={`bt-metric ${backtest.digitHitCount === digitCount ? 'hit' : ''}`}>
+                <div className="bt-name">命中</div>
+                <div className="bt-val">{backtest.digitHitCount}/{digitCount}</div>
               </div>
               <div className={`bt-metric ${backtest.spanHit ? 'hit' : ''}`}>
                 <div className="bt-name">跨度</div>

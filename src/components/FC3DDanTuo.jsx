@@ -24,10 +24,11 @@ function combinations(arr, k) {
   return result
 }
 
-export default function FC3DDanTuo({ label = '福彩3D' }) {
+export default function FC3DDanTuo({ label = '福彩3D', digitCount = 3 }) {
   const [dan, setDan] = useState([])
   const [tuo, setTuo] = useState([])
-  const [playType, setPlayType] = useState('group6')
+  const [playType, setPlayType] = useState(digitCount === 5 ? 'direct' : 'group6')
+  const playTypes = digitCount === 5 ? PLAY_TYPES.filter((p) => p.id === 'direct') : PLAY_TYPES
 
   const allSelected = [...dan, ...tuo]
 
@@ -39,6 +40,11 @@ export default function FC3DDanTuo({ label = '福彩3D' }) {
   // 计算注数
   const { count, cost, error } = useMemo(() => {
     if (dan.length === 0 && tuo.length === 0) return { count: 0, cost: 0, error: null }
+    if (playType === 'direct' && digitCount === 5) {
+      // 排列五只有直选：每位取同一个数字池做定位复式，n 个号码 → n^5 注
+      const count = allSelected.length ** 5
+      return { count, cost: count * 2, error: null }
+    }
     if (dan.length + tuo.length < 3) return { count: 0, cost: 0, error: '胆码+拖码至少需要 3 个不同号码' }
     if (playType === 'group6') {
       // 组六：从所有号码中选3个不同的
@@ -66,7 +72,7 @@ export default function FC3DDanTuo({ label = '福彩3D' }) {
       return { count, cost: count * 2, error: null }
     }
     return { count: 0, cost: 0, error: null }
-  }, [dan, tuo, playType])
+  }, [dan, tuo, playType, allSelected.length, digitCount])
 
   function clear() { setDan([]); setTuo([]) }
 
@@ -74,7 +80,7 @@ export default function FC3DDanTuo({ label = '福彩3D' }) {
     <div className="page">
       <Card title="复式胆拖选号" tag={label}>
         <div className="fc3d-dt-type">
-          {PLAY_TYPES.map((p) => (
+          {playTypes.map((p) => (
             <button
               key={p.id}
               className={`tab-btn ${playType === p.id ? 'active' : ''}`}
@@ -141,7 +147,11 @@ export default function FC3DDanTuo({ label = '福彩3D' }) {
             </>
           )}
         </div>
-        <Note>组六/组三为组选玩法，直选为定位复式。胆拖可缩小选号范围、控制投注金额。</Note>
+        <Note>
+          {digitCount === 5
+            ? '排列五只有直选：n 个号码做定位复式，共 n⁵ 注（如 2 个号 32 注 64 元、3 个号 243 注 486 元）。复式能覆盖更多组合，但成本按指数上升。'
+            : '组六/组三为组选玩法，直选为定位复式。胆拖可缩小选号范围、控制投注金额。'}
+        </Note>
       </Card>
     </div>
   )

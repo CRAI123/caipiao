@@ -1,16 +1,7 @@
 // 福彩3D 形态走势 —— 跨度、和值、奇偶、大中小、质合、形态分布
 import React, { useState } from 'react'
 import { Card, Note } from './common.jsx'
-import {
-  analyzeDraw,
-  spanDistribution,
-  sumDistribution,
-  oddEvenDistribution,
-  formDistribution,
-  sizeDistribution,
-  primeDistribution,
-  takeLatest,
-} from '../lib/fc3dStats.js'
+import * as defaultStats from '../lib/fc3dStats.js'
 
 const WINDOWS = [10, 20, 30, 50, 100]
 
@@ -27,8 +18,18 @@ function Bar({ label, value, max, color = '#c1272d' }) {
   )
 }
 
-export default function FC3DPatterns({ draws }) {
+export default function FC3DPatterns({ draws, stats = defaultStats }) {
   const [windowN, setWindowN] = useState(30)
+  const {
+    analyzeDraw,
+    spanDistribution,
+    sumDistribution,
+    oddEvenDistribution,
+    formDistribution,
+    sizeDistribution,
+    primeDistribution,
+    takeLatest,
+  } = stats
 
   const spanDist = spanDistribution(draws, windowN)
   const sumDist = sumDistribution(draws, windowN)

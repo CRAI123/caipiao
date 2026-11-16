@@ -1,21 +1,30 @@
-// 福彩3D 总览页 —— 最新开奖、关键指标、近期走势速览
+// 福彩3D / 排列五 总览页 —— 最新开奖、关键指标、近期走势速览
 import React from 'react'
 import { Card, StatCard, Note } from './common.jsx'
-import {
-  analyzeDraw,
-  digitFrequency,
-  digitMissing,
-  spanDistribution,
-  sumDistribution,
-  formDistribution,
-  sizeDistribution,
-  primeDistribution,
-  hotColdClass,
-  takeLatest,
-} from '../lib/fc3dStats.js'
+import * as defaultStats from '../lib/fc3dStats.js'
 
-export default function FC3DOverview({ draws }) {
+export default function FC3DOverview({
+  draws,
+  positions = ['百', '十', '个'],
+  stats = defaultStats,
+  sumTheory = 13.5,
+  spanTheory = 5.5,
+  formName = '组三',
+  formTheory = '约 27%',
+}) {
   if (!draws.length) return <Note>暂无数据</Note>
+  const {
+    analyzeDraw,
+    digitFrequency,
+    digitMissing,
+    spanDistribution,
+    sumDistribution,
+    formDistribution,
+    sizeDistribution,
+    primeDistribution,
+    hotColdClass,
+    takeLatest,
+  } = stats
   const latest = draws[0]
   const a = analyzeDraw(latest.num)
 
@@ -29,6 +38,7 @@ export default function FC3DOverview({ draws }) {
   const primeDist = primeDistribution(draws, 30)
 
   const recent = takeLatest(draws, 10)
+  const digitCount = latest.num.length
 
   return (
     <div className="page">
@@ -36,7 +46,7 @@ export default function FC3DOverview({ draws }) {
         <div className="fc3d-latest">
           {latest.num.map((d, i) => (
             <div key={i} className="fc3d-pos-col">
-              <div className="fc3d-pos-label">{['百', '十', '个'][i]}</div>
+              <div className="fc3d-pos-label">{positions[i]}</div>
               <div className="fc3d-latest-ball">{d}</div>
             </div>
           ))}
@@ -47,14 +57,19 @@ export default function FC3DOverview({ draws }) {
           <span>合值 {a.sumTail}</span>
           <span>{a.oddPattern}</span>
           <span>{a.form}</span>
-          <span>质{a.primeCount}/合{3 - a.primeCount}</span>
+          <span>质{a.primeCount}/合{digitCount - a.primeCount}</span>
         </div>
       </Card>
 
       <div className="stat-grid">
-        <StatCard label="近30期和值均值" value={sumDist.avg} note="理论均值 13.5" />
-        <StatCard label="近30期跨度均值" value={spanDist.avg} tone="blue" note="理论均值约 5.5" />
-        <StatCard label="近50期组三占比" value={`${((formDist.find(([f]) => f === '组三')?.[1] || 0) / 50 * 100).toFixed(0)}%`} tone="amber" note="理论约 27%" />
+        <StatCard label="近30期和值均值" value={sumDist.avg} note={`理论均值 ${sumTheory}`} />
+        <StatCard label="近30期跨度均值" value={spanDist.avg} tone="blue" note={`理论均值约 ${spanTheory}`} />
+        <StatCard
+          label={`近50期${formName}占比`}
+          value={`${((formDist.find(([f]) => f === formName)?.[1] || 0) / 50 * 100).toFixed(0)}%`}
+          tone="amber"
+          note={`理论${formTheory}`}
+        />
         <StatCard label="近30期大号占比" value={`${sizeDist.bigPct}%`} tone="green" note={`小${sizeDist.smallPct}% / 中${sizeDist.midPct}%`} />
       </div>
 

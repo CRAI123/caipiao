@@ -7,7 +7,16 @@
 //   3. 本期解析全站共享：首位用户真实调用，后续用户读取并模拟一段分析等待
 import React, { useEffect, useMemo, useRef, useState } from 'react'
 import { Card, Note, Dialog } from './common.jsx'
-import { summarizeDigit, buildDigitMessages, rankDigitCandidates, digitCandidatePool } from '../lib/digitAi.js'
+import {
+  summarizeDigit,
+  buildDigitMessages,
+  rankDigitCandidates,
+  digitCandidatePool,
+  summarizeDigit5,
+  buildPL5Messages,
+  rankPL5Candidates,
+  pl5CandidatePool,
+} from '../lib/digitAi.js'
 import { runDigitAi, peekDigitAi, auditDigitAi } from '../lib/api.js'
 import { getDeviceId } from '../lib/device.js'
 import { fakeAnalyze, sharedWaitSeconds } from '../lib/aiWait.js'
@@ -25,26 +34,26 @@ const ROUND_STAGES = [
 // 结果结构版本：与服务端 SCHEMA 对齐，旧版（候选池 / 自由推演 / 复核制）会重算
 const SCHEMA = 5
 
-const digitsOf = (s) => String(s).replace(/\D/g, '').slice(0, 3)
+const digitsOf = (s, digitCount = 3) => String(s).replace(/\D/g, '').slice(0, digitCount)
 
-/** 校验 AI 给的号码格式：3 位、去重、组六三不同、组三两同（是否在候选池内由服务端校验） */
-function sanitizePicks(raw) {
+/** 校验 AI 给的号码格式：位数、去重、组六三不同、组三两同（是否在候选池内由服务端校验） */
+function sanitizePicks(raw, digitCount = 3) {
   if (!raw) return null
   const take = (arr, max, kinds) =>
     (Array.isArray(arr) ? arr : [])
-      .map(digitsOf)
-      .filter((n) => n.length === 3)
+      .map((x) => digitsOf(x, digitCount))
+      .filter((n) => n.length === digitCount)
       .filter((n) => kinds.includes(new Set(n).size))
       .filter((n, i, a) => a.indexOf(n) === i)
       .slice(0, max)
-  const straight = take(raw.straight, 5, [1, 2, 3])
-  const group = take(raw.group, 5, [3])
-  const group3 = take(raw.group3, 3, [2])
+  const straight = take(raw.straight, 8, [1, 2, 3, 4, 5])
+  const group = digitCount === 3 ? take(raw.group, 5, [3]) : []
+  const group3 = digitCount === 3 ? take(raw.group3, 3, [2]) : []
   if (!straight.length && !group.length && !group3.length) return null
   return { straight, group, group3, reasons: raw.reasons || {}, summary: raw.summary || '', risk: raw.risk || '' }
 }
 
-function DigitAIInner({ draws, label = '福彩3D', game = 'fc3d', onRefreshData }) {
+function DigitAIInner({ draws, label = '福彩3D', game = 'fc3d', onRefreshData, digitCount = 3 }) {
   const [busy, setBusy] = useState(false)
   const [text, setText] = useState('')
   const [meta, setMeta] = useState(null)
@@ -55,10 +64,11 @@ function DigitAIInner({ draws, label = '福彩3D', game = 'fc3d', onRefreshData 
   const [tip, setTip] = useState('')
   const [stale, setStale] = useState(false)
 
-  const summary = useMemo(
-    () => (Array.isArray(draws) && draws.length ? summarizeDigit(draws, 100) : null),
-    [draws],
-  )
+  const is5 = digitCount === 5
+  const summary = useMemo(() => {
+    if (!Array.isArray(draws) || !draws.length) return null
+    return (is5 ? summarizeDigit5 : summarizeDigit)(draws, 100)
+  }, [draws, is5])
   const busyRef = useRef(false)
   const latestId = Number(draws?.[0]?.id) || 0
 
@@ -125,20 +135,26 @@ function DigitAIInner({ draws, label = '福彩3D', game = 'fc3d', onRefreshData 
     }
   }, [game, latestId])
 
-  const picks = useMemo(() => sanitizePicks(meta?.picks), [meta])
+  const picks = useMemo(() => sanitizePicks(meta?.picks, digitCount), [meta, digitCount])
 
-  // 算法层：全盘评分排序（直选 1000 / 组六 120 / 组三 90），用于显示算法名次与纯算法基准
-  const algo = useMemo(() => (summary ? rankDigitCandidates(summary) : null), [summary])
+  // 算法层：全盘评分排序（3 位：直选 1000 / 组六 120 / 组三 90；5 位：直选 10 万）
+  const algo = useMemo(
+    () => (summary ? (is5 ? rankPL5Candidates(summary) : rankDigitCandidates(summary)) : null),
+    [summary, is5],
+  )
   const algoTop = useMemo(
     () => ({
-      straight: (algo?.straight || []).slice(0, 3),
+      straight: (algo?.straight || []).slice(0, is5 ? 5 : 3),
       group: (algo?.group || []).slice(0, 2),
       group3: (algo?.group3 || []).slice(0, 1),
     }),
-    [algo],
+    [algo, is5],
   )
-  // 算法候选池：直选 12 注 / 组六 8 组 / 组三 5 组，AI 只能在这里终选
-  const pool = useMemo(() => (summary ? digitCandidatePool(summary) : null), [summary])
+  // 算法候选池：3 位为直选 12 注 / 组六 8 组 / 组三 5 组；5 位为直选 20 注
+  const pool = useMemo(
+    () => (summary ? (is5 ? pl5CandidatePool(summary) : digitCandidatePool(summary)) : null),
+    [summary, is5],
+  )
   /** 号码在全盘算法里的名次（1 起），找不到返回 null */
   const algoRank = (kind, num) => {
     const i = (algo?.[kind] || []).findIndex((x) => x.num === num)
@@ -175,28 +191,28 @@ function DigitAIInner({ draws, label = '福彩3D', game = 'fc3d', onRefreshData 
     for (const run of audit) {
       const i = idxById.get(Number(run.drawId))
       if (i === undefined || i < 1) continue
-      const actual = (draws[i - 1]?.nums || []).join('')
-      if (actual.length !== 3) continue
+      const actual = (draws[i - 1]?.num || draws[i - 1]?.nums || []).join('')
+      if (actual.length !== digitCount) continue
       const key = [...actual].sort().join('')
       const uniq = new Set(actual).size
       if (run.picks) {
         n++
         if ((run.picks.straight || []).includes(actual)) sHit++
-        if (uniq === 3 && (run.picks.group || []).some((x) => [...x].sort().join('') === key)) gHit++
-        if (uniq === 2 && (run.picks.group3 || []).some((x) => [...x].sort().join('') === key)) g3Hit++
+        if (digitCount === 3 && uniq === 3 && (run.picks.group || []).some((x) => [...x].sort().join('') === key)) gHit++
+        if (digitCount === 3 && uniq === 2 && (run.picks.group3 || []).some((x) => [...x].sort().join('') === key)) g3Hit++
       }
       // 纯算法基准：只用该期及更早的数据建评分（严格前推，不用未来数据）
-      const histSum = summarizeDigit(draws.slice(i, i + 100), 100)
-      const rk = histSum ? rankDigitCandidates(histSum) : null
+      const histSum = (is5 ? summarizeDigit5 : summarizeDigit)(draws.slice(i, i + 100), 100)
+      const rk = histSum ? (is5 ? rankPL5Candidates(histSum) : rankDigitCandidates(histSum)) : null
       if (rk) {
         an++
-        if (rk.straight.slice(0, 3).some((x) => x.num === actual)) aS++
-        if (uniq === 3 && rk.group.slice(0, 2).some((x) => x.num === key)) aG++
-        if (uniq === 2 && rk.group3.slice(0, 1).some((x) => x.num === key)) aG3++
+        if (rk.straight.slice(0, is5 ? 5 : 3).some((x) => x.num === actual)) aS++
+        if (digitCount === 3 && uniq === 3 && rk.group.slice(0, 2).some((x) => x.num === key)) aG++
+        if (digitCount === 3 && uniq === 2 && rk.group3.slice(0, 1).some((x) => x.num === key)) aG3++
       }
     }
     return { n, sHit, gHit, g3Hit, an, aS, aG, aG3 }
-  }, [audit, draws])
+  }, [audit, draws, digitCount, is5])
 
   if (!summary || summary.total < 10) return null
 
@@ -229,7 +245,7 @@ function DigitAIInner({ draws, label = '福彩3D', game = 'fc3d', onRefreshData 
       }
       const latestFresh = Array.isArray(fresh) ? fresh[0] : null
       if (!latestFresh) throw new Error('没有取到开奖数据，请稍后重试')
-      const freshSummary = summarizeDigit(fresh, 100)
+      const freshSummary = (is5 ? summarizeDigit5 : summarizeDigit)(fresh, 100)
       if (!freshSummary) throw new Error('最新数据不足 10 期，无法分析')
 
       const prevLatest = draws?.[0]
@@ -284,8 +300,8 @@ function DigitAIInner({ draws, label = '福彩3D', game = 'fc3d', onRefreshData 
           game,
           drawId,
           label,
-          messages: buildDigitMessages(freshSummary, label),
-          algo: digitCandidatePool(freshSummary),
+          messages: (is5 ? buildPL5Messages : buildDigitMessages)(freshSummary, label),
+          algo: is5 ? pl5CandidatePool(freshSummary) : digitCandidatePool(freshSummary),
           deviceId: getDeviceId()?.id || '',
         })
         setText(r.text)
@@ -347,7 +363,9 @@ function DigitAIInner({ draws, label = '福彩3D', game = 'fc3d', onRefreshData 
     <Card title={`AI 推算下期号码 · ${label}`} tag={meta?.cached ? '全站共享' : 'AI'}>
       <div className="predict-sub" style={{ marginTop: 2, marginBottom: 4 }}>
         流程和快乐8一致：<b>算法先选 → AI 终选</b>。底层算法按频率 / 遗漏 / 同位转移对全盘打分
-        （直选 1000 注、组六 120 组、组三 90 组），选出候选池后由 AI 只在池内终选 3 注直选 + 2 注组六 + 1 注组三。
+        {is5
+          ? '（直选 10 万注），选出直选 20 注候选池后由 AI 只在池内终选 5 注直选。'
+          : '（直选 1000 注、组六 120 组、组三 90 组），选出候选池后由 AI 只在池内终选 3 注直选 + 2 注组六 + 1 注组三。'}
       </div>
       <div className="predict-row">
         <div className="predict-label">算法候选 · 直选</div>
@@ -360,28 +378,32 @@ function DigitAIInner({ draws, label = '福彩3D', game = 'fc3d', onRefreshData 
           <span className="muted small">{(pool?.straight || []).length} 注</span>
         </div>
       </div>
-      <div className="predict-row">
-        <div className="predict-label">算法候选 · 组六</div>
-        <div className="predict-value">
-          {(pool?.group || []).map((n) => (
-            <span key={n} className="draw-num">
-              {n}
-            </span>
-          ))}
-          <span className="muted small">{(pool?.group || []).length} 组</span>
-        </div>
-      </div>
-      <div className="predict-row">
-        <div className="predict-label">算法候选 · 组三</div>
-        <div className="predict-value">
-          {(pool?.group3 || []).map((n) => (
-            <span key={n} className="draw-num">
-              {n}
-            </span>
-          ))}
-          <span className="muted small">{(pool?.group3 || []).length} 组</span>
-        </div>
-      </div>
+      {!is5 && (
+        <>
+          <div className="predict-row">
+            <div className="predict-label">算法候选 · 组六</div>
+            <div className="predict-value">
+              {(pool?.group || []).map((n) => (
+                <span key={n} className="draw-num">
+                  {n}
+                </span>
+              ))}
+              <span className="muted small">{(pool?.group || []).length} 组</span>
+            </div>
+          </div>
+          <div className="predict-row">
+            <div className="predict-label">算法候选 · 组三</div>
+            <div className="predict-value">
+              {(pool?.group3 || []).map((n) => (
+                <span key={n} className="draw-num">
+                  {n}
+                </span>
+              ))}
+              <span className="muted small">{(pool?.group3 || []).length} 组</span>
+            </div>
+          </div>
+        </>
+      )}
 
       <div className="toolbar" style={{ marginTop: 8 }}>
         <button className="tab-btn active" onClick={() => run()} disabled={busy}>
@@ -470,14 +492,18 @@ function DigitAIInner({ draws, label = '福彩3D', game = 'fc3d', onRefreshData 
             <div style={{ marginTop: 8 }}>
               <div className="predict-sub" style={{ marginTop: 0, marginBottom: 6 }}>
                 {meta?.finalSource === 'algo'
-                  ? '⚠️ AI 终选未通过校验，已回退到算法前三'
+                  ? `⚠️ AI 终选未通过校验，已回退到算法前${is5 ? '五' : '三'}`
                   : '✅ 算法候选 → AI 终选已完成'}
                 {meta?.finalNote ? ` · ${meta.finalNote}` : ''}
               </div>
               {[
-                ['直选推荐', picks.straight, '每注 1/1000', 'straight'],
-                ['组选推荐 · 组六', picks.group, '约 1/167', 'group'],
-                ['组三推荐', picks.group3, '约 1/333', 'group3'],
+                ['直选推荐', picks.straight, is5 ? '每注 1/100000' : '每注 1/1000', 'straight'],
+                ...(is5
+                  ? []
+                  : [
+                      ['组选推荐 · 组六', picks.group, '约 1/167', 'group'],
+                      ['组三推荐', picks.group3, '约 1/333', 'group3'],
+                    ]),
               ].map(([name, list, odds, kind]) =>
                 list.length ? (
                   <div className="predict-row" key={name}>
@@ -516,15 +542,25 @@ function DigitAIInner({ draws, label = '福彩3D', game = 'fc3d', onRefreshData 
               {algoTop.straight.length > 0 && (
                 <div className="note note-info" style={{ marginTop: 10 }}>
                   <b>纯算法基准</b>（不加 AI，直接取全盘评分最高）：直选{' '}
-                  {algoTop.straight.map((x) => x.num).join(' ')} · 组六 {algoTop.group.map((x) => x.num).join(' ')} ·
-                  组三 {algoTop.group3.map((x) => x.num).join(' ')}
+                  {algoTop.straight.map((x) => x.num).join(' ')}
+                  {!is5 && (
+                    <>
+                      {' '}· 组六 {algoTop.group.map((x) => x.num).join(' ')} · 组三{' '}
+                      {algoTop.group3.map((x) => x.num).join(' ')}
+                    </>
+                  )}
                   <br />
                   与 AI 定稿重合：直选{' '}
                   {picks.straight.filter((n) => algoTop.straight.some((x) => x.num === n)).length}/
-                  {picks.straight.length} · 组六{' '}
-                  {picks.group.filter((n) => algoTop.group.some((x) => x.num === n)).length}/{picks.group.length} ·
-                  组三 {picks.group3.filter((n) => algoTop.group3.some((x) => x.num === n)).length}/
-                  {picks.group3.length}（号码后的 #N 是它在本期全盘算法评分里的名次）
+                  {picks.straight.length}
+                  {!is5 && (
+                    <>
+                      {' '}· 组六 {picks.group.filter((n) => algoTop.group.some((x) => x.num === n)).length}/
+                      {picks.group.length} · 组三{' '}
+                      {picks.group3.filter((n) => algoTop.group3.some((x) => x.num === n)).length}/{picks.group3.length}
+                    </>
+                  )}
+                  （号码后的 #N 是它在本期全盘算法评分里的名次）
                 </div>
               )}
 
@@ -564,26 +600,32 @@ function DigitAIInner({ draws, label = '福彩3D', game = 'fc3d', onRefreshData 
           历史回测（同期对照，样本 {Math.max(backtest.n, backtest.an)} 期）：
           {backtest.n > 0 && (
             <>
-              AI 推荐命中 直选 <b>{backtest.sHit}/{backtest.n}</b>、组六 <b>{backtest.gHit}/{backtest.n}</b>、组三{' '}
-              <b>{backtest.g3Hit}/{backtest.n}</b>；
+              AI 推荐命中 直选 <b>{backtest.sHit}/{backtest.n}</b>
+              {!is5 && (
+                <>、组六 <b>{backtest.gHit}/{backtest.n}</b>、组三 <b>{backtest.g3Hit}/{backtest.n}</b></>
+              )}；
             </>
           )}
           {backtest.an > 0 && (
             <>
-              纯算法基准命中 直选 <b>{backtest.aS}/{backtest.an}</b>、组六 <b>{backtest.aG}/{backtest.an}</b>、组三{' '}
-              <b>{backtest.aG3}/{backtest.an}</b>。
+              纯算法基准命中 直选 <b>{backtest.aS}/{backtest.an}</b>
+              {!is5 && (
+                <>、组六 <b>{backtest.aG}/{backtest.an}</b>、组三 <b>{backtest.aG3}/{backtest.an}</b></>
+              )}。
             </>
           )}
           {Math.max(backtest.n, backtest.an) < 5
             ? '样本太少，还看不出真实水平。'
-            : '这是实际命中记录，不是估计值；概率仍是直选 1/1000、组六 1/167、组三 1/333。'}
+            : is5
+              ? '这是实际命中记录，不是估计值；概率仍是直选 1/100000。'
+              : '这是实际命中记录，不是估计值；概率仍是直选 1/1000、组六 1/167、组三 1/333。'}
         </div>
       )}
 
       <Note>
-        流程与快乐8一致：底层算法对全盘打分（直选 1000 注、组六 120 组、组三 90 组），
-        选出直选 12 注 / 组六 8 组 / 组三 5 组的候选池，AI 只在池内终选 3 + 2 + 1 注并给出理由；终选不合规自动回退算法前三。
-        概率仍是直选 1/1000、组六 1/167、组三 1/333，选号方式不会改变这一点。
+        {is5
+          ? '流程与快乐8一致：底层算法对全盘 10 万注打分，选出直选 20 注候选池，AI 只在池内终选 5 注并给出理由；终选不合规自动回退算法前五。概率仍是直选 1/100000，选号方式不会改变这一点。'
+          : '流程与快乐8一致：底层算法对全盘打分（直选 1000 注、组六 120 组、组三 90 组），选出直选 12 注 / 组六 8 组 / 组三 5 组的候选池，AI 只在池内终选 3 + 2 + 1 注并给出理由；终选不合规自动回退算法前三。概率仍是直选 1/1000、组六 1/167、组三 1/333，选号方式不会改变这一点。'}
       </Note>
 
       <Dialog open={Boolean(tip)} text={tip} onClose={() => setTip('')} />

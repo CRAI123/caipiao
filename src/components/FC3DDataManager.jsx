@@ -4,8 +4,8 @@ import { Card, Note } from './common.jsx'
 import { FC3D_DRAWS } from '../data/fc3d.js'
 import { fetchFc3dDraws } from '../lib/fc3d.js'
 
-/** 解析用户粘贴的福彩3D历史文本：每行一期，期号 日期 百十个 */
-function parseFc3dText(text) {
+/** 解析用户粘贴的福彩3D / 排列五历史文本：每行一期，期号 日期 各位数字 */
+function parseFc3dText(text, digitCount = 3) {
   const lines = text.split(/\r?\n/).map((l) => l.trim()).filter(Boolean)
   const draws = []
   const errors = []
@@ -24,7 +24,7 @@ function parseFc3dText(text) {
         id = Number(p)
       } else if (/^\d{4}-\d{1,2}-\d{1,2}$/.test(p)) {
         date = p
-      } else if (/^\d{1,3}$/.test(p)) {
+      } else if (/^\d{1,5}$/.test(p)) {
         numIdx.push(p)
       }
     }
@@ -34,12 +34,12 @@ function parseFc3dText(text) {
       return
     }
     // 解析号码：可能是 "123" 连续，或 "1 2 3" 分开
-    if (numIdx.length === 1 && numIdx[0].length === 3) {
+    if (numIdx.length === 1 && numIdx[0].length === digitCount) {
       digits = numIdx[0].split('').map(Number)
-    } else if (numIdx.length === 3) {
+    } else if (numIdx.length === digitCount) {
       digits = numIdx.map(Number)
     } else {
-      errors.push(`第 ${idx + 1} 行号码格式错误（应为 3 个数字）：${line}`)
+      errors.push(`第 ${idx + 1} 行号码格式错误（应为 ${digitCount} 个数字）：${line}`)
       return
     }
     if (digits.some((d) => !Number.isInteger(d) || d < 0 || d > 9)) {
@@ -61,6 +61,8 @@ export default function FC3DDataManager({
   filePrefix = 'fc3d',
   sourceUrl = 'https://www.cwl.gov.cn/ygkj/wqkjgg/3d/',
   sourceName = '中国福彩官网开奖公告',
+  digitCount = 3,
+  positions = ['百', '十', '个'],
 }) {
   const [text, setText] = useState('')
   const [errors, setErrors] = useState([])
@@ -85,7 +87,7 @@ export default function FC3DDataManager({
   }
 
   function doImport() {
-    const { draws: parsed, errors: errs } = parseFc3dText(text)
+    const { draws: parsed, errors: errs } = parseFc3dText(text, digitCount)
     setErrors(errs)
     if (parsed.length) {
       setDraws(parsed)
@@ -111,13 +113,13 @@ export default function FC3DDataManager({
     <div className="page">
       <Note tone="warn">
         每次抓取或导入都会<b>先清空旧数据、再整体覆盖</b>，不会追加或合并。
-        导入格式：每行一期，<code>期号,日期,百,十,个</code>（或 <code>期号 123</code>），
+        导入格式：每行一期，<code>期号,日期,{positions.join(',')}</code>（或 <code>期号 {positions.map(() => '0').join('')}</code>），
         分隔符支持空格/逗号，日期可省略。
       </Note>
 
       <Card title="一键抓取开奖数据" tag={`来源：${sourceName}`}>
         <p className="muted small">
-          自动抓取最近 100 期{label}开奖（期号、开奖日期、百十个 3 个号码），来源为
+          自动抓取最近 100 期{label}开奖（期号、开奖日期、{positions.join('')} {digitCount} 个号码），来源为
           <a href={sourceUrl} target="_blank" rel="noreferrer">
             {sourceName}
           </a>
@@ -140,7 +142,11 @@ export default function FC3DDataManager({
           <textarea
             className="import-area mono"
             rows={10}
-            placeholder={'2024300,2024-11-05,3,7,2\n2024301 2024-11-06 8 1 5\n2024302 049'}
+            placeholder={
+              digitCount === 3
+                ? '2024300,2024-11-05,3,7,2\n2024301 2024-11-06 8 1 5\n2024302 049'
+                : '26306,2026-11-15,0,3,2,4,3\n26307 2026-11-16 7 1 4 9 6\n26308 03183'
+            }
             value={text}
             onChange={(e) => setText(e.target.value)}
           />
@@ -177,7 +183,7 @@ export default function FC3DDataManager({
 
         <Card title="导出当前数据" tag={`${draws.length} 期`}>
           <p className="muted small">
-            将当前数据导出为 CSV（期号,日期,百,十,个），便于在 Excel 中继续研究。
+            将当前数据导出为 CSV（期号,日期,{positions.join(',')}），便于在 Excel 中继续研究。
           </p>
           <button className="btn-primary" onClick={doExport}>导出 CSV</button>
           <div className="data-preview">
@@ -202,9 +208,9 @@ export default function FC3DDataManager({
               <tr>
                 <th>期号</th>
                 <th>日期</th>
-                <th>百位</th>
-                <th>十位</th>
-                <th>个位</th>
+                {positions.map((p) => (
+                  <th key={p}>{p}位</th>
+                ))}
                 <th>来源</th>
               </tr>
             </thead>
@@ -213,9 +219,9 @@ export default function FC3DDataManager({
                 <tr key={d.id}>
                   <td className="mono">{d.id}</td>
                   <td className="mono muted">{d.date || '—'}</td>
-                  <td className="mono"><span className="digit-ball">{d.num[0]}</span></td>
-                  <td className="mono"><span className="digit-ball">{d.num[1]}</span></td>
-                  <td className="mono"><span className="digit-ball">{d.num[2]}</span></td>
+                  {positions.map((p, i) => (
+                    <td key={p} className="mono"><span className="digit-ball">{d.num[i]}</span></td>
+                  ))}
                   <td className="muted small">{d.sample ? '演示' : '真实'}</td>
                 </tr>
               ))}

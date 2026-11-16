@@ -17,7 +17,7 @@ import { comb } from './stats.js'
 
 const KEY = 'kl8_journal_v1' // 保留原 key，历史记录读取时补上 lottery='kl8'
 
-export const LOTTERY_LABEL = { kl8: '快乐8', fc3d: '福彩3D', pl3: '排列三' }
+export const LOTTERY_LABEL = { kl8: '快乐8', fc3d: '福彩3D', pl3: '排列三', pl5: '排列五' }
 
 /** 记录所属彩种（旧记录没有该字段，默认按快乐8处理） */
 export function lotteryOf(rec) {

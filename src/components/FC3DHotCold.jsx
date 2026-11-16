@@ -15,12 +15,13 @@ import {
 
 const WINDOWS = [10, 20, 30, 50]
 
-export default function FC3DHotCold({ draws }) {
+export default function FC3DHotCold({ draws, positions = POSITIONS }) {
   const [windowN, setWindowN] = useState(30)
   const [trendN, setTrendN] = useState(15)
 
-  const posFreq = [0, 1, 2].map((pos) => digitFrequencyByPos(draws, pos, windowN))
-  const posOmit = [0, 1, 2].map((pos) => digitMissingByPos(draws, pos, windowN))
+  const posIdx = positions.map((_, i) => i)
+  const posFreq = posIdx.map((pos) => digitFrequencyByPos(draws, pos, windowN))
+  const posOmit = posIdx.map((pos) => digitMissingByPos(draws, pos, windowN))
   const totalFreq = digitFrequency(draws, windowN)
   const totalOmit = digitMissing(draws, windowN)
   const { hot, cold } = hotColdClass(totalFreq)
@@ -52,7 +53,7 @@ export default function FC3DHotCold({ draws }) {
               <div key={d} className="fc3d-pos-digit-head">{d}</div>
             ))}
           </div>
-          {POSITIONS.map((label, pos) => (
+          {positions.map((label, pos) => (
             <div key={pos} className="fc3d-pos-row">
               <div className="fc3d-pos-name">{label}</div>
               {DIGITS.map((d) => {
@@ -92,7 +93,7 @@ export default function FC3DHotCold({ draws }) {
       </div>
 
       {/* 分位遗漏走势 */}
-      {POSITIONS.map((label, pos) => {
+      {positions.map((label, pos) => {
         const trend = positionTrend(draws, trendN, pos)
         return (
           <Card key={pos} title={`${label}位遗漏走势`} tag={`最近 ${trendN} 期`}>

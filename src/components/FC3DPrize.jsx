@@ -12,38 +12,44 @@ const PLAYS = [
   { id: 'group6', name: '组选6', amount: 173, desc: '三位各不相同，不限位置' },
 ]
 
+const PL5_PLAYS = [
+  { id: 'direct', name: '直选', amount: 100000, desc: '五位号码与开奖完全相同（位置一致），单注 2 元' },
+]
+
 const UNIT = 2 // 每注 2 元
 
 function sortedKey(arr) {
   return [...arr].sort((a, b) => a - b).join('')
 }
 
-/** 形态：豹子 / 组三 / 组六 */
-function betShape(digits) {
+/** 形态：3 位为豹子/组三/组六，5 位按重复结构描述 */
+function betShape(digits, digitCount = 3) {
   const n = new Set(digits).size
+  if (digitCount !== 3) return `${n} 种数字`
   if (n === 1) return '豹子'
   if (n === 2) return '组三'
   return '组六'
 }
 
 /** 解析用户填写的购买号码：每行一注，支持 "123" / "1 2 3" / "1,2,3" */
-function parseBets(text) {
+function parseBets(text, digitCount = 3) {
   const rows = []
   const errors = []
+  const re = new RegExp(`^\\d{${digitCount}}$`)
   text.split(/\r?\n/).forEach((line, i) => {
     const s = line.trim()
     if (!s) return
     let digits = null
-    if (/^\d{3}$/.test(s)) {
+    if (re.test(s)) {
       digits = s.split('').map(Number)
     } else {
       const parts = s.split(/[\s,，]+/).filter(Boolean)
-      if (parts.length === 3 && parts.every((p) => /^\d$/.test(p))) {
+      if (parts.length === digitCount && parts.every((p) => /^\d$/.test(p))) {
         digits = parts.map(Number)
       }
     }
     if (!digits) {
-      errors.push(`第 ${i + 1} 行「${s}」不是有效的 3 位号码`)
+      errors.push(`第 ${i + 1} 行「${s}」不是有效的 ${digitCount} 位号码`)
       return
     }
     rows.push({ raw: s, digits })
@@ -52,8 +58,8 @@ function parseBets(text) {
 }
 
 /** 判定单注是否中奖 */
-function judgeBet(digits, playId, drawDigits) {
-  const shape = betShape(digits)
+function judgeBet(digits, playId, drawDigits, digitCount = 3) {
+  const shape = betShape(digits, digitCount)
   if (playId === 'group3' && shape !== '组三') {
     return { status: 'invalid', hitDigits: 0, reason: '组选3 需要「两同一不同」' }
   }
@@ -62,7 +68,7 @@ function judgeBet(digits, playId, drawDigits) {
   }
   if (playId === 'direct') {
     const hitDigits = digits.filter((d, i) => d === drawDigits[i]).length
-    return { status: hitDigits === 3 ? 'win' : 'lose', hitDigits }
+    return { status: hitDigits === digitCount ? 'win' : 'lose', hitDigits }
   }
   // 组选：号码集合完全相同即中奖（不限位置）
   const win = sortedKey(digits) === sortedKey(drawDigits)
@@ -73,26 +79,32 @@ function judgeBet(digits, playId, drawDigits) {
 
 const STATUS_LABEL = { win: '中奖', lose: '未中', invalid: '形态不符' }
 
-export default function FC3DPrize({ draws, lottery = 'fc3d', label = '福彩3D' }) {
+export default function FC3DPrize({
+  draws,
+  lottery = 'fc3d',
+  label = '福彩3D',
+  digitCount = 3,
+  plays = digitCount === 5 ? PL5_PLAYS : PLAYS,
+}) {
   const [drawIdx, setDrawIdx] = useState(0)
   const [text, setText] = useState('')
-  const [play, setPlay] = useState('')
+  const [play, setPlay] = useState(digitCount === 5 ? 'direct' : '')
   const [saving, setSaving] = useState(false)
   const [savedTick, setSavedTick] = useState(0)
   const [ledgerMsg, setLedgerMsg] = useState(null)
 
   const draw = draws[Math.min(drawIdx, draws.length - 1)] || draws[0]
   const drawLabel = draw ? (draw.drawId ?? draw.id) : '—'
-  const { rows, errors } = useMemo(() => parseBets(text), [text])
+  const { rows, errors } = useMemo(() => parseBets(text, digitCount), [text, digitCount])
 
-  const playDef = PLAYS.find((p) => p.id === play)
+  const playDef = plays.find((p) => p.id === play)
   const results = useMemo(() => {
     if (!play || !draw) return []
     return rows.map((r) => {
-      const j = judgeBet(r.digits, play, draw.num)
+      const j = judgeBet(r.digits, play, draw.num, digitCount)
       return { ...r, ...j, prize: j.status === 'win' ? playDef.amount : 0 }
     })
-  }, [rows, play, draw, playDef])
+  }, [rows, play, draw, playDef, digitCount])
 
   const valid = results.filter((r) => r.status !== 'invalid')
   const wins = results.filter((r) => r.status === 'win')
@@ -153,7 +165,7 @@ export default function FC3DPrize({ draws, lottery = 'fc3d', label = '福彩3D' 
     <div className="page">
       <Note tone="warn">
         本工具只按固定奖金规则计算<b>已知开奖结果</b>的命中与奖金，不预测、不改变中奖概率。
-        单注 2 元，奖金为{label}固定奖：直选 1040 元 / 组选3 346 元 / 组选6 173 元。
+        单注 2 元，奖金为{label}固定奖：{plays.map((p) => `${p.name} ${p.amount} 元`).join(' / ')}。
       </Note>
 
       <Card title="中奖计算" tag="填号码 → 选玩法 → 自动算奖金">
@@ -186,12 +198,19 @@ export default function FC3DPrize({ draws, lottery = 'fc3d', label = '福彩3D' 
         <div className="prize-step">
           <div className="prize-step-head">
             <span className="prize-step-no">2</span> 填写本期购买号码
-            <span className="muted small">（每行一注，如 123 或 1 2 3）</span>
+            <span className="muted small">
+              （每行一注，如 {Array.from({ length: digitCount }, (_, i) => i + 1).join('')} 或{' '}
+              {Array.from({ length: digitCount }, (_, i) => i + 1).join(' ')}）
+            </span>
           </div>
           <textarea
             className="import-area mono"
             rows={6}
-            placeholder={'例如：\n123\n1 2 3\n456'}
+            placeholder={
+              digitCount === 3
+                ? '例如：\n123\n1 2 3\n456'
+                : '例如：\n03243\n0 3 2 4 3\n71829'
+            }
             value={text}
             onChange={(e) => setText(e.target.value)}
           />
@@ -214,7 +233,7 @@ export default function FC3DPrize({ draws, lottery = 'fc3d', label = '福彩3D' 
             <div className="prize-prompt">
               <b>号码已填写（共 {rows.length} 注），请选择你要计算的玩法：</b>
               <div className="prize-play-opts">
-                {PLAYS.map((p) => (
+                {plays.map((p) => (
                   <button key={p.id} className="prize-play-btn" onClick={() => setPlay(p.id)}>
                     <span className="prize-play-name">{p.name}</span>
                     <span className="prize-play-amt">{p.amount} 元/注</span>
@@ -225,7 +244,7 @@ export default function FC3DPrize({ draws, lottery = 'fc3d', label = '福彩3D' 
             </div>
           ) : (
             <div className="prize-play-opts">
-              {PLAYS.map((p) => (
+              {plays.map((p) => (
                 <button
                   key={p.id}
                   className={`prize-play-btn ${play === p.id ? 'active' : ''}`}
@@ -258,7 +277,7 @@ export default function FC3DPrize({ draws, lottery = 'fc3d', label = '福彩3D' 
             />
           </div>
 
-          {invalid.length > 0 && (
+          {invalid.length > 0 && plays.length > 1 && (
             <Note tone="warn">
               有 {invalid.length} 注号码形态与所选玩法不符（如组选3 却填了三位不同号），已不计入投注与奖金。
             </Note>
@@ -299,7 +318,7 @@ export default function FC3DPrize({ draws, lottery = 'fc3d', label = '福彩3D' 
                       <td className="mono">
                         <span className="fc3d-bet-num">{r.digits.join(' ')}</span>
                       </td>
-                      <td className="small muted">{betShape(r.digits)}</td>
+                      <td className="small muted">{betShape(r.digits, digitCount)}</td>
                       <td className="mono">{r.hitDigits} 位</td>
                       <td>
                         <span className={`prize-badge prize-badge-${r.status}`}>

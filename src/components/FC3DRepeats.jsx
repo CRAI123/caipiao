@@ -1,12 +1,13 @@
 // 福彩3D 重号分析 —— 相邻期重号统计、号码跟随关系
 import React, { useState } from 'react'
 import { Card, StatCard, Note } from './common.jsx'
-import { analyzeDraw, repeatStats, takeLatest, DIGITS } from '../lib/fc3dStats.js'
+import * as defaultStats from '../lib/fc3dStats.js'
 
 const WINDOWS = [20, 30, 50, 100]
 
-export default function FC3DRepeats({ draws }) {
+export default function FC3DRepeats({ draws, stats = defaultStats, digitCount = 3 }) {
   const [windowN, setWindowN] = useState(30)
+  const { analyzeDraw, repeatStats, takeLatest } = stats
 
   const rep = repeatStats(draws, windowN)
   const recent = takeLatest(draws, 15)
@@ -35,7 +36,15 @@ export default function FC3DRepeats({ draws }) {
         <StatCard label="平均重号个数" value={rep.avg} note={`${rep.totalPairs} 对相邻期`} />
         <StatCard label="0个重号占比" value={`${((rep.distribution[0] || 0) / rep.totalPairs * 100).toFixed(0)}%`} tone="blue" />
         <StatCard label="1个重号占比" value={`${((rep.distribution[1] || 0) / rep.totalPairs * 100).toFixed(0)}%`} tone="amber" />
-        <StatCard label="2-3个重号占比" value={`${(((rep.distribution[2] || 0) + (rep.distribution[3] || 0)) / rep.totalPairs * 100).toFixed(0)}%`} tone="green" />
+        <StatCard
+          label={digitCount === 3 ? '2-3个重号占比' : '2个以上重号占比'}
+          value={`${
+            (Array.from({ length: digitCount - 1 }, (_, i) => rep.distribution[i + 2] || 0).reduce((a, b) => a + b, 0) /
+              rep.totalPairs *
+              100).toFixed(0)
+          }%`}
+          tone="green"
+        />
       </div>
 
       <Card title="近期重号明细" tag="最近 15 期">

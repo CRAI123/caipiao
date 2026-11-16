@@ -39,12 +39,16 @@ import SSQTerms from './components/SSQTerms.jsx'
 import SSQDataManager from './components/SSQDataManager.jsx'
 import { FC3D_DRAWS } from './data/fc3d.js'
 import { PL3_DRAWS } from './data/pl3.js'
+import { PL5_DRAWS } from './data/pl5.js'
 import { SSQ_DRAWS } from './data/ssq.js'
 import { fetchPl3Draws } from './lib/pl3.js'
+import { fetchPl5Draws } from './lib/pl5.js'
 import { fetchFc3dDraws } from './lib/fc3d.js'
 import { fetchKl8Draws } from './lib/kl8.js'
 import { fetchSsqDraws } from './lib/ssq.js'
 import * as pl3Engine from './lib/pl3Predict.js'
+import * as pl5Engine from './lib/pl5Predict.js'
+import * as pl5Stats from './lib/pl5Stats.js'
 import { loadJournal, getRecord } from './lib/journal.js'
 import { loadSettings, isNeonReady } from './lib/settings.js'
 import { getSql } from './lib/neon.js'
@@ -62,6 +66,15 @@ const PL3_ALGO_INFO = {
   v4: {
     name: '排列三 v4 技术指标',
     desc: 'MA5/MA10 + 布林带 + MACD 投影和值/跨度区间，仅作走势参考',
+  },
+}
+
+// 排列五推算引擎算法说明（只有直选玩法，5 位穷举 10 万注）
+const PL5_ALGO_INFO = {
+  pro: {
+    name: '排列五 v3 Pro',
+    desc: '9 专家 Hedge 自适应权重 + 六维结构约束 + 5 位穷举 10 万注',
+    recommend: true,
   },
 }
 
@@ -119,21 +132,30 @@ export default function App() {
   const [fc3dTab, setFc3dTab] = useState('overview')
   const [pl3Draws, setPl3Draws] = useState(PL3_DRAWS)
   const [pl3Tab, setPl3Tab] = useState('overview')
+  const [pl5Draws, setPl5Draws] = useState(PL5_DRAWS)
+  const [pl5Tab, setPl5Tab] = useState('overview')
+  const [pl5LoadErr, setPl5LoadErr] = useState('')
   const [ssqDraws, setSsqDraws] = useState(SSQ_DRAWS)
   const [ssqTab, setSsqTab] = useState('overview')
   const [tick, setTick] = useState(0) // 账本变化后刷新「待打卡」标记
   const usingSample = draws[0]?.sample
   const fc3dUsingSample = fc3dDraws[0]?.sample
   const pl3UsingSample = pl3Draws[0]?.sample
+  const pl5UsingSample = pl5Draws[0]?.sample
   const ssqUsingSample = ssqDraws[0]?.sample
 
-  // 三位数彩票（福彩3D / 排列三）共用同一套页面与算法，只切换数据源
-  const isDigit = lottery === 'fc3d' || lottery === 'pl3'
-  const digitDraws = lottery === 'pl3' ? pl3Draws : fc3dDraws
-  const digitTab = lottery === 'pl3' ? pl3Tab : fc3dTab
-  const setDigitTab = lottery === 'pl3' ? setPl3Tab : setFc3dTab
-  const digitLabel = lottery === 'pl3' ? '排列三' : '福彩3D'
-  const digitUsingSample = lottery === 'pl3' ? pl3UsingSample : fc3dUsingSample
+  // 数字型彩票（福彩3D / 排列三 / 排列五）共用同一套页面与算法，只切换数据源
+  const isDigit = lottery === 'fc3d' || lottery === 'pl3' || lottery === 'pl5'
+  const digitDraws = lottery === 'pl5' ? pl5Draws : lottery === 'pl3' ? pl3Draws : fc3dDraws
+  const digitTab = lottery === 'pl5' ? pl5Tab : lottery === 'pl3' ? pl3Tab : fc3dTab
+  const setDigitTab = lottery === 'pl5' ? setPl5Tab : lottery === 'pl3' ? setPl3Tab : setFc3dTab
+  const digitLabel = lottery === 'pl5' ? '排列五' : lottery === 'pl3' ? '排列三' : '福彩3D'
+  const digitUsingSample =
+    lottery === 'pl5' ? pl5UsingSample : lottery === 'pl3' ? pl3UsingSample : fc3dUsingSample
+  const digitCount = lottery === 'pl5' ? 5 : 3
+  const digitPositions = lottery === 'pl5' ? pl5Stats.POSITIONS : undefined
+  const digitPosLabels = lottery === 'pl5' ? pl5Stats.POSITIONS.map((p) => `${p}位`) : undefined
+  const digitStats = lottery === 'pl5' ? pl5Stats : undefined
 
   // ---------- 访问控制 ----------
   // gate: loading(检查中) | open(已授权/本地模式) | gated(未授权，渲染门禁)
@@ -147,6 +169,11 @@ export default function App() {
 
   // ---------- AI 分析前置：强制同步最新开奖数据 ----------
   const refreshDigitDraws = useCallback(async () => {
+    if (lottery === 'pl5') {
+      const list = await fetchPl5Draws(100)
+      if (list?.length) setPl5Draws(list)
+      return list || pl5Draws
+    }
     if (lottery === 'pl3') {
       const list = await fetchPl3Draws(100)
       if (list?.length) setPl3Draws(list)
@@ -155,7 +182,23 @@ export default function App() {
     const list = await fetchFc3dDraws(100)
     if (list?.length) setFc3dDraws(list)
     return list || fc3dDraws
-  }, [lottery, pl3Draws, fc3dDraws])
+  }, [lottery, pl3Draws, pl5Draws, fc3dDraws])
+
+  // 排列五没有内置快照：首次进入时自动拉取最近 100 期真实开奖
+  useEffect(() => {
+    if (lottery !== 'pl5' || pl5Draws.length) return
+    let alive = true
+    fetchPl5Draws(100)
+      .then((list) => {
+        if (alive && list?.length) setPl5Draws(list)
+      })
+      .catch((e) => {
+        if (alive) setPl5LoadErr(e?.message || '拉取失败')
+      })
+    return () => {
+      alive = false
+    }
+  }, [lottery, pl5Draws.length])
 
   const refreshKl8Draws = useCallback(async () => {
     const list = await fetchKl8Draws(100)
@@ -283,6 +326,8 @@ export default function App() {
                   <>福彩3D · 数据研究档案 <i>FC3D RESEARCH LEDGER</i></>
                 ) : lottery === 'pl3' ? (
                   <>体彩排列三 · 数据研究档案 <i>PL3 RESEARCH LEDGER</i></>
+                ) : lottery === 'pl5' ? (
+                  <>体彩排列五 · 数据研究档案 <i>PL5 RESEARCH LEDGER</i></>
                 ) : (
                   <>福彩双色球 · 数据研究档案 <i>SSQ RESEARCH LEDGER</i></>
                 )}
@@ -304,6 +349,14 @@ export default function App() {
                 <div>头奖概率 1 / 17,721,088</div>
                 <div className={ssqUsingSample ? 'meta-sample' : 'meta-real'}>
                   数据源：{ssqUsingSample ? '内置演示数据' : '真实开奖数据'}
+                </div>
+              </>
+            ) : lottery === 'pl5' ? (
+              <>
+                <div>5 位数 · 00000 – 99999</div>
+                <div>直选概率 1 / 100,000</div>
+                <div className={digitUsingSample ? 'meta-sample' : 'meta-real'}>
+                  数据源：{digitUsingSample ? '内置演示数据' : '真实开奖数据'}
                 </div>
               </>
             ) : (
@@ -340,6 +393,14 @@ export default function App() {
                 onClick={() => setLottery('pl3')}
               >
                 排列三
+              </button>
+              <button
+                role="tab"
+                aria-selected={lottery === 'pl5'}
+                className={`lottery-tab ${lottery === 'pl5' ? 'active' : ''}`}
+                onClick={() => setLottery('pl5')}
+              >
+                排列五
               </button>
               <button
                 role="tab"
@@ -419,18 +480,73 @@ export default function App() {
             {ssqTab === 'data' && <SSQDataManager draws={ssqDraws} setDraws={setSsqDraws} />}
           </>
         ) : isDigit ? (
+          !digitDraws.length ? (
+            <div className="page">
+              <div className={pl5LoadErr ? 'note note-warn' : 'note'}>
+                {pl5LoadErr
+                  ? `排列五开奖数据拉取失败：${pl5LoadErr}`
+                  : `正在拉取${digitLabel}最近 100 期开奖数据，请稍候…`}
+              </div>
+              {pl5LoadErr && (
+                <button
+                  className="tab-btn"
+                  onClick={() => {
+                    setPl5LoadErr('')
+                    fetchPl5Draws(100)
+                      .then((list) => list?.length && setPl5Draws(list))
+                      .catch((e) => setPl5LoadErr(e?.message || '拉取失败'))
+                  }}
+                >
+                  重新拉取
+                </button>
+              )}
+            </div>
+          ) : (
           <>
-            {digitTab === 'overview' && <FC3DOverview draws={digitDraws} />}
-            {digitTab === 'hotcold' && <FC3DHotCold draws={digitDraws} />}
-            {digitTab === 'patterns' && <FC3DPatterns draws={digitDraws} />}
-            {digitTab === 'kline' && <KlinePage lottery={lottery} draws={digitDraws} />}
-            {digitTab === 'repeats' && <FC3DRepeats draws={digitDraws} />}
-            {digitTab === 'dantuo' && <FC3DDanTuo label={digitLabel} />}
+            {digitTab === 'overview' && (
+              <FC3DOverview
+                draws={digitDraws}
+                positions={digitPositions}
+                stats={digitStats}
+                sumTheory={lottery === 'pl5' ? 22.5 : undefined}
+                spanTheory={lottery === 'pl5' ? '约 6.6' : undefined}
+                formName={lottery === 'pl5' ? '全不同' : undefined}
+                formTheory={lottery === 'pl5' ? '约 30%' : undefined}
+              />
+            )}
+            {digitTab === 'hotcold' && <FC3DHotCold draws={digitDraws} positions={digitPositions} />}
+            {digitTab === 'patterns' && <FC3DPatterns draws={digitDraws} stats={digitStats} />}
+            {digitTab === 'kline' && (
+              <KlinePage lottery={lottery} draws={digitDraws} positions={digitPosLabels} />
+            )}
+            {digitTab === 'repeats' && (
+              <FC3DRepeats draws={digitDraws} stats={digitStats} digitCount={digitCount} />
+            )}
+            {digitTab === 'dantuo' && <FC3DDanTuo label={digitLabel} digitCount={digitCount} />}
             {digitTab === 'prize' && (
-              <FC3DPrize draws={digitDraws} lottery={lottery} label={digitLabel} />
+              <FC3DPrize
+                draws={digitDraws}
+                lottery={lottery}
+                label={digitLabel}
+                digitCount={digitCount}
+              />
             )}
             {digitTab === 'predict' &&
-              (lottery === 'pl3' ? (
+              (lottery === 'pl5' ? (
+                <FC3D
+                  draws={digitDraws}
+                  engine={pl5Engine}
+                  algoInfo={PL5_ALGO_INFO}
+                  showTiers
+                  label={digitLabel}
+                  game="pl5"
+                  onRefreshData={refreshDigitDraws}
+                  positions={digitPositions}
+                  digitCount={5}
+                  defaultCover={4}
+                  algoFn={{ pro: { predict: 'predictPL5', backtest: 'backtestPL5' } }}
+                />
+              ) : lottery === 'pl3' ? (
                 <FC3D
                   draws={digitDraws}
                   engine={pl3Engine}
@@ -444,7 +560,23 @@ export default function App() {
                 <FC3D draws={digitDraws} label={digitLabel} game="fc3d" onRefreshData={refreshDigitDraws} />
               ))}
             {digitTab === 'audit' &&
-              (lottery === 'pl3' ? (
+              (lottery === 'pl5' ? (
+                <FC3DAudit
+                  draws={digitDraws}
+                  engine={pl5Engine}
+                  defaultPeriods={20}
+                  defaultAlgo="pro"
+                  auditFns={{ pro: 'walkForwardAuditPL5' }}
+                  predictFns={{ pro: 'predictPL5' }}
+                  proEnabled
+                  proLabel="排列五 v3 Pro"
+                  compareEnabled={false}
+                  ceilingEnabled={false}
+                  digitCount={5}
+                  periodsList={[10, 20, 30]}
+                  formNote="五同/四同一异/…/全不同"
+                />
+              ) : lottery === 'pl3' ? (
                 <FC3DAudit
                   draws={digitDraws}
                   engine={pl3Engine}
@@ -456,9 +588,22 @@ export default function App() {
               ) : (
                 <FC3DAudit draws={digitDraws} />
               ))}
-            {digitTab === 'terms' && <FC3DTerms label={digitLabel} />}
+            {digitTab === 'terms' && <FC3DTerms label={digitLabel} digitCount={digitCount} />}
             {digitTab === 'data' && (
-              lottery === 'pl3' ? (
+              lottery === 'pl5' ? (
+                <FC3DDataManager
+                  draws={pl5Draws}
+                  setDraws={setPl5Draws}
+                  label="排列五"
+                  fetchDraws={fetchPl5Draws}
+                  sampleDraws={PL5_DRAWS}
+                  filePrefix="pl5"
+                  sourceUrl="https://www.lottery.gov.cn/kj/kjlb.html?pl5"
+                  sourceName="中国体彩网开奖公告"
+                  digitCount={5}
+                  positions={pl5Stats.POSITIONS}
+                />
+              ) : lottery === 'pl3' ? (
                 <FC3DDataManager
                   draws={pl3Draws}
                   setDraws={setPl3Draws}
@@ -474,6 +619,7 @@ export default function App() {
               )
             )}
           </>
+          )
         ) : tab === 'admin' ? (
           <Admin
             deviceId={device?.id || ''}

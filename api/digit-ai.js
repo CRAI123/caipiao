@@ -1,5 +1,5 @@
 // ============================================================
-// POST /api/digit-ai —— 福彩3D / 排列三 近 100 期 AI 解读（全站共享）
+// POST /api/digit-ai —— 福彩3D / 排列三 / 排列五 近 100 期 AI 解读（全站共享）
 //
 // 每期每彩种只允许首位用户触发真实的大模型调用，结果写入数据库；
 // 后续用户读到同一份结果（前端会补一段模拟等待，保证体验一致）。
@@ -13,43 +13,62 @@ import { getSql, ensureTables } from './_lib/neon.js'
 
 export const config = { maxDuration: 60 }
 
-const GAMES = { fc3d: '福彩3D', pl3: '排列三' }
+const GAMES = { fc3d: '福彩3D', pl3: '排列三', pl5: '排列五' }
+// 每位彩种的号码位数：排列三 3 位（直选/组选），排列五 5 位（只有直选）
+const POS_LEN = { fc3d: 3, pl3: 3, pl5: 5 }
 const maskId = (id) => (id ? `尾号${String(id).slice(-4)}` : '匿名设备')
 // 结果结构版本：旧版（纯候选池 / 纯自由推演 / 复核制）命中后重算为「算法候选池 → AI 终选」
 const SCHEMA = 5
 
+/** 某个位数对应的 JSON 输出格式说明（供模型与重试用） */
+function jsonHint(len) {
+  return len === 5
+    ? '{"straight":["01234","56789"],"reasons":{"01234":"一句话理由"},"summary":"80 字内","risk":"一句风险提示"}'
+    : '{"straight":["123","456","789"],"group":["135","246"],"group3":["112"],"reasons":{"123":"一句话理由"},"summary":"80 字内","risk":"一句风险提示"}'
+}
+
 // 四轮真实分析：结构解读 → 反向质询 → 算法候选终选 → 终审校验（每轮单独调用一次大模型）
-const ROUNDS = [
-  {
-    name: '结构解读',
-    prompt:
-      '第一轮：只依据前面给出的统计数据，解读本期号码结构（位置频率、遗漏、和值/跨度区间、形态倾向）。不要编造数据，不要承诺中奖。控制在 300 字内。',
-    temperature: 0.5,
-  },
-  {
-    name: '反向质询',
-    prompt:
-      '第二轮：请以严格质疑者的身份审查第一轮结论——指出其中过度解读、样本不足或自相矛盾之处，并给出更保守的表述。控制在 250 字内。',
-    temperature: 0.3,
-  },
-  {
-    name: '算法候选终选',
-    prompt:
-      '第三轮：只能从上面给出的算法候选池里终选本期号码——直选 3 注、组六 2 注、组三 1 注，不得自创池外号码。' +
-      '只输出一个 JSON 对象，不要解释文字、不要代码块围栏。格式：' +
-      '{"straight":["123","456","789"],"group":["135","246"],"group3":["112"],"reasons":{"123":"一句话理由"},"summary":"80 字内","risk":"一句风险提示"}。' +
-      'straight 必须正好 3 个、group 必须正好 2 个、group3 必须正好 1 个，且都来自候选池；reasons 的键必须是上面出现过的号码。',
-    temperature: 0.3,
-  },
-  {
-    name: '终审校验',
-    prompt:
-      '第四轮：终审校验上一轮结果——逐个检查：直选是否正好 3 注、组六 2 注、组三 1 注；是否都在算法候选池内；是否都是 3 位数字，组六三位互不相同，组三两同一异。' +
-      '有不合规的立即替换为候选池里的次优号。只输出最终 JSON（格式同上一轮），不要解释文字、不要代码块围栏。' +
-      'risk 必须写明「每注直选 1/1000、组六约 1/167、组三约 1/333 不变」。',
-    temperature: 0.2,
-  },
-]
+function roundsFor(len) {
+  const is5 = len === 5
+  return [
+    {
+      name: '结构解读',
+      prompt:
+        '第一轮：只依据前面给出的统计数据，解读本期号码结构（位置频率、遗漏、和值/跨度区间、形态倾向）。不要编造数据，不要承诺中奖。控制在 300 字内。',
+      temperature: 0.5,
+    },
+    {
+      name: '反向质询',
+      prompt:
+        '第二轮：请以严格质疑者的身份审查第一轮结论——指出其中过度解读、样本不足或自相矛盾之处，并给出更保守的表述。控制在 250 字内。',
+      temperature: 0.3,
+    },
+    {
+      name: '算法候选终选',
+      prompt: is5
+        ? '第三轮：只能从上面给出的算法候选池里终选本期号码——直选 5 注，不得自创池外号码。' +
+          '只输出一个 JSON 对象，不要解释文字、不要代码块围栏。格式：' +
+          jsonHint(5) +
+          '。straight 必须正好 5 个，且都来自候选池；reasons 的键必须是上面出现过的号码。'
+        : '第三轮：只能从上面给出的算法候选池里终选本期号码——直选 3 注、组六 2 注、组三 1 注，不得自创池外号码。' +
+          '只输出一个 JSON 对象，不要解释文字、不要代码块围栏。格式：' +
+          jsonHint(3) +
+          '。straight 必须正好 3 个、group 必须正好 2 个、group3 必须正好 1 个，且都来自候选池；reasons 的键必须是上面出现过的号码。',
+      temperature: 0.3,
+    },
+    {
+      name: '终审校验',
+      prompt: is5
+        ? '第四轮：终审校验上一轮结果——逐个检查：直选是否正好 5 注、是否都在算法候选池内、是否都是 5 位数字。' +
+          '有不合规的立即替换为候选池里的次优号。只输出最终 JSON（格式同上一轮），不要解释文字、不要代码块围栏。' +
+          'risk 必须写明「每注直选 1/100000 不变」。'
+        : '第四轮：终审校验上一轮结果——逐个检查：直选是否正好 3 注、组六 2 注、组三 1 注；是否都在算法候选池内；是否都是 3 位数字，组六三位互不相同，组三两同一异。' +
+          '有不合规的立即替换为候选池里的次优号。只输出最终 JSON（格式同上一轮），不要解释文字、不要代码块围栏。' +
+          'risk 必须写明「每注直选 1/1000、组六约 1/167、组三约 1/333 不变」。',
+      temperature: 0.2,
+    },
+  ]
+}
 
 /** 从模型输出里抠出 JSON（可能带 ```json 围栏或前后废话） */
 function extractJson(text) {
@@ -73,23 +92,23 @@ function extractJson(text) {
   }
 }
 
-/** 规整模型给出的号码：只保留 3 位数字，限制条数 */
-function normalizePicks(raw) {
+/** 规整模型给出的号码：只保留 digitCount 位数字，限制条数 */
+function normalizePicks(raw, digitCount = 3) {
   if (!raw || typeof raw !== 'object') return null
   const nums = (v, max) =>
     (Array.isArray(v) ? v : [])
       .map((x) => String(x).replace(/\D/g, ''))
-      .filter((x) => x.length === 3)
+      .filter((x) => x.length === digitCount)
       .slice(0, max)
-  const straight = nums(raw.straight, 5)
-  const group = nums(raw.group, 5)
-  const group3 = nums(raw.group3, 3)
+  const straight = nums(raw.straight, 8)
+  const group = digitCount === 3 ? nums(raw.group, 5) : []
+  const group3 = digitCount === 3 ? nums(raw.group3, 3) : []
   if (!straight.length && !group.length && !group3.length) return null
   const reasons = {}
   if (raw.reasons && typeof raw.reasons === 'object') {
     for (const [k, v] of Object.entries(raw.reasons)) {
       const key = String(k).replace(/\D/g, '')
-      if (key.length === 3) reasons[key] = String(v).slice(0, 120)
+      if (key.length === digitCount) reasons[key] = String(v).slice(0, 120)
     }
   }
   return {
@@ -117,19 +136,20 @@ function sanitizeMessages(messages) {
   return out
 }
 
-/** 校验客户端传来的算法候选池（只有 3 位号码数组才接受） */
-function sanitizeAlgo(raw) {
+/** 校验客户端传来的算法候选池（只接受 digitCount 位号码数组） */
+function sanitizeAlgo(raw, digitCount = 3) {
   if (!raw || typeof raw !== 'object') return null
   const take = (arr, max) =>
     (Array.isArray(arr) ? arr : [])
-      .map((x) => String(x).replace(/\D/g, '').slice(0, 3))
-      .filter((n) => n.length === 3)
+      .map((x) => String(x).replace(/\D/g, '').slice(0, digitCount))
+      .filter((n) => n.length === digitCount)
       .filter((n, i, a) => a.indexOf(n) === i)
       .slice(0, max)
   const straight = take(raw.straight, 40)
-  const group = take(raw.group, 30)
-  const group3 = take(raw.group3, 20)
-  if (straight.length < 3 || group.length < 2 || group3.length < 1) return null
+  const group = digitCount === 3 ? take(raw.group, 30) : []
+  const group3 = digitCount === 3 ? take(raw.group3, 20) : []
+  if (straight.length < (digitCount === 3 ? 3 : 5)) return null
+  if (digitCount === 3 && (group.length < 2 || group3.length < 1)) return null
   return { straight, group, group3 }
 }
 
@@ -154,6 +174,11 @@ export default async function handler(req, res) {
     const { action = 'run', game = 'fc3d', drawId, label, messages, algo, deviceId = '' } = req.body || {}
     const id = Number(drawId)
     if (!GAMES[game]) return res.status(400).json({ error: '未知彩种' })
+    const digitCount = POS_LEN[game] || 3
+    const needStraight = digitCount === 3 ? 3 : 5
+    const needGroup = digitCount === 3 ? 2 : 0
+    const needGroup3 = digitCount === 3 ? 1 : 0
+    const ROUNDS = roundsFor(digitCount)
 
     try {
       sqlRef = getSql()
@@ -261,8 +286,8 @@ export default async function handler(req, res) {
       rounds.push({ name: r.name, text })
       conv.push(ask, { role: 'assistant', content: text })
     }
-    const algoPool = sanitizeAlgo(algo)
-    let picks = normalizePicks(extractJson(rounds[rounds.length - 1].text))
+    const algoPool = sanitizeAlgo(algo, digitCount)
+    let picks = normalizePicks(extractJson(rounds[rounds.length - 1].text), digitCount)
     // 模型偶发拒答或格式漂移：用干净的上下文再要一次纯 JSON
     if (!picks) {
       try {
@@ -275,14 +300,17 @@ export default async function handler(req, res) {
               role: 'user',
               content:
                 '只输出一个 JSON 对象，不要任何解释文字、不要代码块围栏。格式：' +
-                '{"straight":["123","456","789"],"group":["135","246"],"group3":["112"],"reasons":{"123":"一句话依据"},"summary":"80 字内","risk":"一句风险提示"}。' +
-                'straight 3 注直选、group 2 注组六（三个数字互不相同）、group3 1 注组三（两同一异）；' +
+                jsonHint(digitCount) +
+                '。' +
+                (digitCount === 3
+                  ? 'straight 3 注直选、group 2 注组六（三个数字互不相同）、group3 1 注组三（两同一异）；'
+                  : 'straight 必须正好 5 注直选（每注 5 位数字）；') +
                 '只能从上面给出的算法候选池里选，不得自创池外号码。',
             },
           ],
           { maxTokens: 700, temperature: 0.2 },
         )
-        picks = normalizePicks(extractJson(retry))
+        picks = normalizePicks(extractJson(retry), digitCount)
       } catch {
         /* 重试失败按无号码处理 */
       }
@@ -295,12 +323,15 @@ export default async function handler(req, res) {
       const restricted = restrictToPool(picks, algoPool)
       if (!restricted) {
         picks = {
-          straight: algoPool.straight.slice(0, 3),
-          group: algoPool.group.slice(0, 2),
-          group3: algoPool.group3.slice(0, 1),
+          straight: algoPool.straight.slice(0, needStraight),
+          group: algoPool.group.slice(0, needGroup),
+          group3: algoPool.group3.slice(0, needGroup3),
           reasons: {},
           summary: '',
-          risk: '每注直选 1/1000、组六约 1/167、组三约 1/333 不变。',
+          risk:
+            digitCount === 5
+              ? '每注直选 1/100000 不变。'
+              : '每注直选 1/1000、组六约 1/167、组三约 1/333 不变。',
         }
         finalSource = 'algo'
         finalNote = 'AI 终选解析失败，已回退到算法前三'
@@ -314,15 +345,16 @@ export default async function handler(req, res) {
           }
           return out.slice(0, need)
         }
-        const straight = fillTo(restricted.straight, algoPool.straight, 3)
-        const group = fillTo(restricted.group, algoPool.group, 2)
-        const group3 = fillTo(restricted.group3, algoPool.group3, 1)
+        const straight = fillTo(restricted.straight, algoPool.straight, needStraight)
+        const group = fillTo(restricted.group, algoPool.group, needGroup)
+        const group3 = fillTo(restricted.group3, algoPool.group3, needGroup3)
+        const totalNeed = needStraight + needGroup + needGroup3
         const missing =
-          3 - restricted.straight.length + (2 - restricted.group.length) + (1 - restricted.group3.length)
+          needStraight - straight.length + (needGroup - group.length) + (needGroup3 - group3.length)
         picks = { ...restricted, straight, group, group3 }
         finalSource = 'ai'
         finalNote = missing
-          ? `AI 终选 ${6 - missing}/6 注在池内，其余 ${missing} 注由算法候选补齐`
+          ? `AI 终选 ${totalNeed - missing}/${totalNeed} 注在池内，其余 ${missing} 注由算法候选补齐`
           : 'AI 已在算法候选池内完成终选'
       }
     } else {
@@ -342,9 +374,9 @@ export default async function handler(req, res) {
       finalNote,
       algoPicks: algoPool
         ? {
-            straight: algoPool.straight.slice(0, 3),
-            group: algoPool.group.slice(0, 2),
-            group3: algoPool.group3.slice(0, 1),
+            straight: algoPool.straight.slice(0, needStraight),
+            group: algoPool.group.slice(0, needGroup),
+            group3: algoPool.group3.slice(0, needGroup3),
           }
         : null,
       schema: SCHEMA,

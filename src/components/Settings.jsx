@@ -47,7 +47,7 @@ export default function Settings() {
   const [larkLink, setLarkLink] = useState('')
 
   // 每日推荐推送（服务端 Cron 读取，保存在云数据库）
-  const [push, setPush] = useState({ webhook: '', secret: '', kl8: true, fc3d: true, pl3: true, ssq: true })
+  const [push, setPush] = useState({ webhook: '', secret: '', kl8: true, fc3d: true, pl3: true, pl5: true, ssq: true })
   const [pushBusy, setPushBusy] = useState(false)
 
   /** 粘贴链接 → 自动识别并填入 app_token / table_id */
@@ -97,7 +97,7 @@ export default function Settings() {
           getDailyPushConfig(sql),
         ])
         if (!alive) return
-        if (pushCfg) setPush({ webhook: '', secret: '', kl8: true, fc3d: true, pl3: true, ssq: true, ...pushCfg })
+        if (pushCfg) setPush({ webhook: '', secret: '', kl8: true, fc3d: true, pl3: true, pl5: true, ssq: true, ...pushCfg })
         setAccess({ mode: 'neon', req, isAdmin: admins.some((a) => a.device_id === d.id) })
       } catch (e) {
         if (alive) setAccess({ mode: 'error', message: e.message })
@@ -186,6 +186,7 @@ export default function Settings() {
         data.skipped?.kl8 && `快乐8：${data.skipped.kl8}`,
         data.skipped?.fc3d && `福彩3D：${data.skipped.fc3d}`,
         data.skipped?.pl3 && `排列三：${data.skipped.pl3}`,
+        data.skipped?.pl5 && `排列五：${data.skipped.pl5}`,
         data.skipped?.ssq && `双色球：${data.skipped.ssq}`,
       ]
         .filter(Boolean)
@@ -355,6 +356,14 @@ export default function Settings() {
               onChange={(e) => setPush({ ...push, pl3: e.target.checked })}
             />{' '}
             推送排列三
+          </label>
+          <label className="sync-badge" style={{ cursor: 'pointer' }}>
+            <input
+              type="checkbox"
+              checked={push.pl5}
+              onChange={(e) => setPush({ ...push, pl5: e.target.checked })}
+            />{' '}
+            推送排列五
           </label>
           <label className="sync-badge" style={{ cursor: 'pointer' }}>
             <input

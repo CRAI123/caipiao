@@ -29,6 +29,20 @@ const cwlProxy = {
       Accept: 'application/json, text/plain, */*',
     },
   },
+  // 体彩排列五：dev/preview 直连体彩官网接口（线上走 /api/pl5-proxy serverless function）
+  '/api/pl5-proxy': {
+    target: 'https://webapi.sporttery.cn',
+    changeOrigin: true,
+    rewrite: (path) => {
+      const u = new URL(path, 'http://x')
+      const count = Math.min(200, Math.max(10, Number(u.searchParams.get('count')) || 100))
+      return `/gateway/lottery/getHistoryPageListV1.qry?gameNo=350133&provinceId=0&pageSize=${count}&isVerify=1&pageNo=1`
+    },
+    headers: {
+      Referer: 'https://static.sporttery.cn/',
+      Accept: 'application/json, text/plain, */*',
+    },
+  },
   // 双色球：dev 无本地 serverless，转发到线上同域代理（线上直接命中 /api/ssq-proxy）
   '/api/ssq-proxy': {
     target: 'https://cai.rayzo.cn',

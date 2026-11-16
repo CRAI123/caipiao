@@ -65,12 +65,13 @@ function buildSeries(lottery, chrono) {
     ]
   }
 
-  // 福彩3D / 排列三
+  // 福彩3D / 排列三 / 排列五
+  const isPl5 = lottery === 'pl5'
   return [
     {
       key: 'sum',
       title: '和值 K 线',
-      tag: '0 – 27',
+      tag: isPl5 ? '0 – 45' : '0 – 27',
       unit: '',
       wick: 0.5,
       points: chrono.map((d) => ({
@@ -79,8 +80,9 @@ function buildSeries(lottery, chrono) {
         value: sumOf(d.num),
         span: spanOf(d.num),
       })),
-      hint:
-        '和值理论均值 13.5。开=上期和值、收=本期和值，影线取本期跨度的 0.5 倍，颜色红涨绿跌。',
+      hint: isPl5
+        ? '和值理论均值 22.5。开=上期和值、收=本期和值，影线取本期跨度的 0.5 倍，颜色红涨绿跌。'
+        : '和值理论均值 13.5。开=上期和值、收=本期和值，影线取本期跨度的 0.5 倍，颜色红涨绿跌。',
     },
     {
       key: 'span',
@@ -94,7 +96,9 @@ function buildSeries(lottery, chrono) {
         value: spanOf(d.num),
         span: 0,
       })),
-      hint: '跨度 = 最大号 − 最小号，理论均值约 6.3。跨度序列本身波动大，均线只用于看区间漂移。',
+      hint: isPl5
+        ? '跨度 = 最大号 − 最小号，取值 0 – 9。跨度序列本身波动大，均线只用于看区间漂移。'
+        : '跨度 = 最大号 − 最小号，理论均值约 6.3。跨度序列本身波动大，均线只用于看区间漂移。',
     },
   ]
 }
@@ -154,7 +158,7 @@ function SeriesCard({ series, showBoll, preset }) {
   )
 }
 
-export default function KlinePage({ lottery, draws }) {
+export default function KlinePage({ lottery, draws, positions = POS_LABEL }) {
   const [windowN, setWindowN] = useState(60)
   const [showBoll, setShowBoll] = useState(true)
   const [presetKey, setPresetKey] = useState('standard')
@@ -187,7 +191,7 @@ export default function KlinePage({ lottery, draws }) {
     [draws, trendN],
   )
 
-  const isDigit = lottery === 'fc3d' || lottery === 'pl3'
+  const isDigit = lottery === 'fc3d' || lottery === 'pl3' || lottery === 'pl5'
 
   const digitPoints = useMemo(
     () =>
@@ -270,7 +274,7 @@ export default function KlinePage({ lottery, draws }) {
         <SeriesCard key={s.key} series={s} showBoll={showBoll} preset={preset} />
       ))}
 
-      <OmissionPanel lottery={lottery} draws={draws} windowN={n} preset={preset} />
+      <OmissionPanel lottery={lottery} draws={draws} windowN={n} preset={preset} positions={positions} />
 
       {lottery === 'kl8' && (
         <Card title="号码走势连线（1 – 80）" tag={`近 ${trendN} 期`}>
@@ -310,10 +314,10 @@ export default function KlinePage({ lottery, draws }) {
         </>
       )}
 
-      {(lottery === 'fc3d' || lottery === 'pl3') && (
-        <Card title="号码走势连线（百 / 十 / 个）" tag={`近 ${trendN} 期`}>
+      {isDigit && (
+        <Card title={`号码走势连线（${positions.join(' / ')}）`} tag={`近 ${trendN} 期`}>
           <div className="toolbar" style={{ marginBottom: 10 }}>
-            {POS_LABEL.map((label, i) => (
+            {positions.map((label, i) => (
               <button key={label} className={`tab-btn ${pos === i ? 'active' : ''}`} onClick={() => setPos(i)}>
                 {label}
               </button>

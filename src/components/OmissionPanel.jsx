@@ -31,8 +31,14 @@ function matchFilter(r, key) {
   return true
 }
 
-export default function OmissionPanel({ lottery, draws, windowN = 60, preset = DEFAULT_PRESET }) {
-  const isDigit = lottery === 'fc3d' || lottery === 'pl3'
+export default function OmissionPanel({
+  lottery,
+  draws,
+  windowN = 60,
+  preset = DEFAULT_PRESET,
+  positions = POS_LABEL,
+}) {
+  const isDigit = lottery === 'fc3d' || lottery === 'pl3' || lottery === 'pl5'
   const isSsq = lottery === 'ssq'
   const [pos, setPos] = useState(0)
   const [digit, setDigit] = useState(0)
@@ -90,13 +96,13 @@ export default function OmissionPanel({ lottery, draws, windowN = 60, preset = D
     const url = URL.createObjectURL(new Blob([csv], { type: 'text/csv;charset=utf-8' }))
     const a = document.createElement('a')
     a.href = url
-    a.download = `${lottery}-${POS_LABEL[pos]}-指标读数.csv`
+    a.download = `${lottery}-${positions[pos]}-指标读数.csv`
     a.click()
     URL.revokeObjectURL(url)
   }
 
   const title = isDigit
-    ? `定位号码 K 线 · ${POS_LABEL[pos]}`
+    ? `定位号码 K 线 · ${positions[pos]}`
     : isSsq
       ? `号码 K 线 · ${kind === 'red' ? '红球' : '蓝球'} ${selNum}`
       : `号码 K 线 · ${selNum} 号`
@@ -105,7 +111,7 @@ export default function OmissionPanel({ lottery, draws, windowN = 60, preset = D
     <Card title={title} tag={`近 ${windowN} 期`}>
       <div className="toolbar" style={{ marginBottom: 10 }}>
         {isDigit &&
-          POS_LABEL.map((label, i) => (
+          positions.map((label, i) => (
             <button key={label} className={`tab-btn ${pos === i ? 'active' : ''}`} onClick={() => setPos(i)}>
               {label}
             </button>
@@ -190,7 +196,7 @@ export default function OmissionPanel({ lottery, draws, windowN = 60, preset = D
       {isDigit && tableRows.length > 0 && (
         <>
           <div className="predict-sub" style={{ marginTop: 14 }}>
-            {POS_LABEL[pos]} 0–9 指标读数（截图时点口径，仅描述历史）
+            {positions[pos]} 0–9 指标读数（截图时点口径，仅描述历史）
           </div>
           <div className="toolbar" style={{ marginBottom: 8 }}>
             <span className="toolbar-label">排序</span>

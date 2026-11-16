@@ -54,21 +54,29 @@ export default function FC3DAudit({
   v2Label = '精准 v2',
   proEnabled = false,
   proLabel = '排列三 v3 Pro',
+  digitCount = 3,
+  defaultAlgo = 'v2',
+  auditFns = AUDIT_FN,
+  predictFns = PREDICT_FN,
+  compareEnabled = true,
+  ceilingEnabled = true,
+  formNote = '组三/组六/豹子/顺子',
+  periodsList = PERIODS,
 }) {
   const [periods, setPeriods] = useState(defaultPeriods)
-  const [algo, setAlgo] = useState('v2')
+  const [algo, setAlgo] = useState(defaultAlgo)
   // v4 只存在于 3D/排列三引擎；其他引擎（或旧引擎）没有这两个函数时不展示该档，避免调用未定义
   const v4Enabled =
     typeof engine.walkForwardAuditFC3Dv4 === 'function' && typeof engine.predictFC3Dv4 === 'function'
 
   const audit = useMemo(
-    () => engine[AUDIT_FN[algo]](draws, { periods, minTrain: algo === 'pro' ? 40 : 20 }),
-    [draws, periods, algo, engine],
+    () => engine[auditFns[algo]](draws, { periods, minTrain: algo === 'pro' ? 40 : 20 }),
+    [draws, periods, algo, engine, auditFns],
   )
 
   // v1 vs v2 vs v4 指标档（vs Pro）对比
   const compare = useMemo(() => {
-    if (draws.length < 40) return null
+    if (!compareEnabled || draws.length < 40) return null
     const a1 = engine.walkForwardAuditFC3D(draws, { periods, minTrain: 20 })
     const a2 = engine.walkForwardAuditFC3Dv2(draws, { periods, minTrain: 20 })
     const a4 = v4Enabled ? engine.walkForwardAuditFC3Dv4(draws, { periods, minTrain: 20 }) : null
@@ -76,11 +84,11 @@ export default function FC3DAudit({
       ? engine.walkForwardAuditPL3Pro(draws, { periods, minTrain: 40 })
       : null
     return { a1, a2, a4, a3 }
-  }, [draws, periods, engine, proEnabled, v4Enabled])
+  }, [draws, periods, engine, proEnabled, v4Enabled, compareEnabled])
 
   // 理论上限：由实际给出的取值个数反推，与任何算法无关
   const ceiling = useMemo(() => {
-    if (!compare) return null
+    if (!compare || !ceilingEnabled) return null
     const avgWidth = (key) => {
       const rows = compare.a2.rows
       if (!rows.length) return 0
@@ -102,13 +110,13 @@ export default function FC3DAudit({
     if (draws.length < 21) return null
     const train = draws.slice(1)
     const actual = draws[0]
-    const pred = engine[PREDICT_FN[algo]](train)
+    const pred = engine[predictFns[algo]](train)
     if (!pred) return null
     const a = engine.analyzeDraw(actual.num)
     const allRec = [...pred.dan, ...pred.tuo]
     const hits = actual.num.filter((d) => allRec.includes(d))
     return { draw: actual, prediction: pred, hits, analysis: a }
-  }, [draws, algo, engine])
+  }, [draws, algo, engine, predictFns])
 
   if (audit.periods === 0) {
     return (
@@ -127,7 +135,7 @@ export default function FC3DAudit({
     <div className="page">
       <div className="toolbar">
         <span className="toolbar-label">回测期数</span>
-        {PERIODS.map((n) => (
+        {periodsList.map((n) => (
           <button
             key={n}
             className={`tab-btn ${periods === n ? 'active' : ''}`}
@@ -138,8 +146,12 @@ export default function FC3DAudit({
         ))}
         <span className="toolbar-sep" />
         <span className="toolbar-label">算法</span>
-        <button className={`tab-btn ${algo === 'v1' ? 'active' : ''}`} onClick={() => setAlgo('v1')}>经典 v1</button>
-        <button className={`tab-btn ${algo === 'v2' ? 'active' : ''}`} onClick={() => setAlgo('v2')}>{v2Label}</button>
+        {compareEnabled && (
+          <>
+            <button className={`tab-btn ${algo === 'v1' ? 'active' : ''}`} onClick={() => setAlgo('v1')}>经典 v1</button>
+            <button className={`tab-btn ${algo === 'v2' ? 'active' : ''}`} onClick={() => setAlgo('v2')}>{v2Label}</button>
+          </>
+        )}
         {v4Enabled && (
           <button className={`tab-btn ${algo === 'v4' ? 'active' : ''}`} onClick={() => setAlgo('v4')}>v4 技术指标</button>
         )}
@@ -274,7 +286,7 @@ export default function FC3DAudit({
             ))}
           </div>
           <div className="chip-row" style={{ marginTop: 14 }}>
-            <span className="chip"><i>组选命中 {rollback.hits.length}/3</i></span>
+            <span className="chip"><i>命中 {rollback.hits.length}/{digitCount}</i></span>
             <span className="chip"><i>跨度 {rollback.analysis.span}（推 {rollback.prediction.spanRange.join('-')}）</i></span>
             <span className="chip"><i>和值 {rollback.analysis.sum}（推 {rollback.prediction.sumRange.join('-')}）</i></span>
             <span className="chip"><i>{rollback.analysis.oddPattern} · {rollback.analysis.form}</i></span>
@@ -285,8 +297,8 @@ export default function FC3DAudit({
 
       {/* 核心指标 */}
       <div className="stat-grid stat-grid-4">
-        <StatCard label="平均组选命中" value={audit.avgHits} unit="个" tone="red" note={`${audit.periods} 期`} />
-        <StatCard label="机选理论平均" value={audit.baseline} unit="个" tone="blue" note="6 码中 3 的期望" />
+        <StatCard label="平均命中个数" value={audit.avgHits} unit="个" tone="red" note={`${audit.periods} 期`} />
+        <StatCard label="机选理论平均" value={audit.baseline} unit="个" tone="blue" note={`6 码中 ${digitCount} 的期望`} />
         <StatCard label="超出基准" value={(diff >= 0 ? '+' : '') + diff} unit="个" tone={Math.abs(diff) <= 0.3 ? 'amber' : 'red'} note="±0.3 以内即无差异" />
         <StatCard label="平均综合评分" value={avgScore} unit="分" tone="amber" note="满分 100" />
       </div>
@@ -296,11 +308,11 @@ export default function FC3DAudit({
         <StatCard label="跨度命中率" value={`${audit.spanRate}%`} tone="blue" note="预测跨度范围" />
         <StatCard label="和值命中率" value={`${audit.sumRate}%`} tone="blue" note="预测和值范围" />
         <StatCard label="奇偶命中率" value={`${audit.oddRate}%`} tone="amber" note="推荐奇偶形态" />
-        <StatCard label="形态命中率" value={`${audit.formRate}%`} tone="green" note="组三/组六/豹子/顺子" />
+        <StatCard label="形态命中率" value={`${audit.formRate}%`} tone="green" note={formNote} />
       </div>
 
       {/* 命中分布 */}
-      <Card title="组选命中分布" tag={`柱=实际次数 · 机选期望 = 概率 × ${audit.periods} 期`}>
+      <Card title="命中分布" tag={`柱=实际次数 · 机选期望 = 概率 × ${audit.periods} 期`}>
         <div className="table-scroll">
           <table className="ledger-table">
             <thead>
@@ -314,14 +326,14 @@ export default function FC3DAudit({
             <tbody>
               {audit.dist.map(({ k, count }) => {
                 // 机选期望：从 10 个里选 6 个，命中 k 个的概率
-                // P(k) = C(3,k)*C(7,6-k)/C(10,6)
+                // P(k) = C(digitCount,k)*C(10-digitCount,6-k)/C(10,6)
                 const c = (n, r) => {
                   if (r < 0 || r > n) return 0
                   let v = 1
                   for (let i = 0; i < r; i++) v = v * (n - i) / (i + 1)
                   return v
                 }
-                const p = (c(3, k) * c(7, 6 - k)) / c(10, 6)
+                const p = (c(digitCount, k) * c(10 - digitCount, 6 - k)) / c(10, 6)
                 const expect = +(p * audit.periods).toFixed(1)
                 return (
                   <tr key={k}>
@@ -364,7 +376,7 @@ export default function FC3DAudit({
                   <td className="mono">{r.draw.num.join(' ')}</td>
                   <td className="mono">{r.prediction.dan.join(' ')}</td>
                   <td className="mono muted">{r.prediction.tuo.join(' ')}</td>
-                  <td className="mono">{r.hits}/3</td>
+                  <td className="mono">{r.hits}/{digitCount}</td>
                   <td className="mono">{r.spanHit ? '✓' : '✗'}</td>
                   <td className="mono">{r.sumHit ? '✓' : '✗'}</td>
                   <td className="mono">{r.oddHit ? '✓' : '✗'}</td>
