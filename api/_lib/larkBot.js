@@ -81,6 +81,10 @@ async function send(cfg, chatId, msgType, content) {
   return d.data
 }
 
+/** 先回一句「收到」，避免现算 AI 的十几秒里用户以为机器人没反应 */
+const ack = (cfg, chatId) =>
+  send(cfg, chatId, 'text', { text: '收到，正在算本期推荐，请稍等十几秒…' }).catch(() => {})
+
 /** 在本进程内调用每日推送的 dry 模式，拿到卡片 JSON（不发群） */
 function dryCards(only) {
   return new Promise((resolve, reject) => {
@@ -180,6 +184,7 @@ async function onMessage(cfg, event) {
       return
     }
     if (/命中|中几|中奖|回测/.test(t)) {
+      await ack(cfg, msg.chat_id)
       const data = await dryCards('')
       await send(cfg, msg.chat_id, 'text', { text: hitText(data.hits) })
       return
@@ -196,6 +201,7 @@ async function onMessage(cfg, event) {
       return
     }
 
+    await ack(cfg, msg.chat_id)
     const data = await dryCards(only)
     if (!data?.cards?.length) {
       await send(cfg, msg.chat_id, 'text', { text: '暂时取不到开奖数据，稍后再试。' })

@@ -5,6 +5,9 @@
 import { applyCors } from './_lib/http.js'
 import { handleLarkEvent } from './_lib/larkBot.js'
 
+// 机器人事件回调也走这个函数：现算 AI 要十几秒，默认 10 秒会被杀掉导致「@了没反应」
+export const config = { maxDuration: 60 }
+
 const LARK_API = 'https://open.feishu.cn/open-apis'
 
 // 账本字段定义（名称, 飞书字段类型：1=文本 2=数字）
