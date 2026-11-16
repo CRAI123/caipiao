@@ -220,6 +220,24 @@ async function onMessage(cfg, event) {
   }
 }
 
+/** 记住处理过的 message_id，避免飞书 3 秒超时重推造成重复回复 */
+const HANDLED_KEY = 'lark_bot_handled'
+
+async function alreadyHandled(messageId) {
+  if (!process.env.DATABASE_URL) return false
+  try {
+    const sql = getSql()
+    const raw = await readConfig(sql, HANDLED_KEY)
+    const list = raw ? JSON.parse(raw) : []
+    if (Array.isArray(list) && list.includes(messageId)) return true
+    const next = [...(Array.isArray(list) ? list : []), messageId].slice(-100)
+    await writeConfig(sql, HANDLED_KEY, JSON.stringify(next))
+  } catch (e) {
+    console.error('[lark-bot] 记录 message_id 失败：', e.message)
+  }
+  return false
+}
+
 /** 处理飞书事件回调：URL 校验、加密解密、消息路由（由 lark-proxy 调用） */
 export async function handleLarkEvent(req, res, rawBody) {
   if (req.method === 'OPTIONS') {
@@ -264,10 +282,16 @@ export async function handleLarkEvent(req, res, rawBody) {
     return res.status(403).json({ error: 'verification token 不匹配' })
   }
 
-  // 飞书要求 3 秒内响应，先回 200 再处理（AI 未命中缓存时会比较慢）
-  res.status(200).json({ code: 0 })
-
+  // Vercel 在响应发出后会冻结实例，写在这里之后的事都不会执行，
+  // 所以必须先把消息处理完（含发消息）再回 200；
+  // 飞书 3 秒收不到响应会重推同一条事件，用 message_id 去重防止重复回复。
   if (header.event_type === 'im.message.receive_v1') {
+    const messageId = data.event?.message?.message_id || ''
+    if (messageId && (await alreadyHandled(messageId))) {
+      return res.status(200).json({ code: 0 })
+    }
     await onMessage(cfg, data.event).catch((e) => console.error('[lark-bot] 处理消息异常：', e))
   }
+
+  return res.status(200).json({ code: 0 })
 }
