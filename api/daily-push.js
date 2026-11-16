@@ -901,8 +901,15 @@ export default async function handler(req, res) {
     const timestamp = Math.floor(Date.now() / 1000)
     const signPart = feishuSign(cfg.secret, timestamp)
 
+    // 每天先发一条分割线，把当天这组推送和前一天隔开
+    const divider = {
+      msg_type: 'text',
+      content: { text: `━━━━━━━━ ${dateText} 每日推荐 ━━━━━━━━` },
+    }
+    const payloads = [divider, ...cards]
+
     let sent = 0
-    for (const payload of cards) {
+    for (const payload of payloads) {
       const r = await fetch(cfg.webhook, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
@@ -911,7 +918,7 @@ export default async function handler(req, res) {
       const data = await r.json().catch(() => ({}))
       if (!r.ok || (data.code ?? 0) !== 0) {
         const error = `飞书推送失败：${data.msg || `HTTP ${r.status}`}${data.code ? `（${data.code}）` : ''}`
-        await savePushStatus({ at: new Date().toISOString(), ok: false, error, sent, total: cards.length, fresh })
+        await savePushStatus({ at: new Date().toISOString(), ok: false, error, sent, total: payloads.length, fresh })
         return res.status(502).json({ error })
       }
       sent++
@@ -950,7 +957,7 @@ export default async function handler(req, res) {
         fc3d: fc3dAi ? { source: fc3dAi.source, cached: fc3dAi.cached, picks: fc3dAi.picks } : null,
         pl3: pl3Ai ? { source: pl3Ai.source, cached: pl3Ai.cached, picks: pl3Ai.picks } : null,
       },
-      messages: cards.length,
+      messages: payloads.length,
       hits,
       fresh,
       skipped,
