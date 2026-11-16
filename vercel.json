@@ -8,11 +8,5 @@
       "path": "/api/daily-push",
       "schedule": "0 6 * * *"
     }
-  ],
-  "rewrites": [
-    {
-      "source": "/api/lark-bot",
-      "destination": "/api/lark-proxy"
-    }
   ]
 }

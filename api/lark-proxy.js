@@ -3,9 +3,8 @@
 // 浏览器把凭证和记录 POST 到这里，由服务端转发飞书 OpenAPI（绕过浏览器 CORS）。
 // 凭证只在本次请求内使用，不落库、不记录。
 import { applyCors } from './_lib/http.js'
-import { handleLarkEvent } from './_lib/larkBot.js'
 
-// 机器人事件回调也走这个函数：现算 AI 要十几秒，默认 10 秒会被杀掉导致「@了没反应」
+// 多维表格批量同步可能较慢，放宽函数超时
 export const config = { maxDuration: 60 }
 
 const LARK_API = 'https://open.feishu.cn/open-apis'
@@ -108,11 +107,7 @@ export default async function handler(req, res) {
       body = null
     }
   }
-  // 机器人事件订阅回调也走这个路由（Vercel 免费版函数数量有限，不再单开文件）
-  if (body && (body.type === 'url_verification' || body.encrypt || body?.header?.event_type)) {
-    return handleLarkEvent(req, res, body)
-  }
-
+  // 机器人事件订阅回调已下线（自建应用机器人不再使用），这里只做多维表格同步
   const { cfg, records } = body || {}
   const { appId, appSecret, appToken, tableId } = cfg || {}
   if (!appId || !appSecret || !appToken || !tableId) {
