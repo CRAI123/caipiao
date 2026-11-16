@@ -1,5 +1,5 @@
 // ============================================================
-// 体彩排列五 数据抓取 —— 通过本站 /api/pl5-proxy 转发体彩开奖接口
+// 体彩排列五 数据抓取 —— 通过本站 /api/pl3-proxy?game=pl5 转发体彩开奖接口
 // 接口特点：每期 lotteryDrawResult 返回 "0 3 2 4 3" 五位数字（万千百十个）
 // ============================================================
 
@@ -34,7 +34,7 @@ function fromOfficialList(list) {
  * 返回 { id, date, num: [万, 千, 百, 十, 个] } 数组，最新在前。
  */
 export async function fetchPl5Draws(count = 100) {
-  const url = `${isTauri() ? WEB_BASE : ''}/api/pl5-proxy?count=${count}`
+  const url = `${isTauri() ? WEB_BASE : ''}/api/pl3-proxy?game=pl5&count=${count}`
 
   let res
   try {

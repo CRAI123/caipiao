@@ -15,28 +15,16 @@ const cwlProxy = {
       Referer: 'https://www.cwl.gov.cn/ygkj/wqkjgg/kl8/',
     },
   },
-  // 体彩排列三：dev/preview 直连体彩官网接口（线上走 /api/pl3-proxy serverless function）
+  // 体彩排列三 / 排列五：dev/preview 直连体彩官网接口（线上走 /api/pl3-proxy serverless function）
+  // game=pl5 时取排列五（gameNo=350133），否则取排列三（gameNo=35）
   '/api/pl3-proxy': {
     target: 'https://webapi.sporttery.cn',
     changeOrigin: true,
     rewrite: (path) => {
       const u = new URL(path, 'http://x')
       const count = Math.min(200, Math.max(10, Number(u.searchParams.get('count')) || 100))
-      return `/gateway/lottery/getHistoryPageListV1.qry?gameNo=35&provinceId=0&pageSize=${count}&isVerify=1&pageNo=1`
-    },
-    headers: {
-      Referer: 'https://static.sporttery.cn/',
-      Accept: 'application/json, text/plain, */*',
-    },
-  },
-  // 体彩排列五：dev/preview 直连体彩官网接口（线上走 /api/pl5-proxy serverless function）
-  '/api/pl5-proxy': {
-    target: 'https://webapi.sporttery.cn',
-    changeOrigin: true,
-    rewrite: (path) => {
-      const u = new URL(path, 'http://x')
-      const count = Math.min(200, Math.max(10, Number(u.searchParams.get('count')) || 100))
-      return `/gateway/lottery/getHistoryPageListV1.qry?gameNo=350133&provinceId=0&pageSize=${count}&isVerify=1&pageNo=1`
+      const gameNo = u.searchParams.get('game') === 'pl5' ? '350133' : '35'
+      return `/gateway/lottery/getHistoryPageListV1.qry?gameNo=${gameNo}&provinceId=0&pageSize=${count}&isVerify=1&pageNo=1`
     },
     headers: {
       Referer: 'https://static.sporttery.cn/',
