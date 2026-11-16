@@ -2,6 +2,7 @@
 // 排列三额外提供 Pro 档位（9 专家 + Hedge 自适应权重 + 结构约束）
 import React, { useMemo, useState } from 'react'
 import { Card, Note, StatCard } from './common.jsx'
+import AiHitLog from './AiHitLog.jsx'
 import * as fc3dEngine from '../lib/fc3dPredict.js'
 
 const PERIODS = [20, 30, 50, 80]
@@ -48,6 +49,7 @@ function Digit({ d, hit }) {
 }
 
 export default function FC3DAudit({
+  game = 'fc3d',
   draws,
   engine = fc3dEngine,
   defaultPeriods = 30,
@@ -388,6 +390,8 @@ export default function FC3DAudit({
           </table>
         </div>
       </Card>
+
+      <AiHitLog game={game} draws={draws} digitCount={digitCount} />
 
       <Note tone="warn">
         如果推算结果和机选的理论值几乎重合——这正是预期结果。历史频次、遗漏、形态都不携带对未来的信息，

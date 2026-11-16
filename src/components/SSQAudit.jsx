@@ -2,6 +2,7 @@
 import React, { useMemo, useState } from 'react'
 import { Card, StatCard, Note, Ball } from './common.jsx'
 import { walkForwardAuditSSQ, PRIZE_TABLE } from '../lib/ssqPredict.js'
+import AiHitLog from './AiHitLog.jsx'
 
 const PERIODS = [30, 50, 80, 120]
 
@@ -173,6 +174,8 @@ export default function SSQAudit({ draws }) {
           </table>
         </div>
       </Card>
+
+      <AiHitLog kind="ssq" game="ssq" draws={draws} />
 
       <Note tone="warn">
         回测结果与理论基准的差异属于随机波动。样本越小波动越大，

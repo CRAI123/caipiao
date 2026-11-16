@@ -562,6 +562,7 @@ export default function App() {
             {digitTab === 'audit' &&
               (lottery === 'pl5' ? (
                 <FC3DAudit
+                  game="pl5"
                   draws={digitDraws}
                   engine={pl5Engine}
                   defaultPeriods={20}
@@ -578,6 +579,7 @@ export default function App() {
                 />
               ) : lottery === 'pl3' ? (
                 <FC3DAudit
+                  game="pl3"
                   draws={digitDraws}
                   engine={pl3Engine}
                   defaultPeriods={80}
@@ -586,7 +588,7 @@ export default function App() {
                   proLabel="排列三 v3 Pro"
                 />
               ) : (
-                <FC3DAudit draws={digitDraws} />
+                <FC3DAudit game="fc3d" draws={digitDraws} />
               ))}
             {digitTab === 'terms' && <FC3DTerms label={digitLabel} digitCount={digitCount} />}
             {digitTab === 'data' && (

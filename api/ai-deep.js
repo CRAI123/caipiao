@@ -262,6 +262,34 @@ export default async function handler(req, res) {
   try {
     const { draws = [], play = 10, action = 'run', deviceId = '', drawId } = req.body || {}
 
+    // ---- 只读：历史 AI 终选记录（用于方法体检的命中对照） ----
+    if (action === 'audit') {
+      const k = Math.min(10, Math.max(1, Number(play) || 10))
+      let sql
+      try {
+        sql = getSql()
+        await ensureTables(sql)
+      } catch (e) {
+        return res.status(200).json({ ok: false, runs: [], error: `共享数据库不可用：${e.message}` })
+      }
+      const rows = await sql`
+        SELECT draw_id, result, updated_at
+        FROM kl8_ai_deep_runs
+        WHERE play = ${k} AND status = 'done' AND result IS NOT NULL
+        ORDER BY draw_id DESC
+        LIMIT 30`
+      return res.status(200).json({
+        ok: true,
+        runs: rows.map((r) => ({
+          drawId: Number(r.draw_id),
+          final: Array.isArray(r.result.final10) ? r.result.final10 : [],
+          algo: Array.isArray(r.result.algo10) ? r.result.algo10 : [],
+          at: r.result.at || r.updated_at || null,
+          schema: r.result.schema || 0,
+        })),
+      })
+    }
+
     // ---- 只读：取本期已生成的解析（所有人可见） ----
     if (action === 'peek') {
       const id = Number(drawId)

@@ -3,6 +3,7 @@
 import React, { useMemo, useState } from 'react'
 import { Card, Ball, DrawBalls, Note, StatCard, BarList, pad2, ballKindByRange } from './common.jsx'
 import { walkForwardAudit, hyperHits, PLAY_LABEL, BALL_MAX, PER_DRAW } from '../lib/stats.js'
+import AiHitLog from './AiHitLog.jsx'
 
 const PLAYS = [3, 5, 7, 10]
 
@@ -211,6 +212,8 @@ export default function Audit({ draws }) {
           Copula/互信息函数，异常被捕获后静默跳过，这两项高级能力实际未生效。
         </Note>
       </Card>
+
+      <AiHitLog kind="kl8" draws={draws} play={play} />
 
       <Note tone="warn">
         如果评分法和机选的理论值几乎重合——这正是预期结果。历史频次、遗漏、形态都不携带对未来的信息，

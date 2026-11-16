@@ -73,6 +73,14 @@ export async function auditDigitAi({ game }) {
   })
 }
 
+/** 快乐8 历史 AI 终选（用于方法体检命中对照） */
+export async function auditKl8Ai({ play = 10 } = {}) {
+  return apiFetch('/api/ai-deep', {
+    method: 'POST',
+    body: JSON.stringify({ action: 'audit', play }),
+  })
+}
+
 /** 快乐8 加奖 / 派奖监控（抓取福彩官网通知公告） */
 export async function fetchPromo() {
   return apiFetch('/api/kl8-promo')

@@ -1046,3 +1046,72 @@ export function crowdingScore(red, blue, prevDraw = null) {
   const shareFactor = +(score / 50).toFixed(2)
   return { score, band: band.label, tone: band.tone, shareFactor, ...base }
 }
+
+// ============================================================
+// AI 终选（双色球）：算法先给出候选池（红球 12 / 蓝球 4），
+// AI 只在池内终选 6 红 + 1 蓝。开奖相互独立，一等奖概率恒为
+// 1/17721088，算法与 AI 都不改变这个数字。
+// ============================================================
+
+/** 算法候选池：红球评分前 12（按分数降序，服务端补号时优先取前面的）、蓝球前 4 */
+export function ssqCandidatePool(pred, limits = { red: 12, blue: 4 }) {
+  if (!pred) return null
+  const red = [...(pred.ranked || [])]
+    .sort((a, b) => b.score - a.score)
+    .slice(0, limits.red)
+    .map((x) => x.n)
+  const blue = (pred.blues || []).slice(0, limits.blue).map((b) => b.n)
+  if (red.length < RED_PICK || !blue.length) return null
+  return { kind: 'ssq', red, blue }
+}
+
+const SSQ_SYSTEM_PROMPT = `你是「研彩室」的双色球数据分析助手，服务对象是研究者本人。你只做两件事：解读最近 100 期的历史统计，以及结合底层算法的评分在候选池内终选号码并说明依据。
+
+【铁律】
+1. 只能使用用户消息里给出的统计数据，不得编造统计数字，不得引入外部资料。
+2. 双色球每期从 33 个红球中抽 6 个、16 个蓝球中抽 1 个，单注一等奖概率恒为 1/17721088，与你选什么号无关。开奖相互独立，不存在可利用的「规律」「趋势」「必出号」。
+3. 你不得声称任何组合更容易中奖，不得承诺命中，不得鼓励加大投入或追号。
+4. 选号流程固定为「算法先选、AI 终选」：程序已按频率/遗漏/冷热对红球、蓝球打分并给出候选池（红球 12 个、蓝球 4 个）。你必须只在这个候选池内终选 6 个红球 + 1 个蓝球，不得自创池外号码。
+5. 必须明确说明：以下是历史分布下的参考组合，不改变中奖概率，彩票期望回报为负。
+
+【输出结构】（简体中文，纯文本，不要 Markdown 表格）
+1. 结构概览：近 10 期和值/跨度、三区四区分布与断区率
+2. 冷热观察：红球评分前列与蓝球的遗漏情况，一句话即可，不做预测
+3. 组合参考：给出 6 个红球 + 1 个蓝球，逐号写明「算法排名 + 结构依据」
+4. 风险提示：预算上限与理性购彩提醒`
+
+/** 组装双色球 AI 终选的 messages（纯函数，便于离线校验） */
+export function buildSsqMessages(draws, pred, label = '双色球') {
+  if (!pred || !Array.isArray(draws) || !draws.length) return null
+  const latest = draws[0]
+  const a = analyzeDraw(latest)
+  const p10 = patternSummary(draws, 10)
+  const pool = ssqCandidatePool(pred)
+  const redDesc = (pred.ranked || [])
+    .slice(0, 12)
+    .map((x) => `${x.n}(分${x.score},遗${x.omit},${x.level})`)
+    .join(' ')
+  const blueDesc = (pred.blues || [])
+    .slice(0, 4)
+    .map((b) => `${b.n}(分${b.score},遗${b.curOmit})`)
+    .join(' ')
+  const lines = [
+    `${label} 近 ${draws.length} 期统计（程序计算，真实数据）：`,
+    `- 最新一期：第 ${latest.id} 期，红球 ${latest.red.join(' ')}，蓝球 ${latest.blue}`,
+    `- 近 10 期红球和值均值 ${p10.sumAvg}（理论 102）、跨度均值 ${p10.spanAvg}`,
+    `- 近 10 期三区平均出号 ${p10.zone3.avg.join(' / ')}，断区率 ${p10.zone3.breakRate}%`,
+    `- 近 10 期四区平均出号 ${p10.zone4.avg.join(' / ')}，断区率 ${p10.zone4.breakRate}%`,
+    `- 最新一期结构：和值 ${a.sum}、跨度 ${a.span}、三区 ${a.zone3.join(':')}、AC ${a.ac}`,
+    '',
+    '底层算法评分（频率/冷热/遗漏/结构加权），已从 33 红、16 蓝里选出候选池：',
+    `- 红球评分前 12：${redDesc}`,
+    `- 蓝球评分前 4：${blueDesc}`,
+    `- 候选池红球 ${pool?.red.length || 0} 个、蓝球 ${pool?.blue.length || 0} 个`,
+    '',
+    '请按系统提示词的结构输出：从上面的候选池里终选 6 个红球 + 1 个蓝球，不得自创池外号码。',
+  ]
+  return [
+    { role: 'system', content: SSQ_SYSTEM_PROMPT },
+    { role: 'user', content: lines.join('\n') },
+  ]
+}

@@ -1,5 +1,5 @@
 // 双色球 下期推荐 —— 按《吴明揭秘双色球》十步研判流程输出 6 红 + 1 蓝
-import React, { useMemo, useState } from 'react'
+import React, { useEffect, useMemo, useRef, useState } from 'react'
 import { Card, StatCard, Note, Ball, SsqDraw } from './common.jsx'
 import {
   predictSSQ,
@@ -10,11 +10,286 @@ import {
   heatRatio,
   repeatNeighbor,
   patternSummary,
+  ssqCandidatePool,
+  buildSsqMessages,
   ZONE3,
   ZONE4,
 } from '../lib/ssqPredict.js'
+import { runDigitAi, peekDigitAi } from '../lib/api.js'
+import { getDeviceId } from '../lib/device.js'
+import { fakeAnalyze, sharedWaitSeconds } from '../lib/aiWait.js'
 
 const LEVEL_CLASS = { 热: 'hot', 温: 'warm', 冷: 'cold' }
+
+const sleep = (ms) => new Promise((r) => setTimeout(r, ms))
+
+// 与服务端 api/digit-ai.js 的 roundsSsq 一一对应
+const AI_ROUNDS = [
+  '第 1/4 轮 · 结构解读',
+  '第 2/4 轮 · 反向质询',
+  '第 3/4 轮 · 算法候选终选',
+  '第 4/4 轮 · 终审校验',
+]
+const AI_SCHEMA = 5
+
+// AI 终选：算法候选池 → AI 只在池内终选 6 红 + 1 蓝，结果全站共享、每期一条记录
+function SsqAiCard({ draws, pred }) {
+  const [busy, setBusy] = useState(false)
+  const [meta, setMeta] = useState(null)
+  const [error, setError] = useState('')
+  const [phase, setPhase] = useState('')
+  const [pct, setPct] = useState(0)
+  const [elapsed, setElapsed] = useState(0)
+  const [stale, setStale] = useState(false)
+  const busyRef = useRef(false)
+  const latestId = Number(draws?.[0]?.id) || 0
+  const pool = useMemo(() => ssqCandidatePool(pred), [pred])
+  const picks = meta?.picks || null
+
+  // 切页回来时从共享缓存恢复本期解析
+  useEffect(() => {
+    if (!latestId) return undefined
+    let alive = true
+    peekDigitAi({ game: 'ssq', drawId: latestId })
+      .then((p) => {
+        if (!alive || busyRef.current || !p?.exists) return
+        if (p.status === 'done' && p.result?.text) {
+          setMeta({
+            model: p.result.model,
+            at: p.result.at,
+            cached: true,
+            owner: p.owner,
+            picks: p.result.picks,
+            finalSource: p.result.finalSource,
+            finalNote: p.result.finalNote,
+          })
+          if (p.result.schema !== AI_SCHEMA) setStale(true)
+        }
+      })
+      .catch(() => {})
+    return () => {
+      alive = false
+    }
+  }, [latestId])
+
+  const onTick = ({ elapsed: s, pct: p, stage }) => {
+    setElapsed(s)
+    setPct(p)
+    setPhase(stage)
+  }
+
+  const applyResult = (r, owner) => {
+    setMeta({
+      model: r.model,
+      at: r.at,
+      cached: true,
+      owner,
+      picks: r.picks,
+      finalSource: r.finalSource,
+      finalNote: r.finalNote,
+    })
+    if (r.schema !== AI_SCHEMA) setStale(true)
+    setPct(100)
+    setPhase('分析完成')
+  }
+
+  const run = async () => {
+    if (busy) return
+    busyRef.current = true
+    setBusy(true)
+    setError('')
+    setMeta(null)
+    setStale(false)
+    setPhase(AI_ROUNDS[0])
+    setPct(4)
+    setElapsed(0)
+    try {
+      // 本期已有共享结果：走一遍模拟进度，让后来的人也有分析体验
+      const cached = await peekDigitAi({ game: 'ssq', drawId: latestId }).catch(() => null)
+      if (cached?.exists && cached.status === 'done' && cached.result?.text) {
+        await fakeAnalyze({ seconds: sharedWaitSeconds(), stages: AI_ROUNDS, onTick })
+        applyResult(cached.result, cached.owner)
+        return
+      }
+      fakeAnalyze({ seconds: 45, stages: AI_ROUNDS, onTick })
+      const r = await runDigitAi({
+        game: 'ssq',
+        drawId: latestId,
+        label: '双色球',
+        messages: buildSsqMessages(draws, pred),
+        algo: pool,
+        deviceId: getDeviceId()?.id || '',
+      })
+      setMeta({
+        model: r.model,
+        at: r.at,
+        cached: Boolean(r.cached),
+        owner: r.owner,
+        picks: r.picks,
+        finalSource: r.finalSource,
+        finalNote: r.finalNote,
+      })
+      if (r.schema !== AI_SCHEMA) setStale(true)
+      setPct(100)
+      setPhase('分析完成')
+    } catch (e) {
+      // 别人正在分析：等待并轮询共享结果
+      if (e?.status === 409) {
+        setPhase('本期已有用户在分析，等待结果同步…')
+        let done = false
+        for (let i = 0; i < 12 && !done; i++) {
+          await sleep(5000)
+          const p = await peekDigitAi({ game: 'ssq', drawId: latestId }).catch(() => null)
+          if (p?.exists && p.status === 'done' && p.result?.text) {
+            applyResult(p.result, p.owner)
+            done = true
+          } else {
+            setPct(Math.min(96, 20 + i * 7))
+          }
+        }
+        if (!done) {
+          setError('本期分析仍在进行中，请过一会儿再点一次查看')
+          setPhase('')
+        }
+      } else {
+        setError(e?.message || String(e))
+        setPhase('')
+      }
+    } finally {
+      busyRef.current = false
+      setBusy(false)
+    }
+  }
+
+  return (
+    <Card title="AI 终选 · 双色球" tag={meta?.cached ? '全站共享' : 'AI'}>
+      <div className="predict-sub" style={{ marginTop: 2, marginBottom: 4 }}>
+        流程与 3D / 排列三 / 快乐8 一致：<b>算法先选 → AI 终选</b>。底层算法对 33 个红球、16 个蓝球打分，
+        给出红球 12 个 + 蓝球 4 个候选池，AI 只在池内终选 6 红 + 1 蓝。
+      </div>
+      <div className="predict-row">
+        <div className="predict-label">算法候选 · 红球</div>
+        <div className="predict-value">
+          {(pool?.red || []).map((n) => (
+            <span key={n} className="draw-num">
+              {String(n).padStart(2, '0')}
+            </span>
+          ))}
+          <span className="muted small">{(pool?.red || []).length} 个</span>
+        </div>
+      </div>
+      <div className="predict-row">
+        <div className="predict-label">算法候选 · 蓝球</div>
+        <div className="predict-value">
+          {(pool?.blue || []).map((n) => (
+            <span key={n} className="draw-num">
+              {String(n).padStart(2, '0')}
+            </span>
+          ))}
+          <span className="muted small">{(pool?.blue || []).length} 个</span>
+        </div>
+      </div>
+
+      <div className="toolbar" style={{ marginTop: 8 }}>
+        <button className="tab-btn active" onClick={run} disabled={busy}>
+          {busy ? 'AI 终选中…' : picks ? '重新终选' : '🔬 AI 深度分析（算法候选 → AI 终选）'}
+        </button>
+        <span className="muted small">
+          4 轮 AI 分析（结构解读 → 反向质询 → 算法候选终选 → 终审校验），结果全站共享；每期保留最后一次，可在「方法体检」查看是否命中
+        </span>
+      </div>
+
+      {busy && (
+        <div style={{ marginTop: 14 }}>
+          <div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: 6 }}>
+            <span className="small" style={{ fontWeight: 700 }}>
+              {phase || AI_ROUNDS[0]}
+            </span>
+            <span className="mono small muted">已用 {elapsed} 秒</span>
+          </div>
+          <div style={{ height: 10, borderRadius: 5, background: '#ece6da', overflow: 'hidden' }}>
+            <div
+              style={{
+                height: '100%',
+                width: `${pct}%`,
+                background: 'linear-gradient(90deg, #c23a2b, #e0a24a)',
+                transition: 'width 0.4s ease',
+              }}
+            />
+          </div>
+          <div style={{ display: 'flex', gap: 8, marginTop: 8, flexWrap: 'wrap' }}>
+            {AI_ROUNDS.map((s, i) => {
+              const current = phase === s
+              const passed = pct >= Math.round(((i + 1) / AI_ROUNDS.length) * 100) - 1
+              return (
+                <span
+                  key={s}
+                  className="chip"
+                  style={{
+                    opacity: current || passed ? 1 : 0.45,
+                    borderColor: current ? '#c23a2b' : undefined,
+                    color: current ? '#c23a2b' : undefined,
+                  }}
+                >
+                  <i>
+                    {passed ? '✓ ' : ''}
+                    {s}
+                  </i>
+                </span>
+              )
+            })}
+          </div>
+          <div className="mono small muted" style={{ marginTop: 6 }}>
+            {pct}%
+          </div>
+        </div>
+      )}
+
+      {error && <div className="note note-warn">{error}</div>}
+
+      {picks && (
+        <div style={{ marginTop: 10 }}>
+          <div className="predict-sub" style={{ marginTop: 0, marginBottom: 6 }}>
+            {meta?.finalSource === 'algo' ? '⚠️ AI 终选未通过校验，已回退到算法候选' : '✅ 算法候选 → AI 终选已完成'}
+            {meta?.finalNote ? ` · ${meta.finalNote}` : ''}
+            {meta?.model ? ` · ${meta.model}` : ''}
+            {meta?.at ? ` · ${new Date(meta.at).toLocaleString('zh-CN')}` : ''}
+            {meta?.cached ? ' · 本期共享解析' : ' · 本期首位生成'}
+          </div>
+          <div className="ssq-predict-balls">
+            {(picks.red || []).map((n) => (
+              <Ball key={n} n={n} kind="red" size="lg" />
+            ))}
+            <span className="ssq-divider ssq-divider-lg" aria-hidden="true" />
+            {picks.blue != null ? <Ball n={picks.blue} kind="blue" size="lg" /> : <span className="muted">蓝球缺失</span>}
+          </div>
+          {(() => {
+            const list = (picks.red || []).filter((n) => picks.reasons?.[n])
+            if (!list.length) return null
+            return (
+              <ul className="small muted" style={{ margin: '8px 0 0 18px', lineHeight: 1.8 }}>
+                {list.map((n) => (
+                  <li key={n}>
+                    <b className="mono">{String(n).padStart(2, '0')}</b> {String(picks.reasons[n])}
+                  </li>
+                ))}
+              </ul>
+            )
+          })()}
+          <div className="note note-info" style={{ marginTop: 10 }}>
+            <b>纯算法基准</b>（不加 AI，直接取算法主推）：红球 {(pred.red || []).join(' ')} · 蓝球 {pred.blue}
+            <br />
+            与 AI 定稿重合：红球 {(picks.red || []).filter((n) => pred.red.includes(n)).length}/6 · 蓝球{' '}
+            {picks.blue === pred.blue ? '一致' : '不同'}
+          </div>
+          {picks.summary && <div className="note note-info" style={{ marginTop: 8 }}>{String(picks.summary)}</div>}
+          {picks.risk && <div className="note note-warn" style={{ marginTop: 8 }}>{String(picks.risk)}</div>}
+          {stale && <Note tone="warn">这一版解析来自旧结构，可点「重新终选」生成新的记录。</Note>}
+        </div>
+      )}
+    </Card>
+  )
+}
 
 export default function SSQPredict({ draws }) {
   const [cover, setCover] = useState(6)
@@ -153,6 +428,8 @@ export default function SSQPredict({ draws }) {
           </div>
         </div>
       </Card>
+
+      <SsqAiCard draws={draws} pred={pred} />
 
       <div className="stat-grid">
         <StatCard

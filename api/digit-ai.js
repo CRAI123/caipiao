@@ -13,7 +13,7 @@ import { getSql, ensureTables } from './_lib/neon.js'
 
 export const config = { maxDuration: 60 }
 
-const GAMES = { fc3d: '福彩3D', pl3: '排列三', pl5: '排列五' }
+const GAMES = { fc3d: '福彩3D', pl3: '排列三', pl5: '排列五', ssq: '双色球' }
 // 每位彩种的号码位数：排列三 3 位（直选/组选），排列五 5 位（只有直选）
 const POS_LEN = { fc3d: 3, pl3: 3, pl5: 5 }
 const maskId = (id) => (id ? `尾号${String(id).slice(-4)}` : '匿名设备')
@@ -25,6 +25,46 @@ function jsonHint(len) {
   return len === 5
     ? '{"straight":["01234","56789"],"reasons":{"01234":"一句话理由"},"summary":"80 字内","risk":"一句风险提示"}'
     : '{"straight":["123","456","789"],"group":["135","246"],"group3":["112"],"reasons":{"123":"一句话理由"},"summary":"80 字内","risk":"一句风险提示"}'
+}
+
+/** 双色球的 JSON 输出格式说明 */
+function jsonHintSsq() {
+  return '{"red":[1,7,12,18,25,30],"blue":7,"reasons":{"1":"一句话理由"},"summary":"80 字内","risk":"一句风险提示"}'
+}
+
+/** 双色球四轮：红球 6 个 + 蓝球 1 个，只能在算法候选池内终选 */
+function roundsSsq() {
+  return [
+    {
+      name: '结构解读',
+      prompt:
+        '第一轮：只依据前面给出的统计数据，解读本期红球/蓝球结构（区间分布、冷热、遗漏、和值、奇偶、连号与重号倾向）。不要编造数据，不要承诺中奖。控制在 300 字内。',
+      temperature: 0.5,
+    },
+    {
+      name: '反向质询',
+      prompt:
+        '第二轮：请以严格质疑者的身份审查第一轮结论——指出其中过度解读、样本不足或自相矛盾之处，并给出更保守的表述。控制在 250 字内。',
+      temperature: 0.3,
+    },
+    {
+      name: '算法候选终选',
+      prompt:
+        '第三轮：只能从上面给出的算法候选池里终选本期号码——红球 6 个、蓝球 1 个，不得自创池外号码。' +
+        '只输出一个 JSON 对象，不要解释文字、不要代码块围栏。格式：' +
+        jsonHintSsq() +
+        '。red 必须正好 6 个（1-33，升序、不重复），blue 必须正好 1 个（1-16），且都来自候选池；reasons 的键必须是上面出现过的红球号码。',
+      temperature: 0.3,
+    },
+    {
+      name: '终审校验',
+      prompt:
+        '第四轮：终审校验上一轮结果——逐个检查：红球是否正好 6 个、在 1-33 之间且不重复；蓝球是否在 1-16 之间；是否都在算法候选池内。' +
+        '有不合规的立即替换为候选池里的次优号。只输出最终 JSON（格式同上一轮），不要解释文字、不要代码块围栏。' +
+        'risk 必须写明「一等奖概率 1/17721088 不变」。',
+      temperature: 0.2,
+    },
+  ]
 }
 
 // 四轮真实分析：结构解读 → 反向质询 → 算法候选终选 → 终审校验（每轮单独调用一次大模型）
@@ -121,6 +161,34 @@ function normalizePicks(raw, digitCount = 3) {
   }
 }
 
+/** 规整双色球号码：红球 1-33 去重升序，蓝球 1-16 */
+function normalizePicksSsq(raw) {
+  if (!raw || typeof raw !== 'object') return null
+  const reds = []
+  for (const x of Array.isArray(raw.red) ? raw.red : []) {
+    const n = Number(String(x).replace(/\D/g, ''))
+    if (Number.isInteger(n) && n >= 1 && n <= 33 && !reds.includes(n)) reds.push(n)
+  }
+  const red = reds.sort((a, b) => a - b).slice(0, 8)
+  const bn = Number(String(raw.blue ?? '').replace(/\D/g, ''))
+  const blue = Number.isInteger(bn) && bn >= 1 && bn <= 16 ? bn : null
+  if (red.length < 6) return null
+  const reasons = {}
+  if (raw.reasons && typeof raw.reasons === 'object') {
+    for (const [k, v] of Object.entries(raw.reasons)) {
+      const n = Number(String(k).replace(/\D/g, ''))
+      if (Number.isInteger(n) && n >= 1 && n <= 33) reasons[n] = String(v).slice(0, 120)
+    }
+  }
+  return {
+    red,
+    blue,
+    reasons,
+    summary: String(raw.summary || '').slice(0, 400),
+    risk: String(raw.risk || '').slice(0, 200),
+  }
+}
+
 /** 校验客户端传来的 messages，避免把接口当任意代理用 */
 function sanitizeMessages(messages) {
   if (!Array.isArray(messages) || messages.length === 0 || messages.length > 4) return null
@@ -136,9 +204,21 @@ function sanitizeMessages(messages) {
   return out
 }
 
-/** 校验客户端传来的算法候选池（只接受 digitCount 位号码数组） */
+/** 校验客户端传来的算法候选池（双色球：红球 1-33 / 蓝球 1-16；数字彩：digitCount 位号码数组） */
 function sanitizeAlgo(raw, digitCount = 3) {
   if (!raw || typeof raw !== 'object') return null
+  if (raw.kind === 'ssq') {
+    const ints = (arr, min, max, cap) =>
+      (Array.isArray(arr) ? arr : [])
+        .map((x) => Number(String(x).replace(/\D/g, '')))
+        .filter((n) => Number.isInteger(n) && n >= min && n <= max)
+        .filter((n, i, a) => a.indexOf(n) === i)
+        .slice(0, cap)
+    const red = ints(raw.red, 1, 33, 20)
+    const blue = ints(raw.blue, 1, 16, 8)
+    if (red.length < 6 || blue.length < 1) return null
+    return { kind: 'ssq', red, blue }
+  }
   const take = (arr, max) =>
     (Array.isArray(arr) ? arr : [])
       .map((x) => String(x).replace(/\D/g, '').slice(0, digitCount))
@@ -156,6 +236,13 @@ function sanitizeAlgo(raw, digitCount = 3) {
 /** 终选号码必须落在算法候选池内 */
 function restrictToPool(picks, algo) {
   if (!picks || !algo) return picks
+  if (algo.kind === 'ssq') {
+    return {
+      ...picks,
+      red: (picks.red || []).filter((n) => algo.red.includes(n)),
+      blue: algo.blue.includes(picks.blue) ? picks.blue : null,
+    }
+  }
   return {
     ...picks,
     straight: (picks.straight || []).filter((n) => algo.straight.includes(n)),
@@ -175,10 +262,12 @@ export default async function handler(req, res) {
     const id = Number(drawId)
     if (!GAMES[game]) return res.status(400).json({ error: '未知彩种' })
     const digitCount = POS_LEN[game] || 3
+    const isSsq = game === 'ssq'
     const needStraight = digitCount === 3 ? 3 : 5
     const needGroup = digitCount === 3 ? 2 : 0
     const needGroup3 = digitCount === 3 ? 1 : 0
-    const ROUNDS = roundsFor(digitCount)
+    const needRed = 6
+    const ROUNDS = isSsq ? roundsSsq() : roundsFor(digitCount)
 
     try {
       sqlRef = getSql()
@@ -287,7 +376,8 @@ export default async function handler(req, res) {
       conv.push(ask, { role: 'assistant', content: text })
     }
     const algoPool = sanitizeAlgo(algo, digitCount)
-    let picks = normalizePicks(extractJson(rounds[rounds.length - 1].text), digitCount)
+    const parsePicks = (raw) => (isSsq ? normalizePicksSsq(raw) : normalizePicks(raw, digitCount))
+    let picks = parsePicks(extractJson(rounds[rounds.length - 1].text))
     // 模型偶发拒答或格式漂移：用干净的上下文再要一次纯 JSON
     if (!picks) {
       try {
@@ -298,53 +388,75 @@ export default async function handler(req, res) {
             msgs[1],
             {
               role: 'user',
-              content:
-                '只输出一个 JSON 对象，不要任何解释文字、不要代码块围栏。格式：' +
-                jsonHint(digitCount) +
-                '。' +
-                (digitCount === 3
-                  ? 'straight 3 注直选、group 2 注组六（三个数字互不相同）、group3 1 注组三（两同一异）；'
-                  : 'straight 必须正好 5 注直选（每注 5 位数字）；') +
-                '只能从上面给出的算法候选池里选，不得自创池外号码。',
+              content: isSsq
+                ? '只输出一个 JSON 对象，不要任何解释文字、不要代码块围栏。格式：' +
+                  jsonHintSsq() +
+                  '。red 必须正好 6 个（1-33，升序、不重复），blue 必须正好 1 个（1-16）。' +
+                  '只能从上面给出的算法候选池里选，不得自创池外号码。'
+                : '只输出一个 JSON 对象，不要任何解释文字、不要代码块围栏。格式：' +
+                  jsonHint(digitCount) +
+                  '。' +
+                  (digitCount === 3
+                    ? 'straight 3 注直选、group 2 注组六（三个数字互不相同）、group3 1 注组三（两同一异）；'
+                    : 'straight 必须正好 5 注直选（每注 5 位数字）；') +
+                  '只能从上面给出的算法候选池里选，不得自创池外号码。',
             },
           ],
           { maxTokens: 700, temperature: 0.2 },
         )
-        picks = normalizePicks(extractJson(retry), digitCount)
+        picks = parsePicks(extractJson(retry))
       } catch {
         /* 重试失败按无号码处理 */
       }
     }
 
-    // 终选收敛：AI 结果必须正好 3/2/1 且都在算法候选池内，否则回退算法前三
+    // 终选收敛：AI 结果必须正好满足注数/个数且都在算法候选池内，否则回退算法候选
     let finalSource = 'ai'
     let finalNote = ''
     if (algoPool) {
       const restricted = restrictToPool(picks, algoPool)
-      if (!restricted) {
-        picks = {
-          straight: algoPool.straight.slice(0, needStraight),
-          group: algoPool.group.slice(0, needGroup),
-          group3: algoPool.group3.slice(0, needGroup3),
-          reasons: {},
-          summary: '',
-          risk:
-            digitCount === 5
-              ? '每注直选 1/100000 不变。'
-              : '每注直选 1/1000、组六约 1/167、组三约 1/333 不变。',
+      const fillTo = (have, poolList, need) => {
+        const out = [...have]
+        for (const n of poolList) {
+          if (out.length >= need) break
+          if (!out.includes(n)) out.push(n)
         }
+        return out.slice(0, need)
+      }
+      if (!restricted) {
+        picks = isSsq
+          ? {
+              red: algoPool.red.slice(0, needRed),
+              blue: algoPool.blue[0],
+              reasons: {},
+              summary: '',
+              risk: '一等奖概率 1/17721088 不变。',
+            }
+          : {
+              straight: algoPool.straight.slice(0, needStraight),
+              group: algoPool.group.slice(0, needGroup),
+              group3: algoPool.group3.slice(0, needGroup3),
+              reasons: {},
+              summary: '',
+              risk:
+                digitCount === 5
+                  ? '每注直选 1/100000 不变。'
+                  : '每注直选 1/1000、组六约 1/167、组三约 1/333 不变。',
+            }
         finalSource = 'algo'
-        finalNote = 'AI 终选解析失败，已回退到算法前三'
+        finalNote = 'AI 终选解析失败，已回退到算法候选'
+      } else if (isSsq) {
+        const inPool = Math.min(restricted.red.length, needRed)
+        const blueOk = restricted.blue != null
+        const red = fillTo(restricted.red, algoPool.red, needRed)
+        const blue = blueOk ? restricted.blue : algoPool.blue[0]
+        picks = { ...restricted, red, blue }
+        const missing = needRed - inPool + (blueOk ? 0 : 1)
+        finalNote = missing
+          ? `AI 终选 ${inPool + (blueOk ? 1 : 0)}/${needRed + 1} 个号码在池内，其余 ${missing} 个由算法候选补齐`
+          : 'AI 已在算法候选池内完成终选'
       } else {
         // AI 的池内终选保留，缺的注数用算法候选池顺序补齐，避免整份作废
-        const fillTo = (have, poolList, need) => {
-          const out = [...have]
-          for (const n of poolList) {
-            if (out.length >= need) break
-            if (!out.includes(n)) out.push(n)
-          }
-          return out.slice(0, need)
-        }
         const straight = fillTo(restricted.straight, algoPool.straight, needStraight)
         const group = fillTo(restricted.group, algoPool.group, needGroup)
         const group3 = fillTo(restricted.group3, algoPool.group3, needGroup3)
@@ -373,11 +485,13 @@ export default async function handler(req, res) {
       finalSource,
       finalNote,
       algoPicks: algoPool
-        ? {
-            straight: algoPool.straight.slice(0, needStraight),
-            group: algoPool.group.slice(0, needGroup),
-            group3: algoPool.group3.slice(0, needGroup3),
-          }
+        ? algoPool.kind === 'ssq'
+          ? { kind: 'ssq', red: algoPool.red.slice(0, 12), blue: algoPool.blue.slice(0, 4) }
+          : {
+              straight: algoPool.straight.slice(0, needStraight),
+              group: algoPool.group.slice(0, needGroup),
+              group3: algoPool.group3.slice(0, needGroup3),
+            }
         : null,
       schema: SCHEMA,
       rounds,
