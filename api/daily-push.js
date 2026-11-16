@@ -64,8 +64,8 @@ function freshness(latest, maxAgeDays = 1) {
 
 const staleWarning = (f, name) =>
   f && f.state === 'stale'
-    ? line(
-        `<font color='red'>⚠️ ${name}数据源还没更新：最新只到 ${f.date}（第 ${f.id} 期），本期推荐基于旧数据，稍后可手动重发</font>`,
+    ? md(
+        `<font color=red>⚠️ ${name}数据源还没更新：最新只到 ${f.date}（第 ${f.id} 期），本期推荐基于旧数据，稍后可手动重发</font>`,
       )
     : null
 
@@ -564,94 +564,123 @@ async function digitAiPrev(sql, game, draws, prev) {
   return rec && Number(rec.targetId) === Number(latest.id) && rec.ai?.straight?.length ? rec.ai : null
 }
 
-const DISCLAIMER = {
-  tag: 'note',
-  elements: [
-    {
-      tag: 'plain_text',
-      content: '开奖为独立随机事件，以上号码仅为历史数据整理，不构成任何投注建议。',
-    },
-  ],
+const grey = (s) => `<font color=grey>${s}</font>`
+
+/** 卡片 2.0 的富文本组件 */
+const md = (content) => ({ tag: 'markdown', content })
+
+const HR = { tag: 'hr' }
+
+const DISCLAIMER = md(grey('开奖为独立随机事件，以上号码仅为历史数据整理，不构成任何投注建议。'))
+
+/**
+ * 卡片 2.0 原生表格组件。
+ * cols: [[列 key, 列名], ...]；rows: [[第 1 列值, 第 2 列值, ...], ...]
+ */
+function table(cols, rows, { pageSize = 10, freezeFirst = false } = {}) {
+  return {
+    tag: 'table',
+    page_size: pageSize,
+    row_height: 'low',
+    freeze_first_column: freezeFirst,
+    columns: cols.map(([name, displayName]) => ({
+      name,
+      display_name: displayName,
+      data_type: 'text',
+      width: 'auto',
+    })),
+    rows: rows.map((cells) =>
+      Object.fromEntries(cols.map(([name], i) => [name, String(cells[i] ?? '')])),
+    ),
+  }
 }
 
-const red = (s) => `<font color='red'>${s}</font>`
-const grey = (s) => `<font color='grey'>${s}</font>`
-
-/** 飞书卡片：一个彩种一张卡 */
+/** 飞书卡片（JSON 2.0）：一个彩种一张卡，号码用原生表格组件呈现 */
 function buildCard({ title, template, blocks, warning }) {
   return {
     msg_type: 'interactive',
     card: {
-      config: { wide_screen_mode: true },
+      schema: '2.0',
+      // 撑满聊天窗口，表格列宽才有意义；summary 是会话列表里的预览文案
+      config: { width_mode: 'fill', summary: { content: title } },
       header: { template, title: { tag: 'plain_text', content: title } },
-      elements: [...(warning ? [warning, HR] : []), ...blocks, { tag: 'hr' }, DISCLAIMER],
+      body: { elements: [...(warning ? [warning, HR] : []), ...blocks.filter(Boolean), HR, DISCLAIMER] },
     },
   }
 }
 
-/** 一行文本（手机端按单列渲染最稳，不要用 fields 并排） */
-const line = (content) => ({ tag: 'div', text: { tag: 'lark_md', content } })
-
-const HR = { tag: 'hr' }
-
 function buildKl8Card(kl8, ai, title, warning, hits = null) {
-  const picks = kl8.picks.map(pad).join(' ')
   const firstPrize = Math.round(comb(BALL_MAX, 10) / comb(20, 10))
+  const picks = kl8.picks.map(pad)
+  // 十列号码表格：一行一种来源，横向对比算法十码 / AI 终审 / 三注参考
+  const cols = [['item', '项目'], ...picks.map((_, i) => [`n${i + 1}`, String(i + 1)])]
+  const rows = [
+    ['算法十码', ...picks],
+    ...(ai ? [['AI 终审', ...ai.ten.map(pad)]] : []),
+    ...kl8.groups.map((g, i) => [`三注${'①②③'[i]}`, ...g.map(pad)]),
+  ]
   return buildCard({
     title,
     template: 'blue',
     warning,
     blocks: [
-      line(`上期开奖：${grey(kl8.latest.nums.map(pad).join(' '))}`),
-      line(`**概率** 每号每期恒 25%；选十中十约 1/${firstPrize.toLocaleString('en-US')}（单注 2 元）`),
+      md(`上期开奖：${grey(kl8.latest.nums.map(pad).join(' '))}`),
+      md(`**概率** 每号每期恒 25%；选十中十约 1/${firstPrize.toLocaleString('en-US')}（单注 2 元）`),
       hits
-        ? line(
+        ? md(
             `**上期命中**（第 ${hits.drawId} 期）：算法十码 ${hits.algo}/10 · AI 终审 ${
               hits.ai === null || hits.ai === undefined ? '无记录' : `${hits.ai}/10`
             }`,
           )
-        : line(grey('上期命中：暂无上期推荐记录，下次推送起显示')),
+        : md(grey('上期命中：暂无上期推荐记录，下次推送起显示')),
       HR,
-      line(`**算法推荐十码**（v7 多窗口加权评分）\n<font color='red'>${picks}</font>`),
-      HR,
-      line('**三注参考**'),
-      line(`① ${kl8.groups[0].map(pad).join(' ')}`),
-      line(`② ${kl8.groups[1].map(pad).join(' ')}`),
-      line(`③ ${kl8.groups[2].map(pad).join(' ')}`),
+      table(cols, rows, { freezeFirst: true }),
       ...kl8AiLines(ai),
     ],
   })
 }
 
-/** 快乐8 AI 终审区块：算法 20 码 → AI 终选 10 码 */
+/** 快乐8 AI 终审区块：算法 20 码 → AI 终选 10 码（10 码本身在上面的表格里） */
 function kl8AiLines(ai) {
   if (!ai) return []
   const tag = ai.source === 'ai' ? 'AI 终审' : '算法融合'
   const head = ai.source === 'ai' ? '算法 20 码 → AI 终审' : 'AI 未通过，已回退算法融合'
   return [
     HR,
-    line(`**${tag} · 第 ${ai.nextId} 期 10 码**（${head}）\n<font color='red'>${ai.ten.map(pad).join(' ')}</font>`),
-    line(grey(`算法候选 20 码：${ai.wide.map(pad).join(' ')}`)),
-    ai.summary ? line(grey(ai.summary)) : null,
-    line(grey(`${ai.note || ''}${ai.cached ? ' · 复用站内已生成结果' : ''}`)),
+    md(`**${tag}**（${head} · 第 ${ai.nextId} 期）`),
+    md(grey(`算法候选 20 码：${ai.wide.map(pad).join(' ')}`)),
+    ai.summary ? md(grey(ai.summary)) : null,
+    md(grey(`${ai.note || ''}${ai.cached ? ' · 复用站内已生成结果' : ''}`)),
   ].filter(Boolean)
 }
 
-/** 3D / 排列三 AI 终选区块（精简版）：算法池规模 + AI 终选 3 + 2 + 1 */
+/** 3D / 排列三 AI 终选区块：算法池规模 + AI 终选 3 + 2 + 1 表格 */
 function digitAiLines(ai) {
   if (!ai) return []
-  const p = ai.picks
   const tag = ai.source === 'ai' ? 'AI 终选' : '算法前三（AI 未过校验）'
   return [
     HR,
-    line(grey(`算法池 ${ai.pool.straight.length}/${ai.pool.group.length}/${ai.pool.group3.length} 注（直选/组六/组三）`)),
-    line(`**${tag}** 直选 ${red(p.straight.join(' '))}`),
-    line(`组六 ${red(p.group.join(' '))}　组三 ${red(p.group3.join(' '))}`),
-    ai.cached ? line(grey('复用站内已生成结果')) : null,
+    md(
+      `**${tag}** · 算法池 ${ai.pool.straight.length}/${ai.pool.group.length}/${ai.pool.group3.length} 注（直选/组六/组三）`,
+    ),
+    table(
+      [['play', '玩法'], ['n1', '第1注'], ['n2', '第2注'], ['n3', '第3注']],
+      [
+        ['直选', ...(ai.picks.straight || []).slice(0, 3)],
+        ['组六', ...(ai.picks.group || []).slice(0, 2)],
+        ['组三', ...(ai.picks.group3 || []).slice(0, 1)],
+      ],
+      { pageSize: 3 },
+    ),
+    ai.cached ? md(grey('复用站内已生成结果')) : null,
   ].filter(Boolean)
 }
 
-function buildFc3dCard(digit, title, { template = 'red', extra = [], warning = null, ai = null, hits = null } = {}) {
+function buildFc3dCard(
+  digit,
+  title,
+  { template = 'red', extraRows = [], warning = null, ai = null, hits = null } = {},
+) {
   const p = digit.pred
   const [bai, shi, ge] = p.posTop
   const bets = bai.length * shi.length * ge.length
@@ -660,21 +689,31 @@ function buildFc3dCard(digit, title, { template = 'red', extra = [], warning = n
     template,
     warning,
     blocks: [
-      line(`上期开奖：${grey(digit.latest.num.join(' '))}`),
-      line(grey('概率 直选 1/1000 · 组六 1/167 · 组三 1/333')),
+      md(`上期开奖：${grey(digit.latest.num.join(' '))}`),
+      md(grey('概率 直选 1/1000 · 组六 1/167 · 组三 1/333')),
       hits
-        ? line(
+        ? md(
             `**上期命中**（第 ${hits.drawId} 期，直选/组六/组三）：算法 ${hits.algo.straight}/${hits.algo.group}/${hits.algo.group3}　AI ${
               hits.ai ? `${hits.ai.straight}/${hits.ai.group}/${hits.ai.group3}` : '无记录'
             }`,
           )
-        : line(grey('上期命中：暂无上期推荐记录，下次推送起显示')),
+        : md(grey('上期命中：暂无上期推荐记录，下次推送起显示')),
       HR,
-      line(`**直选复式** ${bets} 注 · ${bets * 2} 元`),
-      line(`百 ${red(bai.join('/'))}　十 ${red(shi.join('/'))}　个 ${red(ge.join('/'))}`),
-      line(`**双胆** ${red(p.dan.join('/'))}　拖码 ${p.tuo.join('/')}`),
-      line(`和值 ${p.sumRange[0]}~${p.sumRange[1]}　跨度 ${p.spanRange[0]}~${p.spanRange[1]}　杀号 ${grey(p.kill.map((k) => k.digit).join('/'))}`),
-      ...extra,
+      table(
+        [['item', '项目'], ['value', '号码']],
+        [
+          ['直选复式', `${bets} 注 · ${bets * 2} 元`],
+          ['百位', bai.join(' ')],
+          ['十位', shi.join(' ')],
+          ['个位', ge.join(' ')],
+          ['双胆', p.dan.join(' ')],
+          ['拖码', p.tuo.join(' ')],
+          ['和值', `${p.sumRange[0]}~${p.sumRange[1]}`],
+          ['跨度', `${p.spanRange[0]}~${p.spanRange[1]}`],
+          ['杀号', p.kill.map((k) => k.digit).join(' ')],
+          ...extraRows,
+        ],
+      ),
       ...digitAiLines(ai),
     ],
   })
@@ -683,16 +722,15 @@ function buildFc3dCard(digit, title, { template = 'red', extra = [], warning = n
 /** 排列三卡：在 3D 版式上补一行覆盖档位（命中与成本） */
 function buildPl3Card(pl3, title, warning, ai = null, hits = null) {
   const tiers = pl3.pred.tiers || []
-  const extra = tiers.length
+  const extraRows = tiers.length
     ? [
-        line(
-          `**覆盖档位** ${tiers
-            .map((t) => `${t.cover}码 ${t.expectHits}个/${t.groupCost}元`)
-            .join('　')}`,
-        ),
+        [
+          '覆盖档位',
+          tiers.map((t) => `${t.cover}码 ${t.expectHits}个/${t.groupCost}元`).join('；'),
+        ],
       ]
     : []
-  return buildFc3dCard(pl3, title, { template: 'orange', extra, warning, ai, hits })
+  return buildFc3dCard(pl3, title, { template: 'orange', extraRows, warning, ai, hits })
 }
 
 /** 双色球卡：绿头，6 红 + 1 蓝 + 结构 + 覆盖档位 */
@@ -706,32 +744,30 @@ function buildSsqCard(ssq, title, warning, hits = null) {
     template: 'green',
     warning,
     blocks: [
-      line(
+      md(
         `上期开奖：红 ${grey(ssq.latest.red.map(pad).join(' '))}　蓝 ${grey(pad(ssq.latest.blue))}`,
       ),
-      line(`**概率** 一等奖 1/${firstPrize.toLocaleString('en-US')}（红球 6/33 + 蓝球 1/16）`),
+      md(`**概率** 一等奖 1/${firstPrize.toLocaleString('en-US')}（红球 6/33 + 蓝球 1/16）`),
       hits
-        ? line(
+        ? md(
             `**上期命中**（第 ${hits.drawId} 期）：红球 ${hits.red}/6 · 蓝球 ${hits.blue ? '命中' : '未中'}`,
           )
-        : line(grey('上期命中：暂无上期推荐记录，下次推送起显示')),
+        : md(grey('上期命中：暂无上期推荐记录，下次推送起显示')),
       HR,
-      line(`**推荐 6 红**\n<font color='red'>${p.red.map(pad).join(' ')}</font>`),
-      line(
-        `**推荐蓝球** <font color='red'>${pad(p.blue)}</font>　备选 ${p.blueBackups
-          .map(pad)
-          .join(' ')}`,
-      ),
-      HR,
-      line(
-        `和值 ${s.sum}　跨度 ${s.span}　三区 ${s.zone3.join(':')}　大小 ${s.big}:${s.small}　奇偶 ${s.odd}:${s.even}`,
-      ),
-      line(`杀红 ${grey(p.kill.map(pad).join(' '))}`),
-      HR,
-      line(
-        `**覆盖档位** ${tiers
-          .map((t) => `${t.cover}码 ${t.expectHits}个/${t.cost}元`)
-          .join('　')}`,
+      table(
+        [['item', '项目'], ['value', '号码']],
+        [
+          ['推荐 6 红', p.red.map(pad).join(' ')],
+          ['推荐蓝球', pad(p.blue)],
+          ['蓝球备选', p.blueBackups.map(pad).join(' ')],
+          ['和值 / 跨度', `${s.sum} / ${s.span}`],
+          ['三区', s.zone3.join(':')],
+          ['大小 / 奇偶', `${s.big}:${s.small} / ${s.odd}:${s.even}`],
+          ['杀红', p.kill.map(pad).join(' ')],
+          ...(tiers.length
+            ? [['覆盖档位', tiers.map((t) => `${t.cover}码 ${t.expectHits}个/${t.cost}元`).join('；')]]
+            : []),
+        ],
       ),
     ],
   })
