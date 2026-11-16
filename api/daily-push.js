@@ -209,8 +209,40 @@ function balancedFromPool(pool, n) {
   return picked.sort((a, b) => a - b)
 }
 
+/**
+ * 把推送端算出的 3D / 排列三 AI 终选写回全站共享表（与网站同一份）。
+ * 只覆盖「推送端自己写的」或「结构版本落后」的记录；
+ * 站内用户正在分析（status='running'）或已是当前版本的真实结果时跳过，绝不覆盖。
+ */
+async function persistDigitRun(sql, payload) {
+  if (!sql) return
+  try {
+    const result = JSON.stringify(payload)
+    const rows = await sql`
+      INSERT INTO digit_ai_runs (game, draw_id, status, device_id, result, updated_at)
+      VALUES (${payload.game}, ${payload.drawId}, 'done', 'daily-push', ${result}::jsonb, now())
+      ON CONFLICT (game, draw_id) DO UPDATE
+      SET status = 'done',
+          device_id = 'daily-push',
+          result = EXCLUDED.result,
+          updated_at = now()
+      WHERE digit_ai_runs.device_id = 'daily-push'
+         OR (
+              digit_ai_runs.status = 'done'
+              AND COALESCE((digit_ai_runs.result->>'schema')::int, 0) < ${payload.schema}
+            )
+      RETURNING draw_id`
+    if (!rows.length) {
+      console.log(`[daily-push] ${payload.game} ${payload.drawId} 已有更新的站内 AI 结果，跳过回写`)
+    }
+  } catch (e) {
+    console.error('[daily-push] 回写 AI 结果失败：', e.message)
+  }
+}
+
 /** 3D / 排列三：算法候选池 + AI 终选（3 + 2 + 1），失败回退算法前三 */
 async function buildDigitAi({ game, label, draws, sql, llm }) {
+  const started = Date.now()
   const drawId = Number(draws?.[0]?.id)
   const summary = summarizeDigit(draws, 100)
   if (!drawId || !summary) return null
@@ -290,14 +322,41 @@ async function buildDigitAi({ game, label, draws, sql, llm }) {
     const group = fillTo(gAi, pool.group, 2)
     const group3 = fillTo(g3Ai, pool.group3, 1)
     const missing = 3 - sAi.length + (2 - gAi.length) + (1 - g3Ai.length)
+    const note = missing
+      ? `AI 终选 ${6 - missing}/6 注在池内，其余 ${missing} 注由算法候选补齐`
+      : 'AI 已在算法候选池内完成终选'
+    const summaryText = String(obj?.summary || '').slice(0, 200)
+    const risk = '每注直选 1/1000、组六约 1/167、组三约 1/333 不变。'
+    // 写回共享表：14:00 推送算一次，站内用户当天直接复用
+    await persistDigitRun(sql, {
+      game,
+      drawId,
+      label,
+      text: [summaryText, risk].filter(Boolean).join('\n\n'),
+      picks: {
+        straight,
+        group,
+        group3,
+        reasons: obj?.reasons && typeof obj.reasons === 'object' ? obj.reasons : {},
+        summary: summaryText,
+        risk,
+      },
+      finalSource: 'ai',
+      finalNote: note,
+      algoPicks: algoTop,
+      schema: DIGIT_SCHEMA,
+      rounds: [{ name: '算法候选终选', text: summaryText || '推送端单轮终选（池内 3 + 2 + 1）' }],
+      roundCount: 1,
+      model: llm.llmModel,
+      at: new Date().toISOString(),
+      elapsedMs: Date.now() - started,
+    })
     return {
       ...base,
       picks: { straight, group, group3 },
       source: 'ai',
-      note: missing
-        ? `AI 终选 ${6 - missing}/6 注在池内，其余 ${missing} 注由算法候选补齐`
-        : 'AI 已在算法候选池内完成终选',
-      summary: String(obj?.summary || '').slice(0, 200),
+      note,
+      summary: summaryText,
     }
   } catch (e) {
     return { ...base, note: `AI 终选失败（${e.message || e}），已回退算法前三` }
