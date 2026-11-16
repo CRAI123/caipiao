@@ -313,7 +313,6 @@ async function buildKl8Ai({ draws, built, sql, llm }) {
       if (r && r.schema === KL8_SCHEMA && Array.isArray(r.final10) && r.final10.length === 10) {
         return {
           ...base,
-          wide: Array.isArray(r.final10Detail) && r.final10Detail.length ? r.final10Detail.map((x) => x.n) : wide,
           ten: [...r.final10].sort((a, b) => a - b),
           source: r.final10Source === 'algo' ? 'algo' : 'ai',
           note: r.final10Note || '',
