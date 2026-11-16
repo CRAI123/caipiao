@@ -3,6 +3,7 @@
 // 浏览器把凭证和记录 POST 到这里，由服务端转发飞书 OpenAPI（绕过浏览器 CORS）。
 // 凭证只在本次请求内使用，不落库、不记录。
 import { applyCors } from './_lib/http.js'
+import { handleLarkEvent } from './_lib/larkBot.js'
 
 const LARK_API = 'https://open.feishu.cn/open-apis'
 
@@ -104,6 +105,11 @@ export default async function handler(req, res) {
       body = null
     }
   }
+  // 机器人事件订阅回调也走这个路由（Vercel 免费版函数数量有限，不再单开文件）
+  if (body && (body.type === 'url_verification' || body.encrypt || body?.header?.event_type)) {
+    return handleLarkEvent(req, res, body)
+  }
+
   const { cfg, records } = body || {}
   const { appId, appSecret, appToken, tableId } = cfg || {}
   if (!appId || !appSecret || !appToken || !tableId) {

@@ -1,5 +1,5 @@
 // ============================================================
-// POST /api/lark-bot —— 飞书自建应用机器人回调
+// 飞书自建应用机器人回调（由 api/lark-proxy.js 转交，不单独占一个函数位）
 //
 // 用途：群里 @机器人 或单聊直接发关键词，机器人回当期算法 + AI 推荐卡片。
 //   快乐8 / 3D / 排列三 / 双色球 / 全部 / 命中 / 帮助
@@ -10,10 +10,8 @@
 // 也支持环境变量 LARK_APP_ID / LARK_APP_SECRET / LARK_VERIFICATION_TOKEN / LARK_ENCRYPT_KEY
 // ============================================================
 import crypto from 'node:crypto'
-import { getSql, readConfig, writeConfig } from './_lib/neon.js'
-import dailyPush from './daily-push.js'
-
-export const config = { maxDuration: 60 }
+import { getSql, readConfig, writeConfig } from './neon.js'
+import dailyPush from '../daily-push.js'
 
 const CONFIG_KEY = 'lark_bot_config'
 const API = 'https://open.feishu.cn/open-apis'
@@ -210,14 +208,15 @@ async function onMessage(cfg, event) {
   }
 }
 
-export default async function handler(req, res) {
+/** 处理飞书事件回调：URL 校验、加密解密、消息路由（由 lark-proxy 调用） */
+export async function handleLarkEvent(req, res, rawBody) {
   if (req.method === 'OPTIONS') {
     res.status(204).end()
     return
   }
   if (req.method !== 'POST') return res.status(405).json({ error: '只接受 POST' })
 
-  let body = req.body
+  let body = rawBody
   if (typeof body === 'string') {
     try {
       body = JSON.parse(body)
