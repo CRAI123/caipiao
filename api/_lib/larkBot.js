@@ -36,6 +36,7 @@ async function loadConfig() {
     token: cfg.token || process.env.LARK_VERIFICATION_TOKEN || '',
     encryptKey: cfg.encryptKey || process.env.LARK_ENCRYPT_KEY || '',
     openIds: Array.isArray(cfg.openIds) ? cfg.openIds : [],
+    chatIds: Array.isArray(cfg.chatIds) ? cfg.chatIds : [],
   }
 }
 
@@ -136,13 +137,18 @@ function hitText(hits) {
   return lines.length ? `上期命中\n${lines.join('\n')}` : '暂时没有上期命中记录'
 }
 
-/** 记住发过消息的用户，后续可做每日私聊推送 */
-async function rememberOpenId(cfg, openId) {
-  if (!openId || !process.env.DATABASE_URL || cfg.openIds.includes(openId)) return
+/** 记住发过消息的用户和会话，后续可做定向群发 / 私聊推送 */
+async function rememberIds(cfg, openId, chatId) {
+  if (!process.env.DATABASE_URL) return
+  const openIds = [...cfg.openIds]
+  const chatIds = [...(cfg.chatIds || [])]
+  if (openId && !openIds.includes(openId)) openIds.push(openId)
+  if (chatId && !chatIds.includes(chatId)) chatIds.push(chatId)
+  if (openIds.length === cfg.openIds.length && chatIds.length === (cfg.chatIds || []).length) return
   try {
-    await writeConfig(getSql(), CONFIG_KEY, JSON.stringify({ ...cfg, openIds: [...cfg.openIds, openId] }))
+    await writeConfig(getSql(), CONFIG_KEY, JSON.stringify({ ...cfg, openIds, chatIds }))
   } catch (e) {
-    console.error('[lark-bot] 记录 open_id 失败：', e.message)
+    console.error('[lark-bot] 记录 open_id / chat_id 失败：', e.message)
   }
 }
 
@@ -156,7 +162,7 @@ async function onMessage(cfg, event) {
   seen.add(msg.message_id)
   if (seen.size > 300) seen.clear()
 
-  await rememberOpenId(cfg, event?.sender?.sender_id?.open_id)
+  await rememberIds(cfg, event?.sender?.sender_id?.open_id, msg.chat_id)
 
   let text = ''
   try {
