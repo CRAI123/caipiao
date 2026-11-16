@@ -50,10 +50,10 @@ export async function peekDeep({ drawId, play = 10 }) {
 }
 
 /** 3D / 排列三 AI 解读：每期每彩种仅首位用户触发，结果全站共享 */
-export async function runDigitAi({ game, drawId, label, messages, deviceId = '' }) {
+export async function runDigitAi({ game, drawId, label, messages, algo, deviceId = '' }) {
   return apiFetch('/api/digit-ai', {
     method: 'POST',
-    body: JSON.stringify({ action: 'run', game, drawId, label, messages, deviceId }),
+    body: JSON.stringify({ action: 'run', game, drawId, label, messages, algo, deviceId }),
   })
 }
 

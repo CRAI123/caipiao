@@ -1,5 +1,5 @@
-// 近 100 期统计 + 算法全盘评分 + AI 复核（福彩3D / 排列三共用）
-// 算法先对直选 1000 注 / 组六 120 组 / 组三 90 组打分排序，AI 复核算法前列后定稿。
+// 近 100 期统计 + 算法候选池 + AI 终选（福彩3D / 排列三共用）
+// 与快乐8一致：算法先对直选 1000 注 / 组六 120 组 / 组三 90 组打分选池，AI 只在池内终选，失败回退算法前三。
 //
 // 点击分析时：
 //   1. 先强制拉取最新开奖数据（不用页面上的旧数据）
@@ -7,7 +7,7 @@
 //   3. 本期解析全站共享：首位用户真实调用，后续用户读取并模拟一段分析等待
 import React, { useEffect, useMemo, useRef, useState } from 'react'
 import { Card, Note, Dialog } from './common.jsx'
-import { summarizeDigit, buildDigitMessages, rankDigitCandidates } from '../lib/digitAi.js'
+import { summarizeDigit, buildDigitMessages, rankDigitCandidates, digitCandidatePool } from '../lib/digitAi.js'
 import { runDigitAi, peekDigitAi, auditDigitAi } from '../lib/api.js'
 import { getDeviceId } from '../lib/device.js'
 import { fakeAnalyze, sharedWaitSeconds } from '../lib/aiWait.js'
@@ -18,16 +18,16 @@ const sleep = (ms) => new Promise((r) => setTimeout(r, ms))
 const ROUND_STAGES = [
   '第 1/4 轮 · 结构解读',
   '第 2/4 轮 · 反向质询',
-  '第 3/4 轮 · 算法候选复核',
-  '第 4/4 轮 · 定稿合成',
+  '第 3/4 轮 · 算法候选终选',
+  '第 4/4 轮 · 终审校验',
 ]
 
-// 结果结构版本：与服务端 SCHEMA 对齐，旧版（候选池 / 纯自由推演）会重算
-const SCHEMA = 4
+// 结果结构版本：与服务端 SCHEMA 对齐，旧版（候选池 / 自由推演 / 复核制）会重算
+const SCHEMA = 5
 
 const digitsOf = (s) => String(s).replace(/\D/g, '').slice(0, 3)
 
-/** 校验 AI 给的号码格式：3 位、去重、组六三不同、组三两同；不再限制在候选池内 */
+/** 校验 AI 给的号码格式：3 位、去重、组六三不同、组三两同（是否在候选池内由服务端校验） */
 function sanitizePicks(raw) {
   if (!raw) return null
   const take = (arr, max, kinds) =>
@@ -77,6 +77,8 @@ function DigitAIInner({ draws, label = '福彩3D', game = 'fc3d', onRefreshData 
         rounds: r.rounds,
         roundCount: r.roundCount || r.rounds?.length || 4,
         picks: r.picks,
+        finalSource: r.finalSource,
+        finalNote: r.finalNote,
       })
       if (r.schema !== SCHEMA) setStale(true)
     }
@@ -135,6 +137,8 @@ function DigitAIInner({ draws, label = '福彩3D', game = 'fc3d', onRefreshData 
     }),
     [algo],
   )
+  // 算法候选池：直选 12 注 / 组六 8 组 / 组三 5 组，AI 只能在这里终选
+  const pool = useMemo(() => (summary ? digitCandidatePool(summary) : null), [summary])
   /** 号码在全盘算法里的名次（1 起），找不到返回 null */
   const algoRank = (kind, num) => {
     const i = (algo?.[kind] || []).findIndex((x) => x.num === num)
@@ -264,6 +268,8 @@ function DigitAIInner({ draws, label = '福彩3D', game = 'fc3d', onRefreshData 
           rounds: cached.result.rounds,
           roundCount: cached.result.roundCount || cached.result.rounds?.length || 4,
           picks: cached.result.picks,
+          finalSource: cached.result.finalSource,
+          finalNote: cached.result.finalNote,
         })
         setPct(100)
         setPhase('分析完成')
@@ -279,6 +285,7 @@ function DigitAIInner({ draws, label = '福彩3D', game = 'fc3d', onRefreshData 
           drawId,
           label,
           messages: buildDigitMessages(freshSummary, label),
+          algo: digitCandidatePool(freshSummary),
           deviceId: getDeviceId()?.id || '',
         })
         setText(r.text)
@@ -290,6 +297,8 @@ function DigitAIInner({ draws, label = '福彩3D', game = 'fc3d', onRefreshData 
           rounds: r.rounds,
           roundCount: r.roundCount || r.rounds?.length || 4,
           picks: r.picks,
+          finalSource: r.finalSource,
+          finalNote: r.finalNote,
         })
         if (r.schema !== SCHEMA) setStale(true)
         setPct(100)
@@ -311,6 +320,8 @@ function DigitAIInner({ draws, label = '福彩3D', game = 'fc3d', onRefreshData 
                 rounds: p.result.rounds,
                 roundCount: p.result.roundCount || p.result.rounds?.length || 4,
                 picks: p.result.picks,
+                finalSource: p.result.finalSource,
+                finalNote: p.result.finalNote,
               })
               if (p.result.schema !== SCHEMA) setStale(true)
               setPct(100)
@@ -335,50 +346,49 @@ function DigitAIInner({ draws, label = '福彩3D', game = 'fc3d', onRefreshData 
   return (
     <Card title={`AI 推算下期号码 · ${label}`} tag={meta?.cached ? '全站共享' : 'AI'}>
       <div className="predict-sub" style={{ marginTop: 2, marginBottom: 4 }}>
-        底层算法先按频率 / 遗漏 / 同位转移对<b>全盘打分排序</b>（直选 1000 注、组六 120 组、组三 90 组），
-        AI 再逐条复核算法前列、保留或否决，最后定稿。下面三行只是其中 top 的统计参考。
+        流程和快乐8一致：<b>算法先选 → AI 终选</b>。底层算法按频率 / 遗漏 / 同位转移对全盘打分
+        （直选 1000 注、组六 120 组、组三 90 组），选出候选池后由 AI 只在池内终选 3 注直选 + 2 注组六 + 1 注组三。
       </div>
       <div className="predict-row">
-        <div className="predict-label">统计参考 · 直选</div>
+        <div className="predict-label">算法候选 · 直选</div>
         <div className="predict-value">
-          {(summary.candidates?.straight || []).map((x) => (
-            <span key={x.join('')} className="draw-num">
-              {x.join('')}
+          {(pool?.straight || []).map((n) => (
+            <span key={n} className="draw-num">
+              {n}
             </span>
           ))}
-          <span className="muted small">按频率/遗漏/转移加权排序</span>
+          <span className="muted small">{(pool?.straight || []).length} 注</span>
         </div>
       </div>
       <div className="predict-row">
-        <div className="predict-label">统计参考 · 组选</div>
+        <div className="predict-label">算法候选 · 组六</div>
         <div className="predict-value">
-          {(summary.candidates?.group || []).map((x) => (
-            <span key={`g${x.join('')}`} className="draw-num">
-              {x.join('')}
+          {(pool?.group || []).map((n) => (
+            <span key={n} className="draw-num">
+              {n}
             </span>
           ))}
-          <span className="muted small">组六，不含重号</span>
+          <span className="muted small">{(pool?.group || []).length} 组</span>
         </div>
       </div>
       <div className="predict-row">
-        <div className="predict-label">统计参考 · 组三</div>
+        <div className="predict-label">算法候选 · 组三</div>
         <div className="predict-value">
-          {(summary.candidates?.group3 || []).map((x) => (
-            <span key={`g3${x.join('')}`} className="draw-num">
-              {x[0]}
-              {x[0]}
-              {x[1]}
+          {(pool?.group3 || []).map((n) => (
+            <span key={n} className="draw-num">
+              {n}
             </span>
           ))}
+          <span className="muted small">{(pool?.group3 || []).length} 组</span>
         </div>
       </div>
 
       <div className="toolbar" style={{ marginTop: 8 }}>
         <button className="tab-btn active" onClick={() => run()} disabled={busy}>
-          {busy ? 'AI 推算中…' : picks ? '重新推算' : 'AI 推算本期号码'}
+          {busy ? 'AI 终选中…' : picks ? '重新终选' : '🔬 AI 深度分析（算法候选 → AI 终选）'}
         </button>
         <span className="muted small">
-          4 轮 AI 分析（结构解读 → 反向质询 → 算法候选复核 → 定稿），结果全站共享；点击会先同步最新开奖数据
+          4 轮 AI 分析（结构解读 → 反向质询 → 算法候选终选 → 终审校验），结果全站共享；点击会先同步最新开奖数据
         </span>
       </div>
 
@@ -458,6 +468,12 @@ function DigitAIInner({ draws, label = '福彩3D', game = 'fc3d', onRefreshData 
 
           {picks && (
             <div style={{ marginTop: 8 }}>
+              <div className="predict-sub" style={{ marginTop: 0, marginBottom: 6 }}>
+                {meta?.finalSource === 'algo'
+                  ? '⚠️ AI 终选未通过校验，已回退到算法前三'
+                  : '✅ 算法候选 → AI 终选已完成'}
+                {meta?.finalNote ? ` · ${meta.finalNote}` : ''}
+              </div>
               {[
                 ['直选推荐', picks.straight, '每注 1/1000', 'straight'],
                 ['组选推荐 · 组六', picks.group, '约 1/167', 'group'],
@@ -565,8 +581,9 @@ function DigitAIInner({ draws, label = '福彩3D', game = 'fc3d', onRefreshData 
       )}
 
       <Note>
-        推荐号码由「底层算法全盘评分 + AI 复核」共同产生：算法先给直选 1000 注、组六 120 组、组三 90 组排序，
-        AI 复核后保留或否决，再定稿。每注直选中奖概率恒为 1/1000、组六约 1/167、组三约 1/333，选号方式不会改变这一点。
+        流程与快乐8一致：底层算法对全盘打分（直选 1000 注、组六 120 组、组三 90 组），
+        选出直选 12 注 / 组六 8 组 / 组三 5 组的候选池，AI 只在池内终选 3 + 2 + 1 注并给出理由；终选不合规自动回退算法前三。
+        概率仍是直选 1/1000、组六 1/167、组三 1/333，选号方式不会改变这一点。
       </Note>
 
       <Dialog open={Boolean(tip)} text={tip} onClose={() => setTip('')} />

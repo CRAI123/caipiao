@@ -161,13 +161,27 @@ export function rankDigitCandidates(summary) {
   return { straight, group, group3 }
 }
 
+/**
+ * 算法候选池：从全盘评分里取前列，交给 AI 终选
+ * 默认直选 12 注、组六 8 组、组三 5 组（终选需要 3 / 2 / 1，留出否决空间）
+ */
+export function digitCandidatePool(summary, limits = { straight: 12, group: 8, group3: 5 }) {
+  const rank = rankDigitCandidates(summary)
+  if (!rank) return { straight: [], group: [], group3: [] }
+  return {
+    straight: rank.straight.slice(0, limits.straight).map((x) => x.num),
+    group: rank.group.slice(0, limits.group).map((x) => x.num),
+    group3: rank.group3.slice(0, limits.group3).map((x) => x.num),
+  }
+}
+
 const SYSTEM_PROMPT = `你是「研彩室」的彩票数据分析助手，服务对象是研究者本人。你只做两件事：解读最近 100 期的历史统计，以及结合底层算法的全盘评分复核号码并说明依据。
 
 【铁律】
 1. 只能使用用户消息里给出的统计数据，不得编造统计数字，不得引入外部资料。
 2. 福彩3D/排列三每期从 000–999 等概率产生，直选单注中奖概率恒为 1/1000，组六约 1/167，与你选什么号无关。开奖相互独立，不存在可利用的「规律」「趋势」「必出胆码」。
 3. 你不得声称任何组合更容易中奖，不得承诺命中，不得鼓励加大投入或追号。
-4. 号码必须与底层算法结合：程序已按频率/遗漏/同位转移对全盘打分排序（直选 1000 注、组六 120 组、组三 90 组），你必须以算法评分前列为基础做取舍；可以给出算法排序之外、结构理由更强的号，但要明确说明为什么放弃高分号。
+4. 选号流程固定为「算法先选、AI 终选」：程序已按频率/遗漏/同位转移对全盘打分（直选 1000 注、组六 120 组、组三 90 组），并给出算法候选池（直选 12 注、组六 8 组、组三 5 组）。你必须只在这个候选池内终选，不得自创池外号码。
 5. 必须明确说明：以下是历史分布下的参考组合，不改变中奖概率，彩票期望回报为负。
 
 【输出结构】（简体中文，纯文本，不要 Markdown 表格）
@@ -205,13 +219,12 @@ export function buildDigitMessages(summary, label = '排列三') {
     fmtPos('十位', 1),
     fmtPos('个位', 2),
     '',
-    '底层算法全盘评分（频率35% + 近30期30% + 遗漏15% + 同位转移20%，已对全盘排序）：',
-    `- 直选 1000 注评分前列：${fmtAlgo(rank?.straight, 40)}`,
-    `- 组六 120 组评分前列：${fmtAlgo(rank?.group, 30)}`,
-    `- 组三 90 组评分前列：${fmtAlgo(rank?.group3, 15)}`,
-    `- 统计参考（仅展示 top5/top3/1 注）：直选 ${s.candidates.straight.map((x) => x.join('')).join('、')}；组六 ${s.candidates.group.map((x) => x.join('')).join('、')}`,
+    '底层算法全盘评分（频率35% + 近30期30% + 遗漏15% + 同位转移20%），已从全盘 1000/120/90 里选出候选池：',
+    `- 直选候选池 12 注：${fmtAlgo(rank?.straight, 12)}`,
+    `- 组六候选池 8 组：${fmtAlgo(rank?.group, 8)}`,
+    `- 组三候选池 5 组：${fmtAlgo(rank?.group3, 5)}`,
     '',
-    '请按系统提示词的结构输出：以算法评分前列为基础复核取舍，可给排序外但理由更强的号并说明原因。',
+    '请按系统提示词的结构输出：从上面的候选池里终选 3 注直选 + 2 注组六 + 1 注组三，不得自创池外号码。',
   ]
   return [
     { role: 'system', content: SYSTEM_PROMPT },
