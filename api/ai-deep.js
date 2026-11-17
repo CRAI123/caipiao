@@ -25,6 +25,7 @@ import { kl8Calibration } from '../src/lib/kl8Calib.js'
 import { resolveLlmSettings, callAi } from './_lib/ai.js'
 import { applyCors } from './_lib/http.js'
 import { getSql, ensureTables } from './_lib/neon.js'
+import { loadLearning, notesForPrompt, persistPredictions } from './_lib/learning.js'
 
 export const config = { maxDuration: 60 }
 
@@ -35,8 +36,8 @@ const MODELS = [
 ]
 const TEMPS = [0.65, 0.85, 1.0]
 const ROUND2_WEIGHT = 1.5
-// 结果结构版本：旧版没有「终选 10 码 / AI 终审」，命中旧版会重算
-const SCHEMA = 3
+// 结果结构版本：v4 起 round1Picks 带 modelId/temp/weight（供学习循环按模型×温度打分）
+const SCHEMA = 4
 
 const bandOf = (n) => Math.min(3, Math.floor((n - 1) / 20))
 const pad = (n) => String(n).padStart(2, '0')
@@ -120,7 +121,7 @@ function calibText(calib) {
   )
 }
 
-function buildContext(draws, play, v7, calib, bt, review = '') {
+function buildContext(draws, play, v7, calib, bt, review = '', notes = '') {
   const nextId = draws[0].id + 1
   const pool = v7.pool.map((x) => `${pad(x.n)}(分${x.score},遗${x.miss})`).join(' ')
   const kill = v7.kill.map((x) => pad(x.n)).join(' ')
@@ -149,6 +150,13 @@ function buildContext(draws, play, v7, calib, bt, review = '') {
       '【上期复盘（程序对照上一期实际开奖计算）】',
       String(review).slice(0, 800),
       '请结合上期偏差修正本期终选思路（区间配比、奇偶结构等），但不得声称因此提高中奖概率，也不得承诺命中。',
+      '',
+    )
+  }
+  if (notes) {
+    lines.push(
+      '【历史经验笔记（AI 自我复盘沉淀，仅供参考，不提高中奖概率）】',
+      String(notes).slice(0, 1200),
       '',
     )
   }
@@ -196,9 +204,9 @@ function aggregate(pool, voteMap, play) {
  * 终选 10 码：底层算法分（v7 池内评分）× AI 投票分 融合后，再做结构约束收敛到 10 个
  * - ai：12 轮投票权重归一化
  * - algo：底层算法评分归一化
- * - total：55% AI + 45% 算法
+ * - total：mix[0] AI + mix[1] 算法（学习状态非冷启动时来自 state.mix，否则 0.55/0.45）
  */
-function finalize10(pool, voteMap, hitsMap, play = 10) {
+function finalize10(pool, voteMap, hitsMap, play = 10, mix = [0.55, 0.45]) {
   const maxAi = Math.max(1, ...pool.map((x) => voteMap[x.n] || 0))
   const maxAlgo = Math.max(1, ...pool.map((x) => x.score || 0))
   const scored = pool.map((x) => {
@@ -208,7 +216,7 @@ function finalize10(pool, voteMap, hitsMap, play = 10) {
       n: x.n,
       ai: Math.round(ai * 100),
       algo: Math.round(algo * 100),
-      total: 0.55 * ai + 0.45 * algo,
+      total: mix[0] * ai + mix[1] * algo,
       hits: hitsMap[x.n] || 0,
     }
   })
@@ -400,6 +408,27 @@ export default async function handler(req, res) {
       claimedKey = { drawId: nextId, play: k }
     }
 
+    // 读服务端学习状态与经验笔记（冷启动/读失败回退硬编码常量）
+    let learnedKl8 = null
+    let kl8Notes = ''
+    try {
+      const [st, nt] = await Promise.all([loadLearning(sqlRef, 'kl8'), notesForPrompt(sqlRef, 'kl8')])
+      if (st && !st.coldStart) learnedKl8 = st
+      kl8Notes = nt || ''
+    } catch (e) {
+      console.warn('ai-deep: 读取学习状态失败，使用默认权重：', e.message)
+    }
+    const modelW =
+      learnedKl8?.model?.weights?.length === MODELS.length
+        ? learnedKl8.model.weights
+        : MODELS.map((m) => m.weight)
+    const tempW =
+      learnedKl8?.temp?.weights?.length === TEMPS.length
+        ? learnedKl8.temp.weights
+        : TEMPS.map(() => 1)
+    const mixW =
+      learnedKl8?.mix?.weights?.length === 2 ? learnedKl8.mix.weights : [0.55, 0.45]
+    const weightFor = (m, t) => modelW[MODELS.indexOf(m)] * tempW[TEMPS.indexOf(t)]
 
     const v7 = v7Recommend(history, { play: k, nextId })
     if (!v7) {
@@ -410,7 +439,7 @@ export default async function handler(req, res) {
     }
     const calib = kl8Calibration(history, 300)
     const bt = walkForward(history, { periods: 60, play: k })
-    const context = buildContext(history, k, v7, calib, bt, review)
+    const context = buildContext(history, k, v7, calib, bt, review, kl8Notes)
     const poolSet = new Set(v7.pool.map((x) => x.n))
 
     const llm = await resolveLlmSettings()
@@ -433,18 +462,20 @@ ${schemaPrompt(k)}`
     const round1Raw = await Promise.all(round1Tasks)
     const round1 = round1Raw
       .filter(Boolean)
-      .map(({ model, obj }) => {
+      .map(({ model, obj, temp }) => {
         const picks = [...new Set(obj.picks.map(Number))].filter((n) => poolSet.has(n)).slice(0, k)
-        return picks.length >= Math.min(k, 3) ? { model, obj, picks } : null
+        return picks.length >= Math.min(k, 3)
+          ? { model, obj, picks, temp, weight: weightFor(model, temp) }
+          : null
       })
       .filter(Boolean)
     if (!round1.length) {
       return res.status(502).json({ error: '第一轮 9 次分析均未返回有效号码，请稍后重试' })
     }
 
-    // 第一轮共识（按模型权重计票）
+    // 第一轮共识（按模型×温度学习权重计票）
     const vote1 = {}
-    round1.forEach(({ model, picks }) => picks.forEach((n) => (vote1[n] = (vote1[n] || 0) + model.weight)))
+    round1.forEach(({ picks, weight }) => picks.forEach((n) => (vote1[n] = (vote1[n] || 0) + weight)))
     const consensus1 = Object.entries(vote1)
       .sort((a, b) => b[1] - a[1])
       .slice(0, Math.min(20, k * 2))
@@ -484,11 +515,12 @@ ${schemaPrompt(k)}`
       })
       .filter(Boolean)
 
-    // 合并计票：第二轮权重 ×1.5
+    // 合并计票：第二轮按学习到的模型权重 ×1.5
     const voteMap = { ...vote1 }
-    round2.forEach(({ model, picks }) =>
-      picks.forEach((n) => (voteMap[n] = (voteMap[n] || 0) + model.weight * ROUND2_WEIGHT)),
-    )
+    round2.forEach(({ model, picks }) => {
+      const w = modelW[MODELS.indexOf(model)] * ROUND2_WEIGHT
+      picks.forEach((n) => (voteMap[n] = (voteMap[n] || 0) + w))
+    })
 
     const finalPicks = aggregate(v7.pool, voteMap, k)
     const votes = finalPicks
@@ -511,9 +543,9 @@ ${schemaPrompt(k)}`
     for (const { picks } of [...round1, ...round2]) {
       for (const n of picks) hitsMap[n] = (hitsMap[n] || 0) + 1
     }
-    // 第二次收敛：只买 10 个球时，用底层算法分 + AI 投票融合出候选
-    const ten = finalize10(v7.pool, voteMap, hitsMap, 10)
-    const wide = finalize10(v7.pool, voteMap, hitsMap, 20)
+    // 第二次收敛：只买 10 个球时，用底层算法分 + AI 投票融合出候选（AI/算法配比读学习状态）
+    const ten = finalize10(v7.pool, voteMap, hitsMap, 10, mixW)
+    const wide = finalize10(v7.pool, voteMap, hitsMap, 20, mixW)
 
     // 第三次：把 20 码算法候选交给 AI 终审，让它自己决定最终 10 码（失败则回退算法结果）
     const candLine = wide.map((x) => `${pad(x.n)}(算法${x.algo}/票${x.ai})`).join(' ')
@@ -577,8 +609,20 @@ ${schemaPrompt(k)}`
         risks: Array.isArray(best?.obj?.risks) ? best.obj.risks.slice(0, 4) : [],
         review: best?.obj?.review || '',
       },
-      round1Picks: round1.map(({ model, picks }) => ({ model: model.label, picks })),
+      round1Picks: round1.map(({ model, temp, weight, picks }) => ({
+        modelId: model.id,
+        model: model.label,
+        temp,
+        weight: +weight.toFixed(4),
+        picks,
+      })),
       round2Picks: round2.map(({ model, picks }) => ({ model: model.label, picks })),
+      learned: {
+        mix: mixW.map((v) => +v.toFixed(4)),
+        modelW: modelW.map((v) => +v.toFixed(4)),
+        tempW: tempW.map((v) => +v.toFixed(4)),
+        noteCount: kl8Notes ? kl8Notes.split('\n').filter(Boolean).length : 0,
+      },
       backtest: bt,
       v7: {
         picks: v7.picks,
@@ -605,6 +649,13 @@ ${schemaPrompt(k)}`
         UPDATE kl8_ai_deep_runs
         SET status = 'done', result = ${JSON.stringify(payload)}::jsonb, updated_at = now()
         WHERE draw_id = ${claimedKey.drawId} AND play = ${claimedKey.play}`
+    }
+
+    // 本期站内 AI 终选 10 码写入学习预测表（draw_id=目标期号，次日由 daily-push 打分）
+    try {
+      if (sqlRef) await persistPredictions(sqlRef, 'kl8', nextId, [{ source: 'ai:site', picks: finalTen }])
+    } catch (e) {
+      console.warn('ai-deep: 写入学习预测失败：', e.message)
     }
 
     return res.status(200).json({ ...payload, cached: false, owner: maskId(deviceId) })

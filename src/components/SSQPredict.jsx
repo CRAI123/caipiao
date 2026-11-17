@@ -14,7 +14,10 @@ import {
   buildSsqMessages,
   ZONE3,
   ZONE4,
+  SSQ_RED_SIGNALS,
+  SSQ_BLUE_SIGNALS,
 } from '../lib/ssqPredict.js'
+import { readLearning } from '../lib/learning.js'
 import { runDigitAi, peekDigitAi, auditDigitAi } from '../lib/api.js'
 import { getDeviceId } from '../lib/device.js'
 import { buildSsqReview } from '../lib/aiReview.js'
@@ -329,7 +332,42 @@ function SsqAiCard({ draws, pred }) {
 
 export default function SSQPredict({ draws }) {
   const [cover, setCover] = useState(6)
-  const pred = useMemo(() => predictSSQ(draws, { cover }), [draws, cover])
+  // 学习中心自适应权重：挂载时读一次；none/coldStart 不传 override，行为与现状一致
+  const [learning, setLearning] = useState(null)
+  useEffect(() => {
+    let alive = true
+    readLearning('ssq')
+      .then((r) => alive && setLearning(r))
+      .catch(() => {})
+    return () => {
+      alive = false
+    }
+  }, [])
+  // learning_state 'redSignals'/'blueSignals' → 按 SSQ_RED_SIGNALS/SSQ_BLUE_SIGNALS 顺序重排的权重数组
+  const learnW = useMemo(() => {
+    if (!learning || learning.source === 'none' || learning.coldStart) return null
+    const map = (paramKey, order) => {
+      const v = (learning.state.find((s) => s.paramKey === paramKey) || {}).value
+      if (!v || !Array.isArray(v.keys) || !Array.isArray(v.weights)) return null
+      if (v.keys.length !== v.weights.length || v.keys.length !== order.length) return null
+      const weights = order.map((k) => Number(v.weights[v.keys.indexOf(k)]))
+      if (weights.some((x) => !Number.isFinite(x))) return null
+      return { weights, n: Number(v.n || 0) }
+    }
+    const red = map('redSignals', SSQ_RED_SIGNALS)
+    const blue = map('blueSignals', SSQ_BLUE_SIGNALS)
+    if (!red && !blue) return null
+    return { red, blue, n: Math.min(red?.n ?? Infinity, blue?.n ?? Infinity) }
+  }, [learning])
+  const pred = useMemo(
+    () =>
+      predictSSQ(draws, {
+        cover,
+        redWeightsOverride: learnW?.red?.weights ?? null,
+        blueWeightsOverride: learnW?.blue?.weights ?? null,
+      }),
+    [draws, cover, learnW],
+  )
   const bt = useMemo(() => backtestSSQ(draws, { periods: 50, minTrain: 30 }), [draws])
 
   const steps = useMemo(() => {
@@ -426,6 +464,11 @@ export default function SSQPredict({ draws }) {
   return (
     <div className="page">
       <Card title="下期推荐" tag={`基于 ${draws.length} 期历史 · 第 ${latest.id + 1} 期`}>
+        {learnW && (
+          <div className="muted small" style={{ marginBottom: 8 }}>
+            权重来自学习中心（n={learnW.n} 期样本）· 仅优化一致性，不提高中奖概率
+          </div>
+        )}
         <div className="ssq-predict-hero">
           <div className="ssq-predict-balls">
             {pred.red.map((n) => (

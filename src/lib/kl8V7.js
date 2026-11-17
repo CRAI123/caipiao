@@ -14,7 +14,7 @@ import { scoreBalls, ballMissing, range, BALL_MAX, isOdd } from './stats.js'
 import { kl8PlayStats } from './kl8Math.js'
 import { kl8Calibration } from './kl8Calib.js'
 
-const WINDOWS = [100, 50, 30, 20]
+export const WINDOWS = [100, 50, 30, 20]
 const POOL_SIZE = 30
 const BAND = (n) => Math.min(3, Math.floor((n - 1) / 20))
 
@@ -92,16 +92,18 @@ function samplePicks(pool, play, rnd) {
 /**
  * v7 推荐
  * @param {Array} draws 最新在前的开奖数组
- * @param {{ play?: number, nextId?: number }} opts
+ * @param {{ play?: number, nextId?: number, windowWeightsOverride?: Array<{w:number,weight:number}>|null }} opts
+ *   windowWeightsOverride：服务端学习状态的窗口权重（长度 4，[{w,weight}]），
+ *   提供时替代按下一期期号轮换的 windowWeights(issue)；不传时行为与现状一致。
  */
-export function v7Recommend(draws, { play = 10, nextId } = {}) {
+export function v7Recommend(draws, { play = 10, nextId, windowWeightsOverride = null } = {}) {
   if (!Array.isArray(draws) || draws.length < 20) return null
   const issue = Number(nextId || draws[0].id + 1)
   const rnd = mulberry32((issue * 7919 + play * 104729) >>> 0)
   const { calib, factorOf } = bucketFactors(draws)
 
   // ② 多窗口加权频次打分，各窗归一后融合
-  const weights = windowWeights(issue)
+  const weights = windowWeightsOverride || windowWeights(issue)
   const fused = Object.fromEntries(range(BALL_MAX).map((n) => [n, 0]))
   for (const { w, weight } of weights) {
     const { scores } = scoreBalls(draws, { periods: w, halfLife: 20, hotMode: 'mix' })

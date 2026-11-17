@@ -35,6 +35,13 @@ import { predictPL3Pro } from '../src/lib/pl3Predict.js'
 import { predictPL5 } from '../src/lib/pl5Predict.js'
 import { predictSSQ } from '../src/lib/ssqPredict.js'
 import { applyCors } from './_lib/http.js'
+import {
+  loadLearning,
+  notesForPrompt,
+  scoreAndLearn,
+  persistPredictions,
+  maybeGenerateNotes,
+} from './_lib/learning.js'
 
 export const config = { maxDuration: 60 }
 
@@ -44,8 +51,8 @@ const STATUS_KEY = 'daily_push_last'
 const HISTORY_KEY = 'daily_push_history'
 const FRESH_RETRY_MS = 1500
 // AI 终选与站内共用同一套结构版本号，只有同版本的历史结果才复用
-const DIGIT_SCHEMA = 5
-const KL8_SCHEMA = 3
+const DIGIT_SCHEMA = 6
+const KL8_SCHEMA = 4
 // 单个 AI 调用最多等这么久，超时就发算法结果，避免整个推送被拖死
 const AI_TIMEOUT_MS = 38000
 
@@ -110,11 +117,16 @@ async function loadConfig() {
   }
 }
 
-/** 快乐8：v7 多窗口加权评分（站内推荐页同款）+ 三注分注参考 */
-function buildKl8(draws) {
+/** 快乐8：v7 多窗口加权评分（站内推荐页同款）+ 三注分注参考；learned 非冷启动时注入窗口权重 */
+function buildKl8(draws, learned = null) {
   const history = draws.slice(0, 200)
   const nextId = history[0].id + 1
-  const v7 = v7Recommend(history, { play: 10, nextId })
+  // state.windows（{keys:['100',...], weights:[...]}）→ v7Recommend 需要的 [{w,weight}]
+  const winOverride =
+    learned && !learned.coldStart && Array.isArray(learned.windows?.weights)
+      ? learned.windows.weights.map((weight, i) => ({ w: Number(learned.windows.keys[i]), weight }))
+      : null
+  const v7 = v7Recommend(history, { play: 10, nextId, windowWeightsOverride: winOverride })
   const { scores } = scoreBalls(history, { periods: 100, halfLife: 20, hotMode: 'mix' })
   const ranked = Array.from({ length: BALL_MAX }, (_, i) => i + 1)
     .map((n) => ({ n, score: scores[n] }))
@@ -130,29 +142,51 @@ function buildKl8(draws) {
 
 const pad = (n) => String(n).padStart(2, '0')
 
-function buildFc3d(draws) {
-  const p = predictFC3Dv2(draws)
+function buildFc3d(draws, learned = null) {
+  const ex = learned && !learned.coldStart ? learned.experts : null
+  // 引擎只接受一组长度 4 的成分权重（百/十/个共用）：把逐位学习权重按成分取均值
+  const wOverride =
+    ex && Array.isArray(ex.p0) && Array.isArray(ex.p1) && Array.isArray(ex.p2)
+      ? ex.p0.map((_, i) => (ex.p0[i] + ex.p1[i] + ex.p2[i]) / 3)
+      : null
+  const p = predictFC3Dv2(draws, wOverride ? { weightsOverride: wOverride } : {})
   if (!p) return null
   return { latest: draws[0], pred: p }
 }
 
 /** 排列三：v3 Pro 档（9 专家 Hedge 自适应权重 + 六维结构约束），站内概率最高的一档 */
-function buildPl3(draws) {
-  const p = predictPL3Pro(draws)
+function buildPl3(draws, learned = null) {
+  const ex = learned && !learned.coldStart ? learned.experts : null
+  const wOverride =
+    ex && Array.isArray(ex.p0) && Array.isArray(ex.p1) && Array.isArray(ex.p2)
+      ? [ex.p0, ex.p1, ex.p2]
+      : null
+  const p = predictPL3Pro(draws, wOverride ? { weightsOverride: wOverride } : {})
   if (!p) return null
   return { latest: draws[0], pred: p }
 }
 
 /** 排列五：v3 Pro 档（9 专家 Hedge 自适应权重 + 结构约束 + 5 位穷举 10 万注） */
-function buildPl5(draws) {
-  const p = predictPL5(draws)
+function buildPl5(draws, learned = null) {
+  const ex = learned && !learned.coldStart ? learned.experts : null
+  const wOverride =
+    ex && Array.isArray(ex.p0) && Array.isArray(ex.p1) && Array.isArray(ex.p2) &&
+    Array.isArray(ex.p3) && Array.isArray(ex.p4)
+      ? [ex.p0, ex.p1, ex.p2, ex.p3, ex.p4]
+      : null
+  const p = predictPL5(draws, wOverride ? { weightsOverride: wOverride } : {})
   if (!p) return null
   return { latest: draws[0], pred: p }
 }
 
 /** 双色球：红球结构评分枚举 + 蓝球周期/振荡评分 */
-function buildSsq(draws) {
-  const p = predictSSQ(draws)
+function buildSsq(draws, learned = null) {
+  const opts = {}
+  if (learned && !learned.coldStart) {
+    if (Array.isArray(learned.redSignals?.weights)) opts.redWeightsOverride = learned.redSignals.weights
+    if (Array.isArray(learned.blueSignals?.weights)) opts.blueWeightsOverride = learned.blueSignals.weights
+  }
+  const p = predictSSQ(draws, opts)
   if (!p) return null
   return { latest: draws[0], pred: p }
 }
@@ -307,12 +341,18 @@ async function buildDigitAi({ game, label, draws, sql, llm }) {
   // 2) 现场调用一次大模型：只让它从候选池里终选
   try {
     const [sys, user] = (is5 ? buildPL5Messages : buildDigitMessages)(summary, label)
+    // 注入 AI 自我复盘沉淀的历史经验笔记（空串跳过）
+    const notes = await notesForPrompt(sql, game)
+    const notesBlock = notes
+      ? '【历史经验笔记（AI 自我复盘沉淀，仅供参考，不提高中奖概率）】\n' + notes + '\n\n'
+      : ''
     const messages = [
       sys,
       {
         role: 'user',
         content:
           `${user.content}\n\n` +
+          notesBlock +
           '只输出一个 JSON 对象，不要解释文字、不要代码块围栏：' +
           (is5
             ? '{"straight":["01234","56789"],"reasons":{"01234":"一句话依据"},"summary":"60 字内","risk":"一句风险提示"}。' +
@@ -402,6 +442,77 @@ function pickInPool(list, pool, max) {
   return [...new Set(list)].filter((n) => pool.includes(n)).slice(0, max)
 }
 
+/** 3D/排列三/排列五：算法候选池 Top 注（写 learning_predictions algo:pool 行用） */
+function digitAlgoPicks(game, draws) {
+  const is5 = game === 'pl5'
+  const summary = (is5 ? summarizeDigit5 : summarizeDigit)(draws, 100)
+  if (!summary) return null
+  const pool = is5 ? pl5CandidatePool(summary) : digitCandidatePool(summary)
+  if (!pool?.straight?.length) return null
+  return is5
+    ? { straight: pool.straight.slice(0, 5) }
+    : {
+        straight: pool.straight.slice(0, 3),
+        group: (pool.group || []).slice(0, 2),
+        group3: (pool.group3 || []).slice(0, 1),
+      }
+}
+
+/** 拼经验笔记生成输入：各彩种近 10 期打分命中摘要 + 当前权重 + 上一条笔记 */
+async function buildRecentSummary(sql, games, learnedOf) {
+  const parts = []
+  for (const g of games) {
+    try {
+      const rows = await sql`
+        SELECT draw_id, source, meta FROM learning_predictions
+        WHERE game = ${g} AND scored = true
+        ORDER BY draw_id DESC LIMIT 10`
+      const brief = rows.map((r) => {
+        const m = typeof r.meta === 'string' ? JSON.parse(r.meta || '{}') : r.meta || {}
+        const hit =
+          m.hits ??
+          m.straightHits ??
+          (m.redHits != null ? `红${m.redHits}/蓝${m.blueHit ? '中' : '未中'}` : '-')
+        return `${r.draw_id}:${r.source}=${hit}`
+      })
+      parts.push(`【${g} 近 10 期命中】${brief.join(' ') || '无'}`)
+    } catch {
+      /* 单彩种摘要失败不影响笔记生成 */
+    }
+  }
+  try {
+    const w = {}
+    for (const g of games) {
+      const st = learnedOf[g]
+      if (!st) continue
+      w[g] = st.experts
+        ? { n: st.n, experts: st.experts }
+        : {
+            n: st.n,
+            model: st.model?.weights,
+            temp: st.temp?.weights,
+            mix: st.mix?.weights,
+            windows: st.windows?.weights,
+            redSignals: st.redSignals?.weights,
+            blueSignals: st.blueSignals?.weights,
+          }
+    }
+    if (Object.keys(w).length) parts.push(`【当前权重】${JSON.stringify(w)}`)
+  } catch {
+    /* 权重摘要失败不阻塞 */
+  }
+  try {
+    const last = await sql`
+      SELECT content FROM ai_experience_notes
+      WHERE game = 'all' AND active = true
+      ORDER BY created_at DESC LIMIT 1`
+    if (last[0]?.content) parts.push(`【上一条笔记】${String(last[0].content).slice(0, 400)}`)
+  } catch {
+    /* 无上一条笔记也正常 */
+  }
+  return parts.join('\n\n').slice(0, 6000)
+}
+
 /** 快乐8：算法 20 码 → AI 终选 10 码，失败回退算法融合 10 码 */
 async function buildKl8Ai({ draws, built, sql, llm }) {
   if (!built?.v7) return null
@@ -434,6 +545,8 @@ async function buildKl8Ai({ draws, built, sql, llm }) {
 
   // 2) 现场调用一次大模型：从算法 20 码里终选 10 码
   try {
+    // 注入 AI 自我复盘沉淀的历史经验笔记（空串跳过）
+    const notes = await notesForPrompt(sql, 'kl8')
     const messages = [
       {
         role: 'system',
@@ -452,6 +565,13 @@ async function buildKl8Ai({ draws, built, sql, llm }) {
             .map((d) => `第${d.id}期：${d.nums.map(pad).join(' ')}`),
           '',
           `算法候选 20 码（按底层评分排序）：${wide.map(pad).join(' ')}`,
+          ...(notes
+            ? [
+                '',
+                '【历史经验笔记（AI 自我复盘沉淀，仅供参考，不提高中奖概率）】',
+                notes,
+              ]
+            : []),
           '',
           '请从上面 20 个候选里终选正好 10 个（可以放弃排名靠后的号），并给每个号一句话理由。' +
             '只输出 JSON：{"picks":[号码 x10],"reasons":{"01":"一句话"},"summary":"60 字内"}。',
@@ -848,6 +968,7 @@ export default async function handler(req, res) {
   const isTest = req.method === 'POST' || req.query?.test === '1'
 
   try {
+    const handlerStart = Date.now()
     const cfg = await loadConfig()
     const isDry = req.query?.dry === '1'
     if (!cfg.webhook && !isDry) {
@@ -893,23 +1014,73 @@ export default async function handler(req, res) {
       refetchIfStale(ssqRes, cfg.ssq, fetchSsqDraws, 4),
     ])
 
-    const kl8 = kl8Res.status === 'fulfilled' && kl8Res.value ? buildKl8(kl8Res.value) : null
-    const fc3d = fc3dRes.status === 'fulfilled' && fc3dRes.value ? buildFc3d(fc3dRes.value) : null
-    const pl3 = pl3Res.status === 'fulfilled' && pl3Res.value ? buildPl3(pl3Res.value.draws) : null
-    const pl5 = pl5Res.status === 'fulfilled' && pl5Res.value ? buildPl5(pl5Res.value.draws) : null
-    const ssq = ssqRes.status === 'fulfilled' && ssqRes.value ? buildSsq(ssqRes.value.draws) : null
-
-    // AI 终选：三个彩种并行（优先复用站内共享结果，没有才现场调用一次大模型）
+    // ── 学习循环 / AI 共享缓存共用的数据库（提前到打分步骤之前获取） ──
     let sqlAi = null
     if (process.env.DATABASE_URL) {
       try {
         sqlAi = getSql()
         await ensureTables(sqlAi)
       } catch (e) {
-        console.warn('[daily-push] 数据库不可用，跳过 AI 共享缓存：', e.message)
+        console.warn('[daily-push] 数据库不可用，跳过学习循环与 AI 共享缓存：', e.message)
         sqlAi = null
       }
     }
+
+    const kl8Draws = drawsOf(kl8Res)
+    const fc3dDraws = drawsOf(fc3dRes)
+    const pl3Draws = drawsOf(pl3Res)
+    const pl5Draws = drawsOf(pl5Res)
+    const ssqDraws = drawsOf(ssqRes)
+
+    // ② 对最新开奖打分并推进权重（五彩种并行；失败只记日志，不阻塞推送）
+    const learningSummary = {}
+    const scoredGames = []
+    if (sqlAi) {
+      try {
+        const candidates = [
+          ['kl8', kl8Draws],
+          ['fc3d', fc3dDraws],
+          ['pl3', pl3Draws],
+          ['pl5', pl5Draws],
+          ['ssq', ssqDraws],
+        ].filter(([g, d]) => d?.length && freshness(d[0], g === 'ssq' ? 4 : 1).state === 'ok')
+        const results = await Promise.all(candidates.map(([g, d]) => scoreAndLearn(sqlAi, g, d)))
+        candidates.forEach(([g], i) => {
+          learningSummary[g] = results[i]
+          if (results[i] && !results[i].skipped) scoredGames.push(g)
+        })
+      } catch (e) {
+        console.error('[daily-push] 学习打分失败：', e.message)
+      }
+    }
+
+    // ③ 读取各彩种学习状态（冷启动/读失败时 build* 不传 override，行为与现状一致）
+    const learnedOf = {}
+    if (sqlAi) {
+      try {
+        const entries = [
+          ['kl8', kl8Draws],
+          ['fc3d', fc3dDraws],
+          ['pl3', pl3Draws],
+          ['pl5', pl5Draws],
+          ['ssq', ssqDraws],
+        ].filter(([, d]) => d?.length)
+        const states = await Promise.all(entries.map(([g]) => loadLearning(sqlAi, g)))
+        entries.forEach(([g], i) => {
+          learnedOf[g] = states[i]
+        })
+      } catch (e) {
+        console.error('[daily-push] 读取学习状态失败：', e.message)
+      }
+    }
+
+    const kl8 = kl8Res.status === 'fulfilled' && kl8Res.value ? buildKl8(kl8Draws, learnedOf.kl8) : null
+    const fc3d = fc3dRes.status === 'fulfilled' && fc3dRes.value ? buildFc3d(fc3dDraws, learnedOf.fc3d) : null
+    const pl3 = pl3Res.status === 'fulfilled' && pl3Res.value ? buildPl3(pl3Draws, learnedOf.pl3) : null
+    const pl5 = pl5Res.status === 'fulfilled' && pl5Res.value ? buildPl5(pl5Draws, learnedOf.pl5) : null
+    const ssq = ssqRes.status === 'fulfilled' && ssqRes.value ? buildSsq(ssqDraws, learnedOf.ssq) : null
+
+    // ④ AI 终选：彩种并行（优先复用站内共享结果，没有才现场调用一次大模型）
     let llm = null
     try {
       llm = await resolveLlmSettings()
@@ -924,34 +1095,85 @@ export default async function handler(req, res) {
         return null
       }
     }
+    // ⑤ 经验笔记生成：与 AI 终选并行；dry/only 手动调试时跳过；失败返回 null 不影响推送
+    const notesTask =
+      !isDry && !only && llm && sqlAi && scoredGames.length
+        ? (async () => {
+            try {
+              const recentSummary = await buildRecentSummary(sqlAi, scoredGames, learnedOf)
+              return await maybeGenerateNotes(sqlAi, llm, {
+                games: scoredGames,
+                recentSummary,
+                elapsedMs: Date.now() - handlerStart,
+              })
+            } catch (e) {
+              console.error('[daily-push] 经验笔记生成失败：', e.message)
+              return null
+            }
+          })()
+        : Promise.resolve(null)
     const [kl8Ai, fc3dAi, pl3Ai, pl5Ai] = llm
       ? await Promise.all([
-          kl8 ? safely(() => buildKl8Ai({ draws: drawsOf(kl8Res), built: kl8, sql: sqlAi, llm })) : null,
+          kl8 ? safely(() => buildKl8Ai({ draws: kl8Draws, built: kl8, sql: sqlAi, llm })) : null,
           fc3d
             ? safely(() =>
-                buildDigitAi({ game: 'fc3d', label: '福彩3D', draws: drawsOf(fc3dRes), sql: sqlAi, llm }),
+                buildDigitAi({ game: 'fc3d', label: '福彩3D', draws: fc3dDraws, sql: sqlAi, llm }),
               )
             : null,
           pl3
             ? safely(() =>
-                buildDigitAi({ game: 'pl3', label: '排列三', draws: drawsOf(pl3Res), sql: sqlAi, llm }),
+                buildDigitAi({ game: 'pl3', label: '排列三', draws: pl3Draws, sql: sqlAi, llm }),
               )
             : null,
           pl5
             ? safely(() =>
-                buildDigitAi({ game: 'pl5', label: '排列五', draws: drawsOf(pl5Res), sql: sqlAi, llm }),
+                buildDigitAi({ game: 'pl5', label: '排列五', draws: pl5Draws, sql: sqlAi, llm }),
               )
             : null,
         ])
       : [null, null, null, null]
+    await notesTask
+
+    // ⑥ 发卡前写本期目标期预测行（次日 scoreAndLearn 打分用；hedge:experts 行由打分流程自己回填，不写）
+    try {
+      if (sqlAi) {
+        if (kl8) {
+          const rows = [{ source: 'algo:v7', picks: kl8.picks }]
+          if (kl8Ai) rows.push({ source: 'ai:final', picks: kl8Ai.ten })
+          rows.push({ source: 'models:kl8', picks: [] })
+          await persistPredictions(sqlAi, 'kl8', kl8.nextId, rows)
+        }
+        for (const [g, aiRes, dList] of [
+          ['fc3d', fc3dAi, fc3dDraws],
+          ['pl3', pl3Ai, pl3Draws],
+          ['pl5', pl5Ai, pl5Draws],
+        ]) {
+          if (!dList?.length) continue
+          const rows = []
+          const algoPicks = digitAlgoPicks(g, dList)
+          if (algoPicks) rows.push({ source: 'algo:pool', picks: algoPicks })
+          if (aiRes?.picks)
+            rows.push({
+              source: 'ai:final',
+              picks: {
+                straight: aiRes.picks.straight || [],
+                group: aiRes.picks.group || [],
+                group3: aiRes.picks.group3 || [],
+              },
+            })
+          if (rows.length) await persistPredictions(sqlAi, g, Number(dList[0].id) + 1, rows)
+        }
+        if (ssq)
+          await persistPredictions(sqlAi, 'ssq', Number(ssq.latest.id) + 1, [
+            { source: 'algo:ssq', picks: { red: ssq.pred.red, blue: ssq.pred.blue } },
+          ])
+      }
+    } catch (e) {
+      console.error('[daily-push] 写入学习预测失败：', e.message)
+    }
 
     // 上期命中：算法部分用「上期及更早」的数据严格前推重算，AI 部分读站内共享结果/上次推送记录
     const prevHistory = await loadHistory()
-    const kl8Draws = drawsOf(kl8Res)
-    const fc3dDraws = drawsOf(fc3dRes)
-    const pl3Draws = drawsOf(pl3Res)
-    const pl5Draws = drawsOf(pl5Res)
-    const ssqDraws = drawsOf(ssqRes)
     const hits = { kl8: null, fc3d: null, pl3: null, pl5: null, ssq: null }
     if (kl8 && kl8Draws) {
       const algo = kl8AlgoPrev(kl8Draws)
@@ -1134,6 +1356,7 @@ export default async function handler(req, res) {
       ai: { kl8: !!kl8Ai, fc3d: !!fc3dAi, pl3: !!pl3Ai, pl5: !!pl5Ai },
       hits,
       fresh,
+      learning: learningSummary,
     })
 
     return res.status(200).json({

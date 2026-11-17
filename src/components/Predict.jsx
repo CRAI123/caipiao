@@ -17,6 +17,7 @@ import { aiDeep, peekDeep, storePrediction, auditKl8Ai } from '../lib/api.js'
 import { getDeviceId } from '../lib/device.js'
 import { buildKl8Review } from '../lib/aiReview.js'
 import { v7Recommend } from '../lib/kl8V7.js'
+import { readLearning } from '../lib/learning.js'
 import { fmtPct } from '../lib/kl8Math.js'
 import { fakeAnalyze, sharedWaitSeconds } from '../lib/aiWait.js'
 import BetVerify from './BetVerify.jsx'
@@ -120,10 +121,40 @@ export default function Predict({ draws, onRefreshData }) {
   const latestHit = new Set(latest?.nums || [])
   const danHitNow = dans.filter((n) => latestHit.has(n)).length
 
+  // 学习中心自适应权重：挂载时读一次；none/coldStart 一律不传 override，行为与现状一致
+  const [kl8Learn, setKl8Learn] = useState(null)
+  useEffect(() => {
+    let alive = true
+    readLearning('kl8')
+      .then((r) => alive && setKl8Learn(r))
+      .catch(() => {})
+    return () => {
+      alive = false
+    }
+  }, [])
+  // learning_state 'windows'（keys=期数字符串）→ v7 windowWeightsOverride [{w,weight}]
+  const kl8Win = useMemo(() => {
+    if (!kl8Learn || kl8Learn.source === 'none' || kl8Learn.coldStart) return null
+    const v = (kl8Learn.state.find((s) => s.paramKey === 'windows') || {}).value
+    if (!v || !Array.isArray(v.keys) || !Array.isArray(v.weights)) return null
+    if (v.keys.length !== v.weights.length || !v.keys.every((k) => Number.isFinite(Number(k)))) return null
+    return {
+      weights: v.keys.map((k, i) => ({ w: Number(k), weight: Number(v.weights[i]) })),
+      n: Number(v.n || 0),
+    }
+  }, [kl8Learn])
+
   // v7：按期号固定的四层统计选号，点按钮才计算
   const v7 = useMemo(
-    () => (showV7 ? v7Recommend(draws, { play, nextId: latest ? latest.id + 1 : undefined }) : null),
-    [showV7, draws, play, latest],
+    () =>
+      showV7
+        ? v7Recommend(draws, {
+            play,
+            nextId: latest ? latest.id + 1 : undefined,
+            windowWeightsOverride: kl8Win ? kl8Win.weights : null,
+          })
+        : null,
+    [showV7, draws, play, latest, kl8Win],
   )
 
   const deepVotes = deep?.votes || []
@@ -646,6 +677,11 @@ export default function Predict({ draws, onRefreshData }) {
           title={`v7 算法 · 第 ${v7.nextId} 期 · ${PLAY_LABEL[v7.play]} 推荐`}
           tag={`30 码推荐池 → 动态概率抽样 · 主窗口 ${v7.primaryWindow} 期`}
         >
+          {kl8Win && (
+            <div className="muted small" style={{ marginBottom: 8 }}>
+              权重来自学习中心（n={kl8Win.n} 期样本）· 仅优化一致性，不提高中奖概率
+            </div>
+          )}
           <div className="predict-head">
             <div>
               <div className="predict-sub">v7 推荐 {v7.play} 码（按期号固定，重复点击结果一致）</div>

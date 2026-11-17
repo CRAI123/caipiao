@@ -550,17 +550,16 @@ export function patternSummary(draws, period = 30) {
 // ---------------------------------------------------------------
 
 const CFG = {
-  // 红球分数权重（一层法 + 二层法 + 三分法）
-  wFreq10: 0.3,
-  wFreq30: 0.25,
-  wFreq100: 0.15,
-  wOmit: 0.12,
-  wRecent5: 0.1,
-  wRepeat: 0.06,
-  wNeighbor: 0.04,
   // 候选池大小（组合枚举 C(12,6)=924，浏览器里也能秒算）
   candidates: 12,
 }
+
+/** 红球信号（按评分顺序）与默认权重（一层法 + 二层法 + 三分法，原 CFG 现值） */
+export const SSQ_RED_SIGNALS = ['freq10', 'freq30', 'freq100', 'omit', 'recent5', 'repeat', 'neighbor']
+export const SSQ_RED_WEIGHTS = [0.3, 0.25, 0.15, 0.12, 0.1, 0.06, 0.04]
+/** 蓝球信号与默认权重（scoreBlue 原硬编码系数；freqPenalty 的原始分为负值） */
+export const SSQ_BLUE_SIGNALS = ['period', 'omit', 'golden', 'goldenPoint', 'osc', 'loop', 'freqPenalty']
+export const SSQ_BLUE_WEIGHTS = [1, 0.5, 0.35, 0.25, 0.4, 0.3, 0.08]
 
 function freqScore(draws, n, window) {
   const sample = draws.slice(0, Math.min(window, draws.length))
@@ -570,9 +569,8 @@ function freqScore(draws, n, window) {
   return expect > 0 ? count / expect : 0
 }
 
-/** 红球单号评分 */
-export function scoreRed(draws, stats) {
-  const last = draws[0]
+/** 红球每个信号的原始分（Array(33)，下标 = 号码-1），不含权重 */
+function redRawSignals(draws, stats) {
   const prev = draws[1]
   const prevSet = new Set(prev ? prev.red : [])
   const neighborSet = new Set()
@@ -583,21 +581,71 @@ export function scoreRed(draws, stats) {
   const pool = new Set()
   for (const d of draws.slice(0, 5)) for (const n of d.red) pool.add(n)
 
-  return stats.map((s) => {
-    const freq =
-      CFG.wFreq10 * freqScore(draws, s.n, 10) +
-      CFG.wFreq30 * freqScore(draws, s.n, 30) +
-      CFG.wFreq100 * freqScore(draws, s.n, 100)
+  const raw = Object.fromEntries(SSQ_RED_SIGNALS.map((k) => [k, Array(RED_MAX).fill(0)]))
+  stats.forEach((s, idx) => {
+    raw.freq10[idx] = freqScore(draws, s.n, 10)
+    raw.freq30[idx] = freqScore(draws, s.n, 30)
+    raw.freq100[idx] = freqScore(draws, s.n, 100)
     // 遗漏回归：当前遗漏越接近平均遗漏，说明在正常节奏内
     const ratio = s.avgOmit > 0 ? Math.min(s.curOmit / s.avgOmit, 3) : 1
-    const omitScore = CFG.wOmit * (1 - Math.abs(ratio - 1) / 2)
-    const recent5 = pool.has(s.n) ? CFG.wRecent5 : 0
-    const repeat = prevSet.has(s.n) ? CFG.wRepeat : 0
-    const neighbor = neighborSet.has(s.n) ? CFG.wNeighbor : 0
+    raw.omit[idx] = 1 - Math.abs(ratio - 1) / 2
+    raw.recent5[idx] = pool.has(s.n) ? 1 : 0
+    raw.repeat[idx] = prevSet.has(s.n) ? 1 : 0
+    raw.neighbor[idx] = neighborSet.has(s.n) ? 1 : 0
+  })
+  return raw
+}
+
+/** 蓝球每个信号的原始分（Array(16)，下标 = 号码-1），不含权重 */
+function blueRawSignals(draws, stats) {
+  const lastBlue = draws[0]?.blue
+  const seq = draws.slice(0, 12).map((d) => d.blue)
+  const freqMap = new Map()
+  for (const b of seq) freqMap.set(b, (freqMap.get(b) || 0) + 1)
+
+  const raw = Object.fromEntries(SSQ_BLUE_SIGNALS.map((k) => [k, Array(BLUE_MAX).fill(0)]))
+  stats.forEach((s, idx) => {
+    // 平均周期：小于 16 说明活跃
+    raw.period[idx] = Number.isFinite(s.period) ? (16 - Math.min(s.period, 32)) / 16 : 0
+    // 遗漏接近平均遗漏：正常节奏
+    const ratio = s.avgOmit > 0 ? Math.min(s.curOmit / s.avgOmit, 3) : 1
+    raw.omit[idx] = 1 - Math.abs(ratio - 1) / 2
+    raw.golden[idx] = s.golden ? 1 : 0
+    raw.goldenPoint[idx] = s.goldenPoint ? 1 : 0
+    // 振荡：与上期距离 1~3 最常见（书中振荡值判断）
+    if (lastBlue) {
+      const diff = Math.abs(s.n - lastBlue)
+      raw.osc[idx] = diff >= 1 && diff <= 3 ? 1 : 0
+      const loop = Math.min(diff, BLUE_MAX - diff)
+      raw.loop[idx] = loop >= 1 && loop <= 2 ? 1 : 0
+    }
+    // 近 12 期已出过的略降（不追热到极端），原始分为负
+    raw.freqPenalty[idx] = -(freqMap.get(s.n) || 0)
+  })
+  return raw
+}
+
+/** 各信号对每个号码的原始打分（供服务端学习循环按信号维度算 log-loss） */
+export function ssqSignalScores(draws) {
+  return {
+    red: redRawSignals(draws, redStats(draws)),
+    blue: blueRawSignals(draws, blueStats(draws)),
+  }
+}
+
+/** 红球单号评分：Σ w_i × 原始分_i（默认权重 = 原 CFG 现值，逐位一致） */
+export function scoreRed(draws, stats, weights = SSQ_RED_WEIGHTS) {
+  const raw = redRawSignals(draws, stats)
+  return stats.map((s, idx) => {
+    const freq = weights[0] * raw.freq10[idx] + weights[1] * raw.freq30[idx] + weights[2] * raw.freq100[idx]
+    const omitScore = weights[3] * raw.omit[idx]
+    const recent5 = weights[4] * raw.recent5[idx]
+    const repeat = weights[5] * raw.repeat[idx]
+    const neighbor = weights[6] * raw.neighbor[idx]
     return {
       ...s,
       score: +(freq + omitScore + recent5 + repeat + neighbor).toFixed(4),
-      parts: { freq: +freq.toFixed(3), omit: +omitScore.toFixed(3), recent5: !!recent5, repeat: !!repeat, neighbor: !!neighbor },
+      parts: { freq: +freq.toFixed(3), omit: +omitScore.toFixed(3), recent5: !!raw.recent5[idx], repeat: !!raw.repeat[idx], neighbor: !!raw.neighbor[idx] },
     }
   })
 }
@@ -631,32 +679,12 @@ function structureScore(c) {
   return s
 }
 
-/** 蓝球评分（第 13-16 章） */
-export function scoreBlue(draws, stats) {
-  const lastBlue = draws[0]?.blue
-  const seq = draws.slice(0, 12).map((d) => d.blue)
-  const freqMap = new Map()
-  for (const b of seq) freqMap.set(b, (freqMap.get(b) || 0) + 1)
-  return stats.map((s) => {
+/** 蓝球评分（第 13-16 章）：Σ w_i × 原始分_i（默认权重 = 原硬编码系数，逐位一致） */
+export function scoreBlue(draws, stats, weights = SSQ_BLUE_WEIGHTS) {
+  const raw = blueRawSignals(draws, stats)
+  return stats.map((s, idx) => {
     let score = 0
-    // 平均周期：小于 16 说明活跃
-    if (Number.isFinite(s.period)) score += (16 - Math.min(s.period, 32)) / 16
-    // 遗漏接近平均遗漏：正常节奏
-    const ratio = s.avgOmit > 0 ? Math.min(s.curOmit / s.avgOmit, 3) : 1
-    score += 0.5 * (1 - Math.abs(ratio - 1) / 2)
-    // 黄金周期窗口
-    if (s.golden) score += 0.35
-    // 黄金分割点号
-    if (s.goldenPoint) score += 0.25
-    // 振荡：与上期距离 1~3 最常见（书中振荡值判断）
-    if (lastBlue) {
-      const diff = Math.abs(s.n - lastBlue)
-      if (diff >= 1 && diff <= 3) score += 0.4
-      const loop = Math.min(diff, BLUE_MAX - diff)
-      if (loop >= 1 && loop <= 2) score += 0.3
-    }
-    // 近 12 期已出过的略降（不追热到极端）
-    score -= (freqMap.get(s.n) || 0) * 0.08
+    for (let i = 0; i < SSQ_BLUE_SIGNALS.length; i++) score += weights[i] * raw[SSQ_BLUE_SIGNALS[i]][idx]
     return { ...s, score: +score.toFixed(4) }
   })
 }
@@ -688,12 +716,14 @@ function bestCombination(cands) {
 /**
  * 下期推荐：返回 6 个红球 + 1 个蓝球，以及候选、杀号、结构说明。
  * cover 仅用于展示「覆盖档位」（多选几码的命中与成本），不改变单注概率。
+ * redWeightsOverride / blueWeightsOverride：服务端学习状态给出的信号权重
+ * （长度与 SSQ_RED_SIGNALS / SSQ_BLUE_SIGNALS 一致），不传时行为与现状一致。
  */
-export function predictSSQ(draws, { cover = 6 } = {}) {
+export function predictSSQ(draws, { cover = 6, redWeightsOverride = null, blueWeightsOverride = null } = {}) {
   if (!Array.isArray(draws) || draws.length < 12) return null
 
   const rStats = redStats(draws)
-  const scored = scoreRed(draws, rStats).sort((a, b) => b.score - a.score)
+  const scored = scoreRed(draws, rStats, redWeightsOverride || SSQ_RED_WEIGHTS).sort((a, b) => b.score - a.score)
   // 保证三个区间都有人选，避免结构分把候选压到某一区
   const cands = []
   for (const z of ZONE3) {
@@ -712,7 +742,7 @@ export function predictSSQ(draws, { cover = 6 } = {}) {
   if (!combo) return null
 
   const bStats = blueStats(draws)
-  const blues = scoreBlue(draws, bStats).sort((a, b) => b.score - a.score)
+  const blues = scoreBlue(draws, bStats, blueWeightsOverride || SSQ_BLUE_WEIGHTS).sort((a, b) => b.score - a.score)
 
   const ranked = scored.map((s) => ({ n: s.n, score: s.score, level: s.level, omit: s.curOmit }))
   const kill = [...ranked].sort((a, b) => a.score - b.score).slice(0, 5).map((x) => x.n)

@@ -10,6 +10,7 @@ import Repeats from './components/Repeats.jsx'
 import DanTuo from './components/DanTuo.jsx'
 import Predict from './components/Predict.jsx'
 import Audit from './components/Audit.jsx'
+import LearningCenter from './components/LearningCenter.jsx'
 import KL8Prize from './components/KL8Prize.jsx'
 import Journal from './components/Journal.jsx'
 import DataManager from './components/DataManager.jsx'
@@ -89,6 +90,7 @@ const TABS = [
   { id: 'prize', label: '概率奖金', en: 'ODDS' },
   { id: 'predict', label: '下期推荐', en: 'PREDICT' },
   { id: 'audit', label: '方法体检', en: 'AUDIT' },
+  { id: 'learning', label: '学习中心', en: 'LEARNING' },
   { id: 'journal', label: '购彩账本', en: 'LEDGER' },
   { id: 'data', label: '数据管理', en: 'DATA' },
   { id: 'admin', label: '后台', en: 'ADMIN' },
@@ -105,6 +107,7 @@ const FC3D_TABS = [
   { id: 'prize', label: '中奖计算', en: 'PRIZE' },
   { id: 'predict', label: '下期推荐', en: 'PREDICT' },
   { id: 'audit', label: '方法体检', en: 'AUDIT' },
+  { id: 'learning', label: '学习中心', en: 'LEARNING' },
   { id: 'terms', label: '术语大全', en: 'TERMS' },
   { id: 'data', label: '数据管理', en: 'DATA' },
 ]
@@ -120,6 +123,7 @@ const SSQ_TABS = [
   { id: 'prize', label: '中奖计算', en: 'PRIZE' },
   { id: 'predict', label: '下期推荐', en: 'PREDICT' },
   { id: 'audit', label: '方法体检', en: 'AUDIT' },
+  { id: 'learning', label: '学习中心', en: 'LEARNING' },
   { id: 'terms', label: '术语大全', en: 'TERMS' },
   { id: 'data', label: '数据管理', en: 'DATA' },
 ]
@@ -476,6 +480,7 @@ export default function App() {
             {ssqTab === 'prize' && <SSQPrize />}
             {ssqTab === 'predict' && <SSQPredict draws={ssqDraws} />}
             {ssqTab === 'audit' && <SSQAudit draws={ssqDraws} />}
+            {ssqTab === 'learning' && <LearningCenter game="ssq" />}
             {ssqTab === 'terms' && <SSQTerms />}
             {ssqTab === 'data' && <SSQDataManager draws={ssqDraws} setDraws={setSsqDraws} />}
           </>
@@ -590,6 +595,7 @@ export default function App() {
               ) : (
                 <FC3DAudit game="fc3d" draws={digitDraws} />
               ))}
+            {digitTab === 'learning' && <LearningCenter game={lottery} />}
             {digitTab === 'terms' && <FC3DTerms label={digitLabel} digitCount={digitCount} />}
             {digitTab === 'data' && (
               lottery === 'pl5' ? (
@@ -646,6 +652,7 @@ export default function App() {
             {tab === 'predict' && <Predict draws={draws} onRefreshData={refreshKl8Draws} />}
             {tab === 'prize' && <KL8Prize draws={draws} />}
             {tab === 'audit' && <Audit draws={draws} />}
+            {tab === 'learning' && <LearningCenter game="kl8" />}
             {tab === 'journal' && <Journal draws={draws} />}
             {tab === 'data' && <DataManager draws={draws} setDraws={setDraws} />}
             {tab === 'settings' && <Settings />}

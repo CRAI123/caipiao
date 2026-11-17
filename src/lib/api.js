@@ -98,3 +98,8 @@ export async function storePrediction({ drawId, play, mode, picks, dans = [], tu
 export async function getReviews(limit = 30) {
   return apiFetch(`/api/get-reviews?limit=${limit}`)
 }
+
+/** 学习中心：读取自主学习状态 {state, runs(近60期scored), notes(近12条active)}；无库时 {error:'no_db'} */
+export async function getLearning(game) {
+  return apiFetch(`/api/get-reviews?learning=1&game=${encodeURIComponent(game)}`)
+}

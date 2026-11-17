@@ -10,6 +10,7 @@
 import { resolveLlmSettings, callAi } from './_lib/ai.js'
 import { applyCors } from './_lib/http.js'
 import { getSql, ensureTables } from './_lib/neon.js'
+import { notesForPrompt, persistPredictions } from './_lib/learning.js'
 
 export const config = { maxDuration: 60 }
 
@@ -17,8 +18,8 @@ const GAMES = { fc3d: '福彩3D', pl3: '排列三', pl5: '排列五', ssq: '双�
 // 每位彩种的号码位数：排列三 3 位（直选/组选），排列五 5 位（只有直选）
 const POS_LEN = { fc3d: 3, pl3: 3, pl5: 5 }
 const maskId = (id) => (id ? `尾号${String(id).slice(-4)}` : '匿名设备')
-// 结果结构版本：旧版（纯候选池 / 纯自由推演 / 复核制）命中后重算为「算法候选池 → AI 终选」
-const SCHEMA = 5
+// 结果结构版本：v6 起服务端注入【历史经验笔记】段，命中旧版会重算
+const SCHEMA = 6
 
 /** 某个位数对应的 JSON 输出格式说明（供模型与重试用） */
 function jsonHint(len) {
@@ -367,10 +368,22 @@ export default async function handler(req, res) {
 
     const started = Date.now()
     const llm = await resolveLlmSettings()
+    // 四轮开始前注入 AI 自我复盘沉淀的历史经验笔记（空跳过）
+    let notesText = ''
+    try {
+      notesText = await notesForPrompt(sqlRef, game)
+    } catch {
+      notesText = ''
+    }
+    const notesBlock = notesText
+      ? '\n\n【历史经验笔记（AI 自我复盘沉淀，仅供参考，不提高中奖概率）】\n' + notesText.slice(0, 1200)
+      : ''
+    const noteCount = notesText ? notesText.split('\n').filter(Boolean).length : 0
     const conv = [...msgs]
     const rounds = []
-    for (const r of ROUNDS) {
-      const ask = { role: 'user', content: r.prompt }
+    for (let i = 0; i < ROUNDS.length; i++) {
+      const r = ROUNDS[i]
+      const ask = { role: 'user', content: i === 0 ? r.prompt + notesBlock : r.prompt }
       const text = await callAi(llm, [...conv, ask], { maxTokens: 1200, temperature: r.temperature })
       rounds.push({ name: r.name, text })
       conv.push(ask, { role: 'assistant', content: text })
@@ -494,6 +507,7 @@ export default async function handler(req, res) {
             }
         : null,
       schema: SCHEMA,
+      notesInjected: noteCount,
       rounds,
       roundCount: ROUNDS.length,
       model: llm.llmModel,
@@ -506,6 +520,24 @@ export default async function handler(req, res) {
         UPDATE digit_ai_runs
         SET status = 'done', result = ${JSON.stringify(payload)}::jsonb, updated_at = now()
         WHERE game = ${game} AND draw_id = ${id}`
+    }
+
+    // 本期站内 AI 终选写入学习预测表（draw_id=目标期号，次日由 daily-push 打分；双色球行不参与打分，跳过）
+    try {
+      if (sqlRef && !isSsq && picks) {
+        await persistPredictions(sqlRef, game, id, [
+          {
+            source: 'ai:site',
+            picks: {
+              straight: picks.straight || [],
+              group: picks.group || [],
+              group3: picks.group3 || [],
+            },
+          },
+        ])
+      }
+    } catch (e) {
+      console.warn('digit-ai: 写入学习预测失败：', e.message)
     }
 
     return res.status(200).json({ ...payload, cached: false, owner: maskId(deviceId) })

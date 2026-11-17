@@ -316,7 +316,7 @@ export function backtestFC3Dv2(draws) {
  *              命中率略高（和值 80~82% vs 80~82%，跨度 80~85%）
  *   奇偶命中 75~80% vs v2 70~74%
  */
-const PRO = {
+export const PRO = {
   hedge: { lookback: 24, eta: 0.8, minWeight: 0.02 },
   gapBlend: 0.9,
   markov2Smooth: 3,
@@ -407,7 +407,7 @@ function proContrarian(draws, pos) {
   return proNorm(f.map((v) => Math.max(0.02, 0.1 + (0.1 - v) * 1.5)))
 }
 
-const PRO_EXPERTS = [
+export const PRO_EXPERTS = [
   { key: 'w20', name: '短窗频率 20', fn: (d, p) => proFreq(d, p, 20) },
   { key: 'w60', name: '中窗频率 60', fn: (d, p) => proFreq(d, p, 60) },
   { key: 'w200', name: '长窗频率 200', fn: (d, p) => proFreq(d, p, 200) },
@@ -423,7 +423,7 @@ const PRO_EXPERTS = [
  * Hedge 自适应权重：逐位回看最近 N 期，按各专家的对数损失做指数加权。
  * 损失用 -log p(实际开出数字) 计算，越准的专家权重越高。
  */
-function proHedge(draws, pos) {
+export function proHedge(draws, pos) {
   const K = PRO_EXPERTS.length
   const losses = Array(K).fill(0)
   const counts = Array(K).fill(0)
@@ -521,14 +521,21 @@ function structLogProb(s, model) {
  * 排列三 v3 Pro 推算。
  * 返回值与 v2/v3 完全兼容，另附 topCombos / expertWeights / structBeta 等增强字段。
  */
-export function predictPL3Pro(draws, { cover = 6, beta = PRO.structBeta, coverRate = 0.8 } = {}) {
+export function predictPL3Pro(
+  draws,
+  { cover = 6, beta = PRO.structBeta, coverRate = 0.8, weightsOverride = null } = {},
+) {
   const base = basePredictV2(draws)
   if (!base) return null
   // 样本太少时退化为 v3，避免二阶转移和结构模型没有统计意义
   if (draws.length < 40) return predictFC3Dv2(draws, { cover })
 
   // --- 1. 逐位：9 专家 + Hedge 自适应权重 ---
-  const weightsByPos = [0, 1, 2].map((pos) => proHedge(draws, pos))
+  // weightsOverride：服务端学习状态提供的逐位权重（长度 3、每项长度 9 且归一），
+  // 提供时替代现算的 proHedge 结果；不传时行为与现状完全一致。
+  const weightsByPos = weightsOverride
+    ? [0, 1, 2].map((pos) => weightsOverride[pos] || proHedge(draws, pos))
+    : [0, 1, 2].map((pos) => proHedge(draws, pos))
   const posProb = [0, 1, 2].map((pos) => {
     const w = weightsByPos[pos]
     const probs = Array(10).fill(0)

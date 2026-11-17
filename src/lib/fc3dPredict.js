@@ -672,13 +672,50 @@ function meanStd(arr) {
   return { mean: +m.toFixed(1), std: +Math.sqrt(v).toFixed(1) }
 }
 
+const fc3dNorm = (arr) => {
+  const t = arr.reduce((a, b) => a + b, 0) || 1
+  return arr.map((v) => v / t)
+}
+
+/**
+ * v2 位置评分的四个成分，各自单独归一为 0-9 概率分布（与 predictFC3Dv2
+ * 内部硬编码的 40/30/20/10 权重一一对应），供服务端学习循环逐成分打分调权。
+ */
+export const FC3D_EXPERTS = [
+  {
+    key: 'freq',
+    name: '指数衰减频率',
+    fn: (draws, pos) => fc3dNorm(weightedPosFreq(draws.slice(0, Math.min(50, draws.length)), pos, 0.03)),
+  },
+  {
+    key: 'markov',
+    name: '一阶转移',
+    fn: (draws, pos) => fc3dNorm(transitionMatrix(draws, pos)[draws[0].num[pos]]),
+  },
+  {
+    key: 'omit',
+    name: '遗漏回补',
+    fn: (draws, pos) => fc3dNorm(posOmission(draws, pos).map((v) => Math.min(v, 20) / 20)),
+  },
+  {
+    key: 'lastNot',
+    name: '上期未出',
+    fn: (draws, pos) => {
+      const last = draws[0].num[pos]
+      return fc3dNorm(Array.from({ length: 10 }, (_, d) => (d === last ? 0 : 1)))
+    },
+  },
+]
+
 /**
  * v2 预测引擎：
  * - 百/十/个 位置独立评分（加权频率 + 马尔可夫转移 + 遗漏回补）
  * - 综合评分选出胆码/拖码
  * - 和值/跨度用正态区间（均值±1σ）
+ * weightsOverride：长度 4 的归一权重（freq/markov/omit/lastNot），提供时按
+ * Σ w_i×100×成分_i[d]/max(成分_i) 评分；不传时维持原 40/30/20/10 路径，行为与现状一致。
  */
-export function predictFC3Dv2(draws, { coverRate = 0.8 } = {}) {
+export function predictFC3Dv2(draws, { coverRate = 0.8, weightsOverride = null } = {}) {
   if (draws.length < 10) return null
   const last = draws[0]
   const lastAnalysis = analyzeDraw(last.num)
@@ -704,7 +741,20 @@ export function predictFC3Dv2(draws, { coverRate = 0.8 } = {}) {
 
   // --- 每个位置的综合评分 ---
   const posScores = [] // [百, 十, 个]，每个是 Array(10) 的分数
-  for (let pos = 0; pos < 3; pos++) {
+  if (weightsOverride) {
+    // 学习权重路径：Σ w_i×100×成分_i[d]/max(成分_i)，成分各自归一后按比例还原
+    for (let pos = 0; pos < 3; pos++) {
+      const comps = FC3D_EXPERTS.map((e) => e.fn(draws, pos))
+      const scales = comps.map((c) => Math.max(...c, 1e-12))
+      const scores = Array(10).fill(0)
+      for (let d = 0; d < 10; d++) {
+        for (let i = 0; i < comps.length; i++) {
+          scores[d] += weightsOverride[i] * 100 * (comps[i][d] / scales[i])
+        }
+      }
+      posScores.push(scores)
+    }
+  } else for (let pos = 0; pos < 3; pos++) {
     const freq = weightedPosFreq(recentDraws, pos, 0.03)
     const M = transitionMatrix(draws, pos)
     const omit = posOmission(draws, pos)

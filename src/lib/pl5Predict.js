@@ -12,7 +12,7 @@
 /** 位置标签：万、千、百、十、个 */
 export const PL5_POS = ['万', '千', '百', '十', '个']
 
-const PRO = {
+export const PRO = {
   hedge: { lookback: 24, eta: 0.8, minWeight: 0.02 },
   gapBlend: 0.9,
   markov2Smooth: 3,
@@ -104,7 +104,7 @@ function contrarianNext(draws, pos) {
   return norm(f.map((v) => Math.max(0.02, 0.1 + (0.1 - v) * 1.5)))
 }
 
-const EXPERTS = [
+export const PRO_EXPERTS = [
   { key: 'w20', name: '短窗频率 20', fn: (d, p) => posFreq(d, p, 20) },
   { key: 'w60', name: '中窗频率 60', fn: (d, p) => posFreq(d, p, 60) },
   { key: 'w200', name: '长窗频率 200', fn: (d, p) => posFreq(d, p, 200) },
@@ -117,8 +117,8 @@ const EXPERTS = [
 ]
 
 /** Hedge 自适应权重：按各专家最近 N 期对数损失指数加权 */
-function hedgeWeights(draws, pos) {
-  const K = EXPERTS.length
+export function proHedge(draws, pos) {
+  const K = PRO_EXPERTS.length
   const losses = Array(K).fill(0)
   const counts = Array(K).fill(0)
   let used = 0
@@ -127,7 +127,7 @@ function hedgeWeights(draws, pos) {
     if (hist.length < 20) break
     const actual = draws[t - 1].num[pos]
     for (let i = 0; i < K; i++) {
-      const p = EXPERTS[i].fn(hist, pos)
+      const p = PRO_EXPERTS[i].fn(hist, pos)
       losses[i] += -Math.log(Math.min(0.999, Math.max(1e-4, p[actual])))
       counts[i]++
     }
@@ -143,13 +143,15 @@ function hedgeWeights(draws, pos) {
   return w.map((v) => v / ws)
 }
 
-/** 逐位概率：9 专家按 Hedge 权重混合 */
-function positionProbs(draws) {
-  const weights = [0, 1, 2, 3, 4].map((pos) => hedgeWeights(draws, pos))
+/** 逐位概率：9 专家按 Hedge 权重混合（weightsOverride 提供时替代现算权重） */
+function positionProbs(draws, weightsOverride = null) {
+  const weights = [0, 1, 2, 3, 4].map((pos) =>
+    weightsOverride ? weightsOverride[pos] || proHedge(draws, pos) : proHedge(draws, pos),
+  )
   const probs = [0, 1, 2, 3, 4].map((pos) => {
     const w = weights[pos]
     const out = Array(10).fill(0)
-    EXPERTS.forEach((e, i) => {
+    PRO_EXPERTS.forEach((e, i) => {
       const p = e.fn(draws, pos)
       for (let d = 0; d < 10; d++) out[d] += w[i] * p[d]
     })
@@ -311,10 +313,15 @@ function buildTiers(rankedDigits) {
  * 排列五下期推算。
  * 返回字段与排列三 Pro 尽量同构，方便页面复用；额外带 posLabels / directPlan。
  */
-export function predictPL5(draws, { cover = 6, beta = PRO.structBeta, coverRate = 0.8 } = {}) {
+export function predictPL5(
+  draws,
+  { cover = 6, beta = PRO.structBeta, coverRate = 0.8, weightsOverride = null } = {},
+) {
   if (!Array.isArray(draws) || draws.length < 20) return null
 
-  const { weights, probs } = positionProbs(draws)
+  // weightsOverride：服务端学习状态的逐位权重（长度 5、每项长度 9 且归一），
+  // 提供时替代现算的 proHedge 结果；不传时行为与现状完全一致。
+  const { weights, probs } = positionProbs(draws, weightsOverride)
   const model = buildStructModel(draws)
   const prev = draws[0]?.num || null
 
@@ -503,7 +510,7 @@ export function predictPL5(draws, { cover = 6, beta = PRO.structBeta, coverRate 
     cover,
     tiers,
     topCombos,
-    expertWeights: EXPERTS.map((e, i) => ({
+    expertWeights: PRO_EXPERTS.map((e, i) => ({
       key: e.key,
       name: e.name,
       weight: +((weights.reduce((s, w) => s + w[i], 0) / 5) * 100).toFixed(1),

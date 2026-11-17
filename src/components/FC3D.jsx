@@ -1,7 +1,8 @@
 // 福彩3D 下期推荐 —— 基于多维度术语评分的下期推算 + 上期回算验证
 // 算法档位由 algoInfo 驱动：福彩3D 两档（v1/v2），排列三三档（v1/v2/pro）
-import React, { useMemo, useState } from 'react'
+import React, { useEffect, useMemo, useState } from 'react'
 import * as fc3dEngine from '../lib/fc3dPredict.js'
+import { readLearning } from '../lib/learning.js'
 import DigitAI from './DigitAI.jsx'
 
 function DigitBall({ d, hot, cold, omit }) {
@@ -49,9 +50,58 @@ export default function FC3D({
   const [cover, setCover] = useState(defaultCover)
   const [coverRate, setCoverRate] = useState(0.8)
   const fn = algoFn[algo] || Object.values(algoFn)[0]
+
+  // 学习中心自适应权重：挂载时读一次（切彩种随 game 重读）；none/coldStart 不传 override
+  const [learning, setLearning] = useState(null)
+  useEffect(() => {
+    let alive = true
+    readLearning(game)
+      .then((r) => alive && setLearning(r))
+      .catch(() => {})
+    return () => {
+      alive = false
+    }
+  }, [game])
+  // learning_state 'experts:p0..pN' → 引擎 weightsOverride：
+  // pl3/pl5 为按位顺序数组（每项长度=专家数）；fc3d 引擎取单条扁平权重，逐位平均
+  const learnW = useMemo(() => {
+    if (!learning || learning.source === 'none' || learning.coldStart) return null
+    const experts = engine.FC3D_EXPERTS || engine.PRO_EXPERTS
+    if (!experts) return null
+    const npos = game === 'pl5' ? 5 : 3
+    const fams = []
+    let n = Infinity
+    for (let pos = 0; pos < npos; pos++) {
+      const v = (learning.state.find((s) => s.paramKey === `experts:p${pos}`) || {}).value
+      if (
+        !v ||
+        !Array.isArray(v.keys) ||
+        !Array.isArray(v.weights) ||
+        v.keys.length !== experts.length ||
+        v.weights.length !== experts.length
+      )
+        return null
+      if (!v.weights.every((x) => Number.isFinite(Number(x)))) return null
+      fams.push(v.weights.map(Number))
+      n = Math.min(n, Number(v.n || 0))
+    }
+    const weightsOverride =
+      game === 'fc3d' ? fams[0].map((_, i) => fams.reduce((a, f) => a + f[i], 0) / npos) : fams
+    return { weightsOverride, n }
+  }, [learning, game, engine])
+  const overrideActive =
+    !!learnW &&
+    ((game === 'fc3d' && fn.predict === 'predictFC3Dv2') ||
+      (game === 'pl3' && fn.predict === 'predictPL3Pro') ||
+      (game === 'pl5' && fn.predict === 'predictPL5'))
+
   const pred = useMemo(
-    () => engine[fn.predict](draws, { cover, coverRate }),
-    [draws, engine, fn.predict, cover, coverRate],
+    () =>
+      engine[fn.predict](
+        draws,
+        overrideActive ? { cover, coverRate, weightsOverride: learnW.weightsOverride } : { cover, coverRate },
+      ),
+    [draws, engine, fn.predict, cover, coverRate, overrideActive, learnW],
   )
   const backtest = useMemo(() => engine[fn.backtest](draws), [draws, engine, fn.backtest])
 
@@ -103,6 +153,12 @@ export default function FC3D({
           </span>
         </div>
       </div>
+
+      {overrideActive && (
+        <div className="muted small" style={{ margin: '8px 0' }}>
+          权重来自学习中心（n={learnW.n} 期样本）· 仅优化一致性，不提高中奖概率
+        </div>
+      )}
 
       {/* AI 分析放在最上方，和推荐结果一起看 */}
       <DigitAI

@@ -5,6 +5,46 @@ import { applyCors } from './_lib/http.js'
 
 export default async function handler(req, res) {
   if (applyCors(req, res)) return
+  // GET /api/get-reviews?learning=1&game=kl8 —— 学习中心数据（状态/近60期打分/笔记）
+  if (req.query?.learning) {
+    if (!process.env.DATABASE_URL) return res.status(200).json({ error: 'no_db' })
+    try {
+      const game = String(req.query.game || 'kl8')
+      const sql = getSql()
+      await ensureTables(sql)
+      const [state, runs, notes] = await Promise.all([
+        sql`SELECT param_key, value FROM learning_state WHERE game = ${game} ORDER BY param_key`,
+        sql`
+          SELECT draw_id, source, picks, meta, scored, updated_at
+          FROM learning_predictions
+          WHERE game = ${game} AND scored = true
+          ORDER BY draw_id DESC
+          LIMIT 60`,
+        sql`
+          SELECT id, game, content, meta, created_at
+          FROM ai_experience_notes
+          WHERE game IN (${game}, 'all') AND active = true
+          ORDER BY created_at DESC
+          LIMIT 12`,
+      ])
+      return res.status(200).json({
+        ok: true,
+        game,
+        state: state.map((r) => ({ paramKey: r.param_key, value: r.value })),
+        runs: runs.map((r) => ({
+          drawId: r.draw_id,
+          source: r.source,
+          picks: r.picks,
+          meta: r.meta,
+          updatedAt: r.updated_at,
+        })),
+        notes: notes.map((r) => ({ id: r.id, game: r.game, content: r.content, meta: r.meta, createdAt: r.created_at })),
+      })
+    } catch (e) {
+      console.error('get-reviews learning error:', e)
+      return res.status(500).json({ error: e.message })
+    }
+  }
   try {
     const limit = Math.min(Number(req.query?.limit) || 30, 100)
     const sql = getSql()
