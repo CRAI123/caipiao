@@ -15,8 +15,9 @@ import {
   ZONE3,
   ZONE4,
 } from '../lib/ssqPredict.js'
-import { runDigitAi, peekDigitAi } from '../lib/api.js'
+import { runDigitAi, peekDigitAi, auditDigitAi } from '../lib/api.js'
 import { getDeviceId } from '../lib/device.js'
+import { buildSsqReview } from '../lib/aiReview.js'
 import { fakeAnalyze, sharedWaitSeconds } from '../lib/aiWait.js'
 
 const LEVEL_CLASS = { 热: 'hot', 温: 'warm', 冷: 'cold' }
@@ -41,10 +42,25 @@ function SsqAiCard({ draws, pred }) {
   const [pct, setPct] = useState(0)
   const [elapsed, setElapsed] = useState(0)
   const [stale, setStale] = useState(false)
+  const [audit, setAudit] = useState([])
   const busyRef = useRef(false)
   const latestId = Number(draws?.[0]?.id) || 0
   const pool = useMemo(() => ssqCandidatePool(pred), [pred])
   const picks = meta?.picks || null
+
+  // 上期复盘：上期 AI 终选 vs 实际开奖，既用于本轮提示，也直接展示
+  useEffect(() => {
+    let alive = true
+    auditDigitAi({ game: 'ssq' })
+      .then((r) => {
+        if (alive && r?.ok) setAudit(r.runs || [])
+      })
+      .catch(() => {})
+    return () => {
+      alive = false
+    }
+  }, [])
+  const review = useMemo(() => buildSsqReview(audit, draws), [audit, draws])
 
   // 切页回来时从共享缓存恢复本期解析
   useEffect(() => {
@@ -104,6 +120,19 @@ function SsqAiCard({ draws, pred }) {
     setPct(4)
     setElapsed(0)
     try {
+      // 上期复盘：重新读取历史 AI 记录，对照上期实际开奖后作为本轮提示
+      let runs = audit
+      try {
+        const a = await auditDigitAi({ game: 'ssq' })
+        if (a?.ok) {
+          runs = a.runs || []
+          setAudit(runs)
+        }
+      } catch {
+        /* 读取失败时沿用已加载的记录 */
+      }
+      const reviewNow = buildSsqReview(runs, draws)
+
       // 本期已有共享结果：走一遍模拟进度，让后来的人也有分析体验
       const cached = await peekDigitAi({ game: 'ssq', drawId: latestId }).catch(() => null)
       if (cached?.exists && cached.status === 'done' && cached.result?.text) {
@@ -116,7 +145,7 @@ function SsqAiCard({ draws, pred }) {
         game: 'ssq',
         drawId: latestId,
         label: '双色球',
-        messages: buildSsqMessages(draws, pred),
+        messages: buildSsqMessages(draws, pred, '双色球', reviewNow?.text || ''),
         algo: pool,
         deviceId: getDeviceId()?.id || '',
       })
@@ -198,6 +227,13 @@ function SsqAiCard({ draws, pred }) {
           4 轮 AI 分析（结构解读 → 反向质询 → 算法候选终选 → 终审校验），结果全站共享；每期保留最后一次，可在「方法体检」查看是否命中
         </span>
       </div>
+
+      {review && (
+        <div className="note note-info" style={{ marginTop: 10 }}>
+          <b>上期复盘 · 第 {review.drawId} 期（AI 上期号码 vs 实际开奖）</b>
+          <div style={{ marginTop: 4, whiteSpace: 'pre-wrap', lineHeight: 1.8 }}>{review.text}</div>
+        </div>
+      )}
 
       {busy && (
         <div style={{ marginTop: 14 }}>

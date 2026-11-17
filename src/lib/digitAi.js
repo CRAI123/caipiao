@@ -190,8 +190,8 @@ const SYSTEM_PROMPT = `你是「研彩室」的彩票数据分析助手，服务
 3. 组合参考：给出 3 注直选、2 注组六、1 注组三，逐注写明「算法排名 + 结构依据」
 4. 风险提示：预算上限与理性购彩提醒`
 
-/** 组装 messages（纯函数，便于离线校验） */
-export function buildDigitMessages(summary, label = '排列三') {
+/** 组装 messages（纯函数，便于离线校验）；review = 上期复盘结论，可选 */
+export function buildDigitMessages(summary, label = '排列三', review = '') {
   if (!summary) return null
   const s = summary
   const fmtPos = (name, p) =>
@@ -224,6 +224,14 @@ export function buildDigitMessages(summary, label = '排列三') {
     `- 组六候选池 8 组：${fmtAlgo(rank?.group, 8)}`,
     `- 组三候选池 5 组：${fmtAlgo(rank?.group3, 5)}`,
     '',
+    ...(review
+      ? [
+          '【上期复盘（程序对照上一期实际开奖计算）】',
+          String(review).slice(0, 800),
+          '请结合上面的偏差修正本期选号：在候选池内优先结构与修正方向一致的组合；不得因此声称提高中奖概率，也不得承诺命中。',
+          '',
+        ]
+      : []),
     '请按系统提示词的结构输出：从上面的候选池里终选 3 注直选 + 2 注组六 + 1 注组三，不得自创池外号码。',
   ]
   return [
@@ -401,8 +409,8 @@ const PL5_SYSTEM_PROMPT = `你是「研彩室」的彩票数据分析助手，�
 3. 组合参考：给出 5 注直选，逐注写明「算法排名 + 结构依据」
 4. 风险提示：预算上限与理性购彩提醒`
 
-/** 组装排列五 messages（纯函数，便于离线校验） */
-export function buildPL5Messages(summary, label = '排列五') {
+/** 组装排列五 messages（纯函数，便于离线校验）；review = 上期复盘结论，可选 */
+export function buildPL5Messages(summary, label = '排列五', review = '') {
   if (!summary) return null
   const s = summary
   const POS_NAMES = ['万位', '千位', '百位', '十位', '个位']
@@ -434,6 +442,14 @@ export function buildPL5Messages(summary, label = '排列五') {
     '底层算法全盘评分（频率35% + 近30期30% + 遗漏15% + 同位转移20%），已从全盘 10 万注里选出候选池：',
     `- 直选候选池 20 注：${fmtAlgo(rank?.straight, 20)}`,
     '',
+    ...(review
+      ? [
+          '【上期复盘（程序对照上一期实际开奖计算）】',
+          String(review).slice(0, 800),
+          '请结合上面的偏差修正本期选号：在候选池内优先结构与修正方向一致的组合；不得因此声称提高中奖概率，也不得承诺命中。',
+          '',
+        ]
+      : []),
     '请按系统提示词的结构输出：从上面的候选池里终选 5 注直选，不得自创池外号码。',
   ]
   return [

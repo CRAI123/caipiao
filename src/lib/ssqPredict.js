@@ -1080,8 +1080,8 @@ const SSQ_SYSTEM_PROMPT = `你是「研彩室」的双色球数据分析助手�
 3. 组合参考：给出 6 个红球 + 1 个蓝球，逐号写明「算法排名 + 结构依据」
 4. 风险提示：预算上限与理性购彩提醒`
 
-/** 组装双色球 AI 终选的 messages（纯函数，便于离线校验） */
-export function buildSsqMessages(draws, pred, label = '双色球') {
+/** 组装双色球 AI 终选的 messages（纯函数，便于离线校验）；review = 上期复盘结论，可选 */
+export function buildSsqMessages(draws, pred, label = '双色球', review = '') {
   if (!pred || !Array.isArray(draws) || !draws.length) return null
   const latest = draws[0]
   const a = analyzeDraw(latest)
@@ -1108,6 +1108,14 @@ export function buildSsqMessages(draws, pred, label = '双色球') {
     `- 蓝球评分前 4：${blueDesc}`,
     `- 候选池红球 ${pool?.red.length || 0} 个、蓝球 ${pool?.blue.length || 0} 个`,
     '',
+    ...(review
+      ? [
+          '【上期复盘（程序对照上一期实际开奖计算）】',
+          String(review).slice(0, 800),
+          '请结合上面的偏差修正本期终选：在候选池内优先结构与修正方向一致的组合；不得因此声称提高中奖概率，也不得承诺命中。',
+          '',
+        ]
+      : []),
     '请按系统提示词的结构输出：从上面的候选池里终选 6 个红球 + 1 个蓝球，不得自创池外号码。',
   ]
   return [

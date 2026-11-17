@@ -13,8 +13,9 @@ import {
   isBig,
   road,
 } from '../lib/stats.js'
-import { aiDeep, peekDeep, storePrediction } from '../lib/api.js'
+import { aiDeep, peekDeep, storePrediction, auditKl8Ai } from '../lib/api.js'
 import { getDeviceId } from '../lib/device.js'
+import { buildKl8Review } from '../lib/aiReview.js'
 import { v7Recommend } from '../lib/kl8V7.js'
 import { fmtPct } from '../lib/kl8Math.js'
 import { fakeAnalyze, sharedWaitSeconds } from '../lib/aiWait.js'
@@ -79,6 +80,7 @@ export default function Predict({ draws, onRefreshData }) {
   const [phase, setPhase] = useState('')
   const [pct, setPct] = useState(0)
   const [elapsed, setElapsed] = useState(0)
+  const [kl8Audit, setKl8Audit] = useState([])
 
   const { scores, weighted, missing, window } = useMemo(
     () => scoreBalls(draws, { periods: 100, halfLife: 20, hotMode }),
@@ -177,6 +179,20 @@ export default function Predict({ draws, onRefreshData }) {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [nextDrawId, play])
 
+  // 上期复盘：读取快乐8 历史 AI 终选，与最新一期实际开奖对照
+  useEffect(() => {
+    let alive = true
+    auditKl8Ai({ play })
+      .then((r) => {
+        if (alive && r?.ok) setKl8Audit(r.runs || [])
+      })
+      .catch(() => {})
+    return () => {
+      alive = false
+    }
+  }, [play])
+  const review = useMemo(() => buildKl8Review(kl8Audit, draws), [kl8Audit, draws])
+
   const bet = useMemo(
     () => ({
       ok: true,
@@ -244,7 +260,20 @@ export default function Predict({ draws, onRefreshData }) {
 
       const drawId = Number(fresh[0].id) + 1
 
-      // 2. 本期是否已有共享解析
+      // 2. 上期复盘：重新读取历史 AI 终选，对照上期实际开奖后作为本轮提示
+      let runs = kl8Audit
+      try {
+        const a = await auditKl8Ai({ play })
+        if (a?.ok) {
+          runs = a.runs || []
+          setKl8Audit(runs)
+        }
+      } catch {
+        /* 读取失败时沿用已加载的记录 */
+      }
+      const reviewNow = buildKl8Review(runs, fresh)
+
+      // 3. 本期是否已有共享解析
       let cached = null
       try {
         const p = await peekDeep({ drawId, play })
@@ -267,7 +296,7 @@ export default function Predict({ draws, onRefreshData }) {
       // 5. 首位用户：真实分析（12 次大模型调用，进度按轮次推进）
       const dev = getDeviceId()
       const timer = fakeAnalyze({ seconds: 40, stages: KL8_STAGES, onTick })
-      const result = await aiDeep({ draws: fresh, play, deviceId: dev?.id || '' })
+      const result = await aiDeep({ draws: fresh, play, deviceId: dev?.id || '', review: reviewNow?.text || '' })
       await timer
       setDeep(result)
       setDeepOwner(result.owner || '')
@@ -445,6 +474,14 @@ export default function Predict({ draws, onRefreshData }) {
           奇偶接近均衡。这让号码形态更像常见开奖，<b>但不提高中奖概率</b>。
         </Note>
       </Card>
+
+      {review && (
+        <Card title={`上期复盘 · 第 ${review.drawId} 期`} tag="AI 上期终选 vs 实际开奖">
+          <div className="predict-sub" style={{ marginTop: 2 }}>{review.headline}</div>
+          <div className="small" style={{ marginTop: 6, whiteSpace: 'pre-wrap', lineHeight: 1.8 }}>{review.text}</div>
+          <Note>复盘只用于修正本期选号思路；开奖独立随机，每个号码 25% 的概率不会因此改变。</Note>
+        </Card>
+      )}
 
       {deep && (
         <Card

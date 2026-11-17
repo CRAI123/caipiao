@@ -19,6 +19,7 @@ import {
 } from '../lib/digitAi.js'
 import { runDigitAi, peekDigitAi, auditDigitAi } from '../lib/api.js'
 import { getDeviceId } from '../lib/device.js'
+import { buildDigitReview } from '../lib/aiReview.js'
 import { fakeAnalyze, sharedWaitSeconds } from '../lib/aiWait.js'
 
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms))
@@ -175,6 +176,12 @@ function DigitAIInner({ draws, label = '福彩3D', game = 'fc3d', onRefreshData,
     }
   }, [game])
 
+  // 上期复盘：上期 AI 号码 vs 实际开奖，既用于本轮提示，也直接展示在卡片上
+  const review = useMemo(
+    () => buildDigitReview(audit || [], draws || [], digitCount),
+    [audit, draws, digitCount],
+  )
+
   // 回测同时算「纯算法基准」：用同一期当时的历史数据做全盘评分，公平对照 AI 是否更好
   const backtest = useMemo(() => {
     if (!Array.isArray(audit) || !Array.isArray(draws)) return null
@@ -249,7 +256,20 @@ function DigitAIInner({ draws, label = '福彩3D', game = 'fc3d', onRefreshData,
 
       const drawId = Number(latestFresh.id)
 
-      // 2. 本期是否已有共享解析（旧版结构没有号码，视为需要重算）
+      // 2. 上期复盘：重新读取历史 AI 记录，对照上期实际开奖后作为本轮提示
+      let runs = audit || []
+      try {
+        const a = await auditDigitAi({ game })
+        if (a?.ok) {
+          runs = a.runs || []
+          setAudit(runs)
+        }
+      } catch {
+        /* 读取失败时沿用已加载的记录，没有记录就跳过复盘 */
+      }
+      const reviewNow = buildDigitReview(runs, fresh, digitCount)
+
+      // 3. 本期是否已有共享解析（旧版结构没有号码，视为需要重算）
       let cached = null
       let old = null
       try {
@@ -293,7 +313,7 @@ function DigitAIInner({ draws, label = '福彩3D', game = 'fc3d', onRefreshData,
           game,
           drawId,
           label,
-          messages: (is5 ? buildPL5Messages : buildDigitMessages)(freshSummary, label),
+          messages: (is5 ? buildPL5Messages : buildDigitMessages)(freshSummary, label, reviewNow?.text || ''),
           algo: is5 ? pl5CandidatePool(freshSummary) : digitCandidatePool(freshSummary),
           deviceId: getDeviceId()?.id || '',
         })
@@ -406,6 +426,13 @@ function DigitAIInner({ draws, label = '福彩3D', game = 'fc3d', onRefreshData,
           4 轮 AI 分析（结构解读 → 反向质询 → 算法候选终选 → 终审校验），结果全站共享；点击会先同步最新开奖数据
         </span>
       </div>
+
+      {review && (
+        <div className="note note-info" style={{ marginTop: 10 }}>
+          <b>上期复盘 · 第 {review.drawId} 期（AI 上期号码 vs 实际开奖）</b>
+          <div style={{ marginTop: 4, whiteSpace: 'pre-wrap', lineHeight: 1.8 }}>{review.text}</div>
+        </div>
+      )}
 
       {busy && (
         <div style={{ marginTop: 14 }}>

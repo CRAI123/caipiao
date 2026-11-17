@@ -120,14 +120,14 @@ function calibText(calib) {
   )
 }
 
-function buildContext(draws, play, v7, calib, bt) {
+function buildContext(draws, play, v7, calib, bt, review = '') {
   const nextId = draws[0].id + 1
   const pool = v7.pool.map((x) => `${pad(x.n)}(分${x.score},遗${x.miss})`).join(' ')
   const kill = v7.kill.map((x) => pad(x.n)).join(' ')
   const recent = draws.slice(0, 10)
     .map((d) => `第${d.id}期：${d.nums.map(pad).join(' ')}`)
     .join('\n')
-  return [
+  const lines = [
     `目标：第 ${nextId} 期，玩法「${KL8_PLAY_LABEL[play] || `选${play}`}」，给出 ${play} 个号码。`,
     '',
     `推荐池 30 码（号码(综合分,当前遗漏)）：${pool}`,
@@ -143,8 +143,17 @@ function buildContext(draws, play, v7, calib, bt) {
     `  结构选号 ${play} 码平均命中 ${bt.pickMean} 个（随机期望 ${bt.pickExp}，z=${bt.zPick}）`,
     `  结论：${bt.significant ? '达到 5% 显著性（仍需警惕多重比较）' : '与随机无显著差异'}`,
     '',
-    '请在推荐池内选号并按格式输出 JSON。',
-  ].join('\n')
+  ]
+  if (review) {
+    lines.push(
+      '【上期复盘（程序对照上一期实际开奖计算）】',
+      String(review).slice(0, 800),
+      '请结合上期偏差修正本期终选思路（区间配比、奇偶结构等），但不得声称因此提高中奖概率，也不得承诺命中。',
+      '',
+    )
+  }
+  lines.push('请在推荐池内选号并按格式输出 JSON。')
+  return lines.join('\n')
 }
 
 function schemaPrompt(play) {
@@ -260,7 +269,7 @@ export default async function handler(req, res) {
   let sqlRef = null
   let claimedKey = null
   try {
-    const { draws = [], play = 10, action = 'run', deviceId = '', drawId } = req.body || {}
+    const { draws = [], play = 10, action = 'run', deviceId = '', drawId, review = '' } = req.body || {}
 
     // ---- 只读：历史 AI 终选记录（用于方法体检的命中对照） ----
     if (action === 'audit') {
@@ -401,7 +410,7 @@ export default async function handler(req, res) {
     }
     const calib = kl8Calibration(history, 300)
     const bt = walkForward(history, { periods: 60, play: k })
-    const context = buildContext(history, k, v7, calib, bt)
+    const context = buildContext(history, k, v7, calib, bt, review)
     const poolSet = new Set(v7.pool.map((x) => x.n))
 
     const llm = await resolveLlmSettings()
