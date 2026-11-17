@@ -1,4 +1,4 @@
-import React, { useCallback, useEffect, useMemo, useState } from 'react'
+import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import logoImg from './assets/logo.webp'
 import { HISTORY_DRAWS, SAMPLE_DRAWS } from './data/sample.js'
 import Overview from './components/Overview.jsx'
@@ -15,6 +15,8 @@ import KL8Prize from './components/KL8Prize.jsx'
 import Journal from './components/Journal.jsx'
 import DataManager from './components/DataManager.jsx'
 import Settings from './components/Settings.jsx'
+import ChangelogDialog from './components/ChangelogDialog.jsx'
+import { CHANGELOG } from './data/changelog.js'
 import AccessGate from './components/AccessGate.jsx'
 import Admin from './components/Admin.jsx'
 import FC3D from './components/FC3D.jsx'
@@ -94,6 +96,23 @@ function markAutoFetched(lottery) {
     sessionStorage.setItem(AUTO_FETCH_PREFIX + lottery, '1')
   } catch {
     /* sessionStorage 不可用时不去重，最多多抓一次 */
+  }
+}
+
+// ---------- 更新公告已读记录（localStorage，Tauri 桌面端同样可用） ----------
+const CHANGELOG_SEEN_KEY = 'caipiao.changelog.seen'
+function readChangelogSeen() {
+  try {
+    return localStorage.getItem(CHANGELOG_SEEN_KEY) || ''
+  } catch {
+    return '' // 存储不可用时视为未读，最多多弹一次
+  }
+}
+function writeChangelogSeen(version) {
+  try {
+    localStorage.setItem(CHANGELOG_SEEN_KEY, version)
+  } catch {
+    /* 忽略 */
   }
 }
 
@@ -187,6 +206,26 @@ export default function App() {
   const [myReq, setMyReq] = useState(null) // 我的申请记录
   const [isAdmin, setIsAdmin] = useState(false)
   const [forceAdmin, setForceAdmin] = useState(false) // 门禁页直接打开后台
+
+  // ---------- 更新公告：新版本自动弹一次，之后靠头部红点手动查看 ----------
+  const [changelogOpen, setChangelogOpen] = useState(false)
+  const [seenVersion, setSeenVersion] = useState(readChangelogSeen)
+  const changelogAutoShown = useRef(false)
+  const changelogLatest = CHANGELOG[0]?.version || ''
+  const changelogUnread = seenVersion !== changelogLatest
+
+  useEffect(() => {
+    if (gate !== 'open' || !changelogLatest || changelogAutoShown.current) return
+    if (readChangelogSeen() === changelogLatest) return
+    changelogAutoShown.current = true
+    setChangelogOpen(true)
+  }, [gate, changelogLatest])
+
+  const closeChangelog = useCallback(() => {
+    setChangelogOpen(false)
+    writeChangelogSeen(changelogLatest)
+    setSeenVersion(changelogLatest)
+  }, [changelogLatest])
 
   const refresh = useCallback(() => setTick((t) => t + 1), [])
 
@@ -449,6 +488,11 @@ export default function App() {
                 </div>
               </>
             )}
+            {/* 更新公告入口 */}
+            <button className="changelog-btn" onClick={() => setChangelogOpen(true)} title="查看软件更新内容">
+              更新公告
+              {changelogUnread && <em className="tab-dot" title="有新更新" />}
+            </button>
             {/* 彩票类型滑块 */}
             <div className="lottery-switch" role="tablist" aria-label="彩种切换">
               <button
@@ -751,6 +795,8 @@ export default function App() {
         </p>
         <p className="mono">research · not betting advice · 18+ only</p>
       </footer>
+
+      <ChangelogDialog open={changelogOpen} onClose={closeChangelog} />
     </div>
   )
 }

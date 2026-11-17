@@ -1758,3 +1758,95 @@ code {
   .learn-bar-row { grid-template-columns: 76px 1fr 50px; }
   .learn-params { grid-template-columns: 1fr; }
 }
+
+/* ---------- 更新公告 ---------- */
+.changelog-btn {
+  appearance: none;
+  display: inline-block;
+  font-family: var(--font-serif);
+  font-size: 12.5px;
+  letter-spacing: 2px;
+  color: var(--ink-80);
+  background: var(--card);
+  border: 1px solid var(--ink-20);
+  border-radius: 4px;
+  padding: 3px 12px;
+  margin-top: 8px;
+  cursor: pointer;
+  box-shadow: var(--shadow-hard);
+}
+.changelog-btn:hover { border-color: var(--red); color: var(--red); }
+.changelog-mask {
+  position: fixed;
+  inset: 0;
+  background: rgba(28, 24, 18, 0.45);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  z-index: 9999;
+  padding: 20px;
+}
+.changelog-card {
+  background: var(--card);
+  border: 1px solid var(--ink-20);
+  border-top: 3px double var(--ink);
+  border-radius: 8px;
+  box-shadow: 0 18px 48px rgba(0, 0, 0, 0.28);
+  width: min(92vw, 560px);
+  max-height: 84vh;
+  overflow-y: auto;
+  padding: 0 22px 14px;
+}
+.changelog-head {
+  position: sticky;
+  top: 0;
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  background: var(--card);
+  border-bottom: 1px dashed var(--ink-20);
+  padding: 14px 0 10px;
+}
+.changelog-head h3 { margin: 0; font-size: 19px; letter-spacing: 6px; }
+.changelog-close {
+  appearance: none;
+  border: 1px solid var(--ink-20);
+  background: transparent;
+  border-radius: 4px;
+  width: 28px;
+  height: 28px;
+  font-size: 17px;
+  line-height: 1;
+  color: var(--ink-60);
+  cursor: pointer;
+}
+.changelog-close:hover { border-color: var(--red); color: var(--red); }
+.changelog-latest { padding-top: 6px; }
+.changelog-entry { padding: 8px 0; }
+.changelog-history .changelog-entry { border-top: 1px dashed var(--ink-08); }
+.changelog-ver { font-size: 11.5px; color: var(--ink-40); letter-spacing: 1px; }
+.changelog-title { margin: 2px 0 6px; font-size: 15.5px; color: var(--red-deep); }
+.changelog-items { margin: 0; padding-left: 20px; font-size: 13.5px; line-height: 1.8; }
+.changelog-items li { margin: 2px 0; }
+.changelog-history { border-top: 1px dashed var(--ink-20); margin-top: 10px; padding-top: 8px; }
+.changelog-toggle {
+  appearance: none;
+  background: transparent;
+  border: none;
+  font-family: var(--font-serif);
+  font-size: 13px;
+  letter-spacing: 1px;
+  color: var(--ink-60);
+  cursor: pointer;
+  padding: 4px 0;
+}
+.changelog-toggle:hover { color: var(--red); }
+.changelog-foot {
+  border-top: 1px dashed var(--ink-20);
+  margin: 12px 0 0;
+  padding-top: 10px;
+  font-size: 10.5px;
+  letter-spacing: 1px;
+  color: var(--ink-40);
+  text-align: center;
+}
