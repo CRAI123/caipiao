@@ -20,8 +20,8 @@ function Entry({ entry }) {
 
 export default function ChangelogDialog({ open, onClose }) {
   const [historyOpen, setHistoryOpen] = useState(false)
-  if (!open) return null
   const [latest, ...history] = CHANGELOG
+  if (!open || !latest) return null
   return (
     <div className="changelog-mask" role="presentation" onClick={onClose}>
       <div className="changelog-card" role="dialog" aria-modal="true" aria-label="更新公告" onClick={(e) => e.stopPropagation()}>

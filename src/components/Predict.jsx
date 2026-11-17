@@ -20,6 +20,8 @@ import { v7Recommend } from '../lib/kl8V7.js'
 import { readLearning } from '../lib/learning.js'
 import { fmtPct } from '../lib/kl8Math.js'
 import { fakeAnalyze, sharedWaitSeconds } from '../lib/aiWait.js'
+import { buildFunFacts } from '../lib/aiFunFacts.js'
+import AiWaitTheater from './AiWaitTheater.jsx'
 import BetVerify from './BetVerify.jsx'
 
 const MODES = [
@@ -45,6 +47,21 @@ const KL8_STAGES = [
   '第 10/12 轮 · Opus 5.5 交叉复核',
   '第 11/12 轮 · Opus 5 交叉复核',
   '第 12/12 轮 · Sonnet 5 交叉复核',
+]
+
+// 等待剧场分步文案：desc 均为 api/ai-deep.js 实际流程的事实描述
+const WAIT_STAGES = [
+  { label: KL8_STAGES[0], desc: '拉取最新开奖，整理近 100 期统计样本' },
+  { label: '样本外回测 · 近 60 期严格前推', desc: '每期只用该期之前的数据建池，对照命中与随机期望' },
+  ...KL8_STAGES.slice(1, 10).map((label) => ({
+    label,
+    desc: '独立调用一次大模型给号，不参考其他轮结果',
+  })),
+  ...KL8_STAGES.slice(10).map((label) => ({
+    label,
+    desc: '对照第一轮共识与回测结果复核，可换号但需说明理由',
+  })),
+  { label: '第 13 步 · 20 码候选终审收敛', desc: '12 轮投票与算法分加权出 20 码，AI 从中定最终 10 码' },
 ]
 
 const bandOf = (n) => Math.min(3, Math.floor((n - 1) / 20))
@@ -82,6 +99,8 @@ export default function Predict({ draws, onRefreshData }) {
   const [pct, setPct] = useState(0)
   const [elapsed, setElapsed] = useState(0)
   const [kl8Audit, setKl8Audit] = useState([])
+
+  const waitFacts = useMemo(() => buildFunFacts('kl8', draws), [draws])
 
   const { scores, weighted, missing, window } = useMemo(
     () => scoreBalls(draws, { periods: 100, halfLife: 20, hotMode }),
@@ -402,53 +421,7 @@ export default function Predict({ draws, onRefreshData }) {
       </div>
 
       {deepBusy && (
-        <div style={{ marginBottom: 10 }}>
-          <div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: 6 }}>
-            <span className="small" style={{ fontWeight: 700 }}>
-              {phase || KL8_STAGES[0]}
-            </span>
-            <span className="mono small muted">已用 {elapsed} 秒</span>
-          </div>
-          <div style={{ height: 10, borderRadius: 5, background: '#ece6da', overflow: 'hidden' }}>
-            <div
-              style={{
-                height: '100%',
-                width: `${pct}%`,
-                background: 'linear-gradient(90deg, #c23a2b, #e0a24a)',
-                transition: 'width 0.4s ease',
-              }}
-            />
-          </div>
-          <div className="chip-row" style={{ marginTop: 8 }}>
-            {[
-              { name: '独立分析 9 轮', from: 1, to: 9 },
-              { name: '交叉复核 3 轮', from: 10, to: 12 },
-            ].map((g) => {
-              const cur = Math.max(0, Math.min(12, Math.round((pct / 100) * 13) - 1))
-              const passed = cur > g.to
-              const active = cur >= g.from && cur <= g.to
-              return (
-                <span
-                  key={g.name}
-                  className="chip"
-                  style={{
-                    opacity: active || passed ? 1 : 0.45,
-                    borderColor: active ? '#c23a2b' : undefined,
-                    color: active ? '#c23a2b' : undefined,
-                  }}
-                >
-                  <i>
-                    {passed ? '✓ ' : ''}
-                    {g.name}
-                  </i>
-                </span>
-              )
-            })}
-            <span className="mono small muted" style={{ alignSelf: 'center' }}>
-              共 12 轮 · {pct}%
-            </span>
-          </div>
-        </div>
+        <AiWaitTheater stages={WAIT_STAGES} facts={waitFacts} pct={pct} elapsedSec={elapsed} />
       )}
 
       <Card title={`第 ${nextId} 期 · ${PLAY_LABEL[play]} 研究推荐`} tag="评分前列 + 结构约束 · 三张单式票">

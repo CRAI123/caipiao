@@ -21,6 +21,8 @@ import { runDigitAi, peekDigitAi, auditDigitAi } from '../lib/api.js'
 import { getDeviceId } from '../lib/device.js'
 import { buildDigitReview } from '../lib/aiReview.js'
 import { fakeAnalyze, sharedWaitSeconds } from '../lib/aiWait.js'
+import { buildFunFacts } from '../lib/aiFunFacts.js'
+import AiWaitTheater from './AiWaitTheater.jsx'
 
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms))
 
@@ -31,6 +33,17 @@ const ROUND_STAGES = [
   '第 3/4 轮 · 算法候选终选',
   '第 4/4 轮 · 终审校验',
 ]
+
+// 等待剧场分步文案：desc 均为 api/digit-ai.js 四轮实际职责的事实描述
+const WAIT_STAGES = ROUND_STAGES.map((label, i) => ({
+  label,
+  desc: [
+    '通读位置频率、遗漏、和值与跨度统计，解读本期号码结构',
+    '以质疑者身份审查第一轮结论，标记过度解读与样本不足',
+    '只在算法候选池内终选号码，输出推荐与理由',
+    '逐个校验注数、位数与候选池归属，不合规即替换为次优号',
+  ][i],
+}))
 
 // 结果结构版本：与服务端 SCHEMA 对齐，旧版（候选池 / 自由推演 / 复核制）会重算
 const SCHEMA = 5
@@ -65,6 +78,7 @@ function DigitAIInner({ draws, label = '福彩3D', game = 'fc3d', onRefreshData,
   const [stale, setStale] = useState(false)
 
   const is5 = digitCount === 5
+  const waitFacts = useMemo(() => buildFunFacts(game, draws), [game, draws])
   const summary = useMemo(() => {
     if (!Array.isArray(draws) || !draws.length) return null
     return (is5 ? summarizeDigit5 : summarizeDigit)(draws, 100)
@@ -435,53 +449,7 @@ function DigitAIInner({ draws, label = '福彩3D', game = 'fc3d', onRefreshData,
       )}
 
       {busy && (
-        <div style={{ marginTop: 14 }}>
-          <div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: 6 }}>
-            <span className="small" style={{ fontWeight: 700 }}>
-              {phase || ROUND_STAGES[0]}
-            </span>
-            <span className="mono small muted">已用 {elapsed} 秒</span>
-          </div>
-          <div
-            style={{
-              height: 10,
-              borderRadius: 5,
-              background: '#ece6da',
-              overflow: 'hidden',
-            }}
-          >
-            <div
-              style={{
-                height: '100%',
-                width: `${pct}%`,
-                background: 'linear-gradient(90deg, #c23a2b, #e0a24a)',
-                transition: 'width 0.4s ease',
-              }}
-            />
-          </div>
-          <div style={{ display: 'flex', gap: 8, marginTop: 8, flexWrap: 'wrap' }}>
-            {ROUND_STAGES.map((s, i) => {
-              const current = phase === s
-              const passed = pct >= Math.round(((i + 1) / ROUND_STAGES.length) * 100) - 1
-              return (
-                <span
-                  key={s}
-                  className="chip"
-                  style={{
-                    opacity: current || passed ? 1 : 0.45,
-                    borderColor: current ? '#c23a2b' : undefined,
-                    color: current ? '#c23a2b' : undefined,
-                  }}
-                >
-                  <i>{passed ? '✓ ' : ''}{s}</i>
-                </span>
-              )
-            })}
-          </div>
-          <div className="mono small muted" style={{ marginTop: 6 }}>
-            {pct}%
-          </div>
-        </div>
+        <AiWaitTheater stages={WAIT_STAGES} facts={waitFacts} pct={pct} elapsedSec={elapsed} />
       )}
 
       {error && <div className="note note-warn">{error}</div>}

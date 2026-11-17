@@ -1850,3 +1850,95 @@ code {
   color: var(--ink-40);
   text-align: center;
 }
+
+/* ---------- AI 等待剧场：分析过程直播 + 冷知识轮播 ---------- */
+.wait-theater {
+  margin-top: 14px;
+  border: 1px solid var(--ink-20);
+  background: var(--card);
+  box-shadow: var(--shadow-hard);
+  padding: 12px 14px 14px;
+}
+.wait-theater-head {
+  display: flex;
+  justify-content: space-between;
+  align-items: baseline;
+  margin-bottom: 8px;
+  border-bottom: 1px dashed var(--ink-20);
+  padding-bottom: 6px;
+}
+.wait-theater-title {
+  font-size: 13px;
+  font-weight: 700;
+  letter-spacing: 2px;
+  color: var(--red-deep);
+}
+.wait-theater-steps {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: grid;
+  gap: 1px;
+}
+.wait-theater-step {
+  display: flex;
+  gap: 8px;
+  align-items: baseline;
+  font-size: 12.5px;
+  line-height: 1.75;
+}
+.wait-theater-mark { width: 14px; flex: none; text-align: center; }
+.wait-theater-step-done { color: var(--ink-40); }
+.wait-theater-step-done .wait-theater-mark { color: var(--blue); }
+.wait-theater-step-done .wait-theater-label { text-decoration: line-through; text-decoration-color: var(--ink-20); }
+.wait-theater-step-active { color: var(--ink); }
+.wait-theater-step-active .wait-theater-mark { color: var(--red); }
+.wait-theater-step-active .wait-theater-label { font-weight: 700; }
+.wait-theater-step-todo { color: var(--ink-40); }
+.wait-theater-desc {
+  color: var(--ink-60);
+  border-left: 1px solid var(--ink-20);
+  padding-left: 8px;
+  margin-left: 2px;
+}
+.wait-theater-caret {
+  display: inline-block;
+  width: 6px;
+  height: 12px;
+  margin-left: 2px;
+  vertical-align: -1px;
+  background: var(--red);
+  animation: wt-blink 0.9s steps(2, start) infinite;
+}
+@keyframes wt-blink { to { visibility: hidden; } }
+.wait-theater-fact {
+  position: relative;
+  margin-top: 12px;
+  border: 1px dashed var(--ink-20);
+  background: var(--paper);
+  padding: 10px 12px 11px;
+  animation: wt-fade 0.45s ease;
+}
+@keyframes wt-fade {
+  from { opacity: 0; transform: translateY(4px); }
+  to { opacity: 1; transform: none; }
+}
+.wait-theater-fact-count {
+  position: absolute;
+  top: 6px;
+  right: 9px;
+  font-size: 10.5px;
+  letter-spacing: 1px;
+  color: var(--ink-40);
+}
+.wait-theater-fact-title {
+  font-size: 11.5px;
+  letter-spacing: 2px;
+  color: var(--red);
+  margin-bottom: 4px;
+}
+.wait-theater-fact-text {
+  font-size: 13px;
+  line-height: 1.7;
+  color: var(--ink-80);
+}
