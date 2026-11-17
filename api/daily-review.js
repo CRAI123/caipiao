@@ -82,22 +82,29 @@ export default async function handler(req, res) {
     const scoredGames = GAMES.filter((g) => learning[g] && learning[g].skipped === false)
 
     // 3. AI 自我复盘：有新打分才尝试（内部有 7 天 / 5 期门槛与超时保护）
+    //    ?advice=1 为手动测试开关：即使本期没有新打分也生成一次改善建议
+    const adviceGames = scoredGames.length ? scoredGames : req.query?.advice === '1' ? GAMES : []
     let note = null
-    if (scoredGames.length) {
+    let adviceText = ''
+    if (adviceGames.length) {
       try {
         const llm = await resolveLlmSettings()
         if (llm?.llmKey) {
           const learnedOf = {}
-          for (const g of scoredGames) learnedOf[g] = await loadLearning(sql, g)
-          const recentSummary = await buildRecentSummary(sql, scoredGames, learnedOf)
-          note = await maybeGenerateNotes(sql, llm, {
-            games: scoredGames,
-            recentSummary,
-            elapsedMs: Date.now() - started,
-          })
+          for (const g of adviceGames) learnedOf[g] = await loadLearning(sql, g)
+          const recentSummary = await buildRecentSummary(sql, adviceGames, learnedOf)
+          if (scoredGames.length) {
+            note = await maybeGenerateNotes(sql, llm, {
+              games: scoredGames,
+              recentSummary,
+              elapsedMs: Date.now() - started,
+            })
+          }
+          // 经验笔记有门槛（每周最多一条），报告里的改善建议则每晚单独生成一份，不写入长期笔记
+          if (!note) adviceText = await generateAdvice(llm, recentSummary, learning)
         }
       } catch (e) {
-        console.error('[daily-review] 经验笔记生成失败：', e?.message || e)
+        console.error('[daily-review] 经验笔记/改善建议生成失败：', e?.message || e)
       }
     }
 
@@ -121,6 +128,7 @@ export default async function handler(req, res) {
       beforeOf,
       afterOf,
       note,
+      adviceText,
       review,
       elapsedMs: Date.now() - started,
     })
@@ -146,6 +154,7 @@ export default async function handler(req, res) {
       elapsedMs: Date.now() - started,
       learning,
       noteGenerated: Boolean(note),
+      advice: note?.note || adviceText || '',
       review,
       feishu,
       ...(isDry ? { card } : {}),
@@ -230,8 +239,42 @@ function ruleAdvice(learning, afterOf) {
   return out.slice(0, 5)
 }
 
+/** 每晚单独生成一份报告用改善建议（不写入长期经验笔记，也不注入后续分析） */
+async function generateAdvice(llm, recentSummary, learning) {
+  try {
+    const brief = GAMES.map((g) => {
+      const r = learning[g] || {}
+      if (!r.skipped) {
+        return `${GAME_LABEL[g]} 第 ${r.drawId} 期，更新 ${(r.updated || []).length} 组权重`
+      }
+      if (r.reason === 'already_scored') return `${GAME_LABEL[g]} 本期无新开奖（上次已学到第 ${r.drawId} 期）`
+      return `${GAME_LABEL[g]} 未参与本期学习`
+    }).join('\n')
+
+    const text = await callAi(
+      llm,
+      [
+        {
+          role: 'system',
+          content:
+            '你是彩票选号系统的算法复盘助手。只做方法与工程层面的复盘：针对权重学习、特征有效性、样本量，给出 2-3 条具体可执行的改善建议。硬性要求：不预测号码，不暗示能提高中奖概率，不编造数据，只依据给定数据；样本不足时明确建议保持默认权重继续观察。每行一条，以「· 」开头，每条不超过 45 个汉字，不要额外解释。',
+        },
+        {
+          role: 'user',
+          content: `【本期学习】\n${brief}\n\n【历史数据】\n${String(recentSummary || '').slice(0, 4000)}`,
+        },
+      ],
+      { maxTokens: 320, temperature: 0.4 },
+    )
+    return String(text || '').trim()
+  } catch (e) {
+    console.error('[daily-review] 改善建议生成失败：', e?.message || e)
+    return ''
+  }
+}
+
 /** 夜间学习报告卡片 */
-function buildLearningCard({ dateText, learning, beforeOf, afterOf, note, review, elapsedMs }) {
+function buildLearningCard({ dateText, learning, beforeOf, afterOf, note, adviceText, review, elapsedMs }) {
   const line = (content) => ({ tag: 'div', text: { tag: 'lark_md', content } })
   const grey = (s) => `<font color='grey'>${s}</font>`
   const HR = { tag: 'hr' }
@@ -282,7 +325,11 @@ function buildLearningCard({ dateText, learning, beforeOf, afterOf, note, review
         HR,
         ...(weightLines.length ? [line('**当前权重**（百分比，按族内归一）'), ...weightLines, HR] : []),
         line('**AI 复盘与改善建议**'),
-        line(note?.note || grey('本期未生成新笔记（门槛：距上条 7 天或新增 5 期打分样本）')),
+        line(
+          note?.note ||
+            adviceText ||
+            grey('模型未就绪或调用失败，本期只有下方规则检查结论（下次会重试）'),
+        ),
         HR,
         line('**本期检查结论**'),
         ...advice.map((a) => line(`· ${a}`)),
