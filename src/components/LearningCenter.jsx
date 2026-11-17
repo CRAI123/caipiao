@@ -24,7 +24,7 @@ const HIT_SOURCES = {
   fc3d: ['ai:final', 'ai:site'],
   pl3: ['ai:final', 'ai:site'],
   pl5: ['ai:final', 'ai:site'],
-  ssq: ['algo:ssq'],
+  ssq: ['algo:ssq', 'ai:final', 'ai:site'],
 }
 
 const SOURCE_COLOR = {

@@ -522,18 +522,20 @@ export default async function handler(req, res) {
         WHERE game = ${game} AND draw_id = ${id}`
     }
 
-    // 本期站内 AI 终选写入学习预测表（draw_id=目标期号，次日由 daily-push 打分；双色球行不参与打分，跳过）
+    // 本期站内 AI 终选写入学习预测表（draw_id=目标期号，次日由 daily-push 打分）
     try {
-      if (sqlRef && !isSsq && picks) {
+      if (sqlRef && picks) {
         await persistPredictions(sqlRef, game, id, [
-          {
-            source: 'ai:site',
-            picks: {
-              straight: picks.straight || [],
-              group: picks.group || [],
-              group3: picks.group3 || [],
-            },
-          },
+          isSsq
+            ? { source: 'ai:site', picks: { red: picks.red, blue: picks.blue } }
+            : {
+                source: 'ai:site',
+                picks: {
+                  straight: picks.straight || [],
+                  group: picks.group || [],
+                  group3: picks.group3 || [],
+                },
+              },
         ])
       }
     } catch (e) {

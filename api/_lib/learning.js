@@ -428,14 +428,16 @@ export async function scoreAndLearn(sql, game, draws) {
         await markScored('hedge:experts', { actual: actual.num, perExpertLoss })
       }
     } else if (game === 'ssq') {
-      // ── 算法推荐行：红球命中 + 蓝球对 ──
-      const picks = bySource.get('algo:ssq')
-      if (picks && Array.isArray(picks.red)) {
+      // ── 推荐行命中打分：算法 + 站内 AI 终选（红球命中 + 蓝球对）──
+      for (const source of ['algo:ssq', 'ai:site', 'ai:final']) {
+        const picks = bySource.get(source)
+        if (!picks || !Array.isArray(picks.red) || !picks.red.length) continue
         const actualRed = new Set(actual.red)
         const redHits = picks.red.filter((n) => actualRed.has(n)).length
         const blueHit = picks.blue === actual.blue
-        const loss = hitLoss(redHits, 6, 6 / 33) + hitLoss(blueHit ? 1 : 0, 1, 1 / 16)
-        await markScored('algo:ssq', {
+        // AI 行红球可能 6-8 个，按实际选号数计损失（每号期望命中概率 6/33）
+        const loss = hitLoss(redHits, picks.red.length, 6 / 33) + hitLoss(blueHit ? 1 : 0, 1, 1 / 16)
+        await markScored(source, {
           actual: { red: actual.red, blue: actual.blue },
           redHits,
           blueHit,
