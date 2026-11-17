@@ -20,14 +20,25 @@ import {
   buildRecentSummary,
   maybeGenerateNotes,
 } from './_lib/learning.js'
+import { loadFeishuTarget, sendFeishuCard } from './_lib/feishu.js'
 
 export const config = { maxDuration: 60 }
 
 const PLAY = 10 // 快乐8 默认选十
 const GAMES = ['kl8', 'fc3d', 'pl3', 'pl5', 'ssq']
+const GAME_LABEL = { kl8: '快乐8', fc3d: '福彩3D', pl3: '排列三', pl5: '排列五', ssq: '双色球' }
 
 export default async function handler(req, res) {
   if (applyCors(req, res)) return
+  const isTest = req.method === 'POST' || req.query?.test === '1'
+  const isDry = req.query?.dry === '1'
+
+  // 配置了 CRON_SECRET 时，定时调用需带 Bearer；手动（POST/test）不受影响
+  const cronSecret = process.env.CRON_SECRET
+  if (cronSecret && req.method === 'GET' && !isTest && req.headers.authorization !== `Bearer ${cronSecret}`) {
+    return res.status(401).json({ error: '未授权' })
+  }
+
   const started = Date.now()
   try {
     const sql = getSql()
@@ -43,6 +54,16 @@ export default async function handler(req, res) {
       safeFetch(fetchSsqDraws),
     ])
     const drawMap = { kl8: kl8Draws, fc3d: fc3dDraws, pl3: pl3Draws, pl5: pl5Draws, ssq: ssqDraws }
+
+    // 学习前快照（报告里对比权重用）
+    const beforeOf = {}
+    for (const g of GAMES) {
+      try {
+        beforeOf[g] = await loadLearning(sql, g)
+      } catch {
+        beforeOf[g] = null
+      }
+    }
 
     // 2. 逐彩种打分学习（该期已打过分则 skipped，可安全重复触发）
     const learning = {}
@@ -79,10 +100,41 @@ export default async function handler(req, res) {
     // 4. 快乐8 当期复盘记录
     const review = kl8Draws[0] ? await reviewKl8(sql, kl8Draws[0]) : { skipped: true, reason: 'no_data' }
 
+    // 学习后权重（报告展示用）
+    const afterOf = {}
+    for (const g of GAMES) {
+      try {
+        afterOf[g] = await loadLearning(sql, g)
+      } catch {
+        afterOf[g] = null
+      }
+    }
+
+    // 5. 飞书夜间学习报告（含 AI 改善建议）
+    const card = buildLearningCard({
+      dateText: beijingDateText(),
+      learning,
+      beforeOf,
+      afterOf,
+      note,
+      review,
+      elapsedMs: Date.now() - started,
+    })
+    let feishu = { ok: false, error: 'dry' }
+    if (!isDry) {
+      try {
+        const target = await loadFeishuTarget(sql)
+        feishu = await sendFeishuCard(target, card)
+        if (!feishu.ok) console.error('[daily-review] 飞书报告发送失败：', feishu.error)
+      } catch (e) {
+        feishu = { ok: false, error: String(e?.message || e) }
+      }
+    }
+
     console.log(
       `[daily-review] 完成：打分 ${scoredGames.join(',') || '无'}；笔记 ${
         note ? '已生成' : '未触发'
-      }；历时 ${Date.now() - started}ms`,
+      }；飞书 ${feishu.ok ? '已发送' : feishu.error}；历时 ${Date.now() - started}ms`,
     )
     return res.status(200).json({
       ok: true,
@@ -91,10 +143,156 @@ export default async function handler(req, res) {
       learning,
       noteGenerated: Boolean(note),
       review,
+      feishu,
+      ...(isDry ? { card } : {}),
     })
   } catch (e) {
     console.error('daily-review error:', e)
     return res.status(500).json({ error: e.message })
+  }
+}
+
+/** 北京时间 MM-DD */
+function beijingDateText() {
+  const t = new Date(Date.now() + 8 * 3600 * 1000)
+  return `${String(t.getUTCMonth() + 1).padStart(2, '0')}-${String(t.getUTCDate()).padStart(2, '0')}`
+}
+
+/** 权重数组按百分比展示（消除默认值未归一化的差异） */
+function pct(arr) {
+  if (!Array.isArray(arr) || !arr.length) return ''
+  const s = arr.reduce((a, b) => a + (Number(b) || 0), 0) || 1
+  return arr.map((v) => Math.round(((Number(v) || 0) / s) * 100)).join('/')
+}
+
+const FAM_LABEL = {
+  model: '模型',
+  temp: '温度',
+  mix: 'AI/算法配比',
+  windows: '窗口',
+  redSignals: '红球信号',
+  blueSignals: '蓝球信号',
+}
+
+/** 某彩种当前权重摘要（冷启动返回空） */
+function weightSummary(st) {
+  if (!st || st.coldStart) return ''
+  if (st.experts) {
+    return Object.entries(st.experts)
+      .map(([p, w]) => `${p} ${pct(w)}`)
+      .join('｜')
+  }
+  return Object.entries(FAM_LABEL)
+    .filter(([k]) => st[k]?.weights)
+    .map(([k, label]) => `${label} ${pct(st[k].weights)}`)
+    .join('｜')
+}
+
+/** 规则型改善建议（不依赖 AI，保证报告里总有可执行内容） */
+function ruleAdvice(learning, afterOf) {
+  const out = []
+  for (const g of GAMES) {
+    const r = learning[g] || {}
+    const st = afterOf[g]
+    if (r.skipped && r.reason === 'no_data') {
+      out.push(`${GAME_LABEL[g]}：本期没抓到新开奖，未参与学习`)
+      continue
+    }
+    if (st?.coldStart) {
+      out.push(`${GAME_LABEL[g]}：样本还不够，权重继续按默认值运行（不做过度调整）`)
+      continue
+    }
+    // 权重是否过度集中（单族最大占比 ≥55% 且成员 ≥3）
+    if (st?.experts) {
+      for (const [p, w] of Object.entries(st.experts)) {
+        const max = Math.max(...w)
+        if (w.length >= 3 && max >= 0.55) {
+          out.push(`${GAME_LABEL[g]} ${p} 专家权重集中在单个专家（${(max * 100).toFixed(0)}%），若连续跑输可考虑回退默认`)
+        }
+      }
+    } else {
+      for (const k of ['model', 'temp', 'redSignals', 'blueSignals']) {
+        const w = st?.[k]?.weights
+        if (!Array.isArray(w) || w.length < 3) continue
+        const max = Math.max(...w)
+        const sum = w.reduce((a, b) => a + b, 0) || 1
+        if (max / sum >= 0.55) {
+          out.push(`${GAME_LABEL[g]} 的${FAM_LABEL[k]}权重集中在单项（${((max / sum) * 100).toFixed(0)}%），注意跟踪其后续表现`)
+        }
+      }
+    }
+  }
+  if (!out.length) out.push('五个彩种权重整体平稳，未发现异常集中，保持当前设置即可')
+  return out.slice(0, 5)
+}
+
+/** 夜间学习报告卡片 */
+function buildLearningCard({ dateText, learning, beforeOf, afterOf, note, review, elapsedMs }) {
+  const line = (content) => ({ tag: 'div', text: { tag: 'lark_md', content } })
+  const grey = (s) => `<font color='grey'>${s}</font>`
+  const HR = { tag: 'hr' }
+
+  const rows = GAMES.map((g) => {
+    const r = learning[g] || {}
+    if (!r.skipped) {
+      const updated = Array.isArray(r.updated) ? r.updated.length : 0
+      return line(`**${GAME_LABEL[g]}** 已学习第 ${r.drawId} 期 · 更新 ${updated} 组权重`)
+    }
+    const why =
+      r.reason === 'already_scored'
+        ? `已学过（第 ${r.drawId} 期）`
+        : r.reason === 'no_data'
+          ? '无新开奖'
+          : r.reason || '跳过'
+    return line(`${GAME_LABEL[g]} ${grey(why)}`)
+  })
+
+  const weightLines = GAMES.map((g) => {
+    const now = weightSummary(afterOf[g])
+    if (!now) return null
+    const prev = weightSummary(beforeOf[g])
+    const changed = prev && prev !== now
+    return line(`${GAME_LABEL[g]}：${now}${changed ? grey('（本期有变动）') : grey('（未变动）')}`)
+  }).filter(Boolean)
+
+  const reviewLine =
+    review && !review.skipped && review.hits != null
+      ? line(`**快乐8 复盘** 第 ${review.drawId} 期命中 ${review.hits}/10，单注奖金 ${review.prize} 元`)
+      : null
+
+  const advice = ruleAdvice(learning, afterOf)
+
+  return {
+    msg_type: 'interactive',
+    card: {
+      config: { wide_screen_mode: true },
+      header: {
+        template: 'turquoise',
+        title: { tag: 'plain_text', content: `夜间学习报告 · ${dateText}` },
+      },
+      elements: [
+        line(grey(`开奖后自我学习 · 用时 ${(elapsedMs / 1000).toFixed(1)}s`)),
+        ...rows,
+        reviewLine,
+        HR,
+        ...(weightLines.length ? [line('**当前权重**（百分比，按族内归一）'), ...weightLines, HR] : []),
+        line('**AI 复盘与改善建议**'),
+        line(note?.note || grey('本期未生成新笔记（门槛：距上条 7 天或新增 5 期打分样本）')),
+        HR,
+        line('**本期检查结论**'),
+        ...advice.map((a) => line(`· ${a}`)),
+        HR,
+        {
+          tag: 'note',
+          elements: [
+            {
+              tag: 'plain_text',
+              content: '自动学习只优化一致性与可解释性，不提高中奖概率；以上不构成投注建议。',
+            },
+          ],
+        },
+      ].filter(Boolean),
+    },
   }
 }
 
