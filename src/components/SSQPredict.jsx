@@ -31,23 +31,27 @@ const sleep = (ms) => new Promise((r) => setTimeout(r, ms))
 
 // 与服务端 api/digit-ai.js 的 roundsSsq 一一对应
 const AI_ROUNDS = [
-  '第 1/4 轮 · 结构解读',
-  '第 2/4 轮 · 反向质询',
-  '第 3/4 轮 · 算法候选终选',
-  '第 4/4 轮 · 终审校验',
+  '第 1/6 轮 · 结构解读',
+  '第 2/6 轮 · 反向质询',
+  '第 3/6 轮 · 红球专项',
+  '第 4/6 轮 · 蓝球专项',
+  '第 5/6 轮 · 算法候选终选',
+  '第 6/6 轮 · 终审校验',
 ]
 
-// 等待剧场分步文案：desc 均为 api/digit-ai.js roundsSsq 四轮实际职责的事实描述
+// 等待剧场分步文案：desc 均为 api/digit-ai.js roundsSsq 六轮实际职责的事实描述
 const WAIT_STAGES = AI_ROUNDS.map((label, i) => ({
   label,
   desc: [
     '通读区间分布、冷热、遗漏与和值统计，解读红蓝球结构',
     '以质疑者身份审查第一轮结论，标记过度解读与样本不足',
+    '红球专项：分析区间分布、连号重号与冷热遗漏，筛出重点红球',
+    '蓝球专项：分析大小奇偶、遗漏与振幅，筛出重点蓝球',
     '只在红球 12 + 蓝球 4 候选池内终选 6 红 1 蓝',
     '校验红球 6 个不重复、蓝球范围与候选池归属，不合规即替换',
   ][i],
 }))
-const AI_SCHEMA = 5
+const AI_SCHEMA = 7
 
 // AI 终选：算法候选池 → AI 只在池内终选 6 红 + 1 蓝，结果全站共享、每期一条记录
 function SsqAiCard({ draws, pred }) {
@@ -117,6 +121,7 @@ function SsqAiCard({ draws, pred }) {
     setPhase(AI_ROUNDS[0])
     setPct(4)
     setElapsed(0)
+    let waitTimer = null
     try {
       // 上期复盘：重新读取历史 AI 记录，对照上期实际开奖后作为本轮提示
       let runs = audit
@@ -138,7 +143,8 @@ function SsqAiCard({ draws, pred }) {
         applyResult(cached.result, cached.owner)
         return
       }
-      fakeAnalyze({ seconds: 45, stages: AI_ROUNDS, onTick })
+      const timer = fakeAnalyze({ seconds: 55, stages: AI_ROUNDS, onTick })
+      waitTimer = timer
       const r = await runDigitAi({
         game: 'ssq',
         drawId: latestId,
@@ -147,6 +153,7 @@ function SsqAiCard({ draws, pred }) {
         algo: pool,
         deviceId: getDeviceId()?.id || '',
       })
+      await timer
       setMeta({
         model: r.model,
         at: r.at,
@@ -160,6 +167,7 @@ function SsqAiCard({ draws, pred }) {
       setPct(100)
       setPhase('分析完成')
     } catch (e) {
+      waitTimer?.cancel?.()
       // 别人正在分析：等待并轮询共享结果
       if (e?.status === 409) {
         setPhase('本期已有用户在分析，等待结果同步…')

@@ -196,7 +196,7 @@ export default function Predict({ draws, onRefreshData }) {
           setElapsed(0)
           setPhase('正在读取本期共享解析…')
           await fakeAnalyze({
-            seconds: sharedWaitSeconds(),
+            seconds: sharedWaitSeconds('kl8'),
             stages: KL8_STAGES,
             onTick: ({ elapsed: s, pct: p, stage }) => {
               setElapsed(s)
@@ -298,6 +298,7 @@ export default function Predict({ draws, onRefreshData }) {
       setPct(p)
       setPhase(stage)
     }
+    let waitTimer = null
     try {
       // 1. 强制刷新开奖数据，避免用页面上的旧数据
       let fresh = draws
@@ -337,7 +338,7 @@ export default function Predict({ draws, onRefreshData }) {
       // 4. 已有共享解析：模拟一段分析等待，让后看的人也有体验
       if (cached) {
         setPhase('正在读取本期共享解析…')
-        await fakeAnalyze({ seconds: sharedWaitSeconds(), stages: KL8_STAGES, onTick })
+        await fakeAnalyze({ seconds: sharedWaitSeconds('kl8'), stages: KL8_STAGES, onTick })
         setDeep({ ...cached.result, cached: true, owner: cached.owner, cachedAt: cached.cachedAt })
         setDeepOwner(cached.owner || '')
         setPct(100)
@@ -347,7 +348,8 @@ export default function Predict({ draws, onRefreshData }) {
 
       // 5. 首位用户：真实分析（12 次大模型调用，进度按轮次推进）
       const dev = getDeviceId()
-      const timer = fakeAnalyze({ seconds: 40, stages: KL8_STAGES, onTick })
+      const timer = fakeAnalyze({ seconds: 65, stages: KL8_STAGES, onTick })
+      waitTimer = timer
       const result = await aiDeep({ draws: fresh, play, deviceId: dev?.id || '', review: reviewNow?.text || '' })
       await timer
       setDeep(result)
@@ -368,6 +370,7 @@ export default function Predict({ draws, onRefreshData }) {
         /* 存档失败不影响展示 */
       }
     } catch (e) {
+      waitTimer?.cancel?.()
       setDeepErr(e.message || 'AI 深度分析失败')
       setPhase('')
     } finally {

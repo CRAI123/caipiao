@@ -18,8 +18,10 @@ export const AI_STAGES = [
 export function fakeAnalyze({ seconds = 26, stages = AI_STAGES, onTick } = {}) {
   const target = Math.max(1, seconds) * 1000
   const start = Date.now()
-  return new Promise((resolve) => {
-    let id = null
+  let id = null
+  let finish = null
+  const promise = new Promise((resolve) => {
+    finish = resolve
     const tick = () => {
       const elapsed = Date.now() - start
       const pct = Math.min(99, Math.round((elapsed / target) * 100))
@@ -27,13 +29,26 @@ export function fakeAnalyze({ seconds = 26, stages = AI_STAGES, onTick } = {}) {
       onTick?.({ elapsed: Math.floor(elapsed / 1000), pct, stage })
       if (elapsed >= target) {
         clearInterval(id)
+        id = null
         resolve()
       }
     }
     id = setInterval(tick, 400)
     tick()
   })
+  // 出错/走别的分支时提前收尾，避免计时器继续改写进度与阶段文案
+  promise.cancel = () => {
+    if (id) {
+      clearInterval(id)
+      id = null
+    }
+    finish?.()
+  }
+  return promise
 }
 
-/** 随机 22–34 秒，用于「后看的人」的共享结果 */
-export const sharedWaitSeconds = () => 22 + Math.floor(Math.random() * 13)
+/** 随机 55–80 秒（快乐8：9 次独立 + 3 次复核 + 终审），34–48 秒（数字彩/双色球多轮） */
+export const sharedWaitSeconds = (kind = 'digit') =>
+  kind === 'kl8'
+    ? 55 + Math.floor(Math.random() * 26)
+    : 34 + Math.floor(Math.random() * 15)

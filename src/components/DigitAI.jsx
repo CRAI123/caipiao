@@ -46,7 +46,7 @@ const WAIT_STAGES = ROUND_STAGES.map((label, i) => ({
 }))
 
 // 结果结构版本：与服务端 SCHEMA 对齐，旧版（候选池 / 自由推演 / 复核制）会重算
-const SCHEMA = 5
+const SCHEMA = 7
 
 const digitsOf = (s, digitCount = 3) => String(s).replace(/\D/g, '').slice(0, digitCount)
 
@@ -198,6 +198,7 @@ function DigitAIInner({ draws, label = '福彩3D', game = 'fc3d', onRefreshData,
     setPhase('正在同步最新开奖数据…')
     setPct(3)
     setElapsed(0)
+    let waitTimer = null
     try {
       // 1. 强制刷新开奖数据
       let fresh = draws
@@ -264,9 +265,10 @@ function DigitAIInner({ draws, label = '福彩3D', game = 'fc3d', onRefreshData,
         return
       }
 
-      // 5. 首位用户：真实三轮分析（进度按轮次推进，不等待模拟计时结束）
+      // 5. 首位用户：真实多轮分析（进度按轮次推进；至少走满模拟时长，避免「秒出」显得不真实）
       setPhase(ROUND_STAGES[0])
-      fakeAnalyze({ seconds: 45, stages: ROUND_STAGES, onTick })
+      const timer = fakeAnalyze({ seconds: 55, stages: ROUND_STAGES, onTick })
+      waitTimer = timer
       try {
         const r = await runDigitAi({
           game,
@@ -276,6 +278,7 @@ function DigitAIInner({ draws, label = '福彩3D', game = 'fc3d', onRefreshData,
           algo: is5 ? pl5CandidatePool(freshSummary) : digitCandidatePool(freshSummary),
           deviceId: getDeviceId()?.id || '',
         })
+        await timer
         setText(r.text)
         setMeta({
           model: r.model,
@@ -312,17 +315,21 @@ function DigitAIInner({ draws, label = '福彩3D', game = 'fc3d', onRefreshData,
                 finalNote: p.result.finalNote,
               })
               if (p.result.schema !== SCHEMA) setStale(true)
+              waitTimer?.cancel?.()
               setPct(100)
               setPhase('分析完成')
               return
             }
             setPct(Math.min(96, 20 + i * 7))
           }
+          waitTimer?.cancel?.()
           throw new Error('本期分析仍在进行中，请过一会儿再点一次查看')
         }
+        waitTimer?.cancel?.()
         throw e
       }
     } catch (e) {
+      waitTimer?.cancel?.()
       setError(e?.message || String(e))
       setPhase('')
     } finally {

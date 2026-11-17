@@ -36,8 +36,8 @@ const MODELS = [
 ]
 const TEMPS = [0.65, 0.85, 1.0]
 const ROUND2_WEIGHT = 1.5
-// 结果结构版本：v4 起 round1Picks 带 modelId/temp/weight（供学习循环按模型×温度打分）
-const SCHEMA = 4
+// 结果结构版本：v5 起终审不足 10 个时按算法融合顺序补齐，不再整体回退
+const SCHEMA = 5
 
 const bandOf = (n) => Math.min(3, Math.floor((n - 1) / 20))
 const pad = (n) => String(n).padStart(2, '0')
@@ -569,13 +569,24 @@ ${schemaPrompt(k)}`
     const wideNums = wide.map((x) => x.n)
     try {
       const judge = await askOnce(llm, MODELS[0].id, messages3, 0.3, 700)
-      const picked = [...new Set((judge?.picks || []).map(Number))].filter((n) => wideNums.includes(n))
-      if (picked.length === 10) {
-        finalTen = picked
+      const picked = [...new Set((judge?.picks || []).map(Number))]
+        .filter((n) => wideNums.includes(n))
+        .slice(0, 10)
+      if (picked.length) {
+        // 终审不足 10 个时按算法融合顺序补齐，保证永远正好给出 10 个
+        const filled = [...picked]
+        for (const n of finalTen) {
+          if (filled.length >= 10) break
+          if (!filled.includes(n)) filled.push(n)
+        }
+        finalTen = filled.slice(0, 10)
         finalTenSource = 'ai'
-        finalTenNote = String(judge.summary || '').slice(0, 200)
+        finalTenNote =
+          picked.length === 10
+            ? String(judge.summary || '').slice(0, 200)
+            : `AI 终审给出 ${picked.length} 个有效号，其余 ${10 - picked.length} 个按算法融合顺序补齐`
       } else {
-        finalTenNote = '终审给出有效号码不足 10 个，已回退到算法融合结果'
+        finalTenNote = '终审未给出有效号码，已采用算法融合结果'
       }
     } catch (e) {
       finalTenNote = `终审调用失败（${e.message || e}），已回退到算法融合结果`

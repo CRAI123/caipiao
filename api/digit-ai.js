@@ -18,8 +18,8 @@ const GAMES = { fc3d: '福彩3D', pl3: '排列三', pl5: '排列五', ssq: '双�
 // 每位彩种的号码位数：排列三 3 位（直选/组选），排列五 5 位（只有直选）
 const POS_LEN = { fc3d: 3, pl3: 3, pl5: 5 }
 const maskId = (id) => (id ? `尾号${String(id).slice(-4)}` : '匿名设备')
-// 结果结构版本：v6 起服务端注入【历史经验笔记】段，命中旧版会重算
-const SCHEMA = 6
+// 结果结构版本：v7 起双色球扩为六轮（新增红球/蓝球专项），命中旧版会重算
+const SCHEMA = 7
 
 /** 某个位数对应的 JSON 输出格式说明（供模型与重试用） */
 function jsonHint(len) {
@@ -33,7 +33,7 @@ function jsonHintSsq() {
   return '{"red":[1,7,12,18,25,30],"blue":7,"reasons":{"1":"一句话理由"},"summary":"80 字内","risk":"一句风险提示"}'
 }
 
-/** 双色球四轮：红球 6 个 + 蓝球 1 个，只能在算法候选池内终选 */
+/** 双色球六轮：结构解读 → 反向质询 → 红球专项 → 蓝球专项 → 算法候选终选 → 终审校验 */
 function roundsSsq() {
   return [
     {
@@ -49,9 +49,25 @@ function roundsSsq() {
       temperature: 0.3,
     },
     {
+      name: '红球专项',
+      prompt:
+        '第三轮：只做红球专项——结合上面的统计，分析红球的区间分布、连号与重号倾向、冷热与遗漏，给出 8-10 个优先关注的红球候选并说明取舍。' +
+        '不要给出最终 6 个，不要编造数据，不要承诺中奖。控制在 250 字内。',
+      temperature: 0.4,
+      maxTokens: 600,
+    },
+    {
+      name: '蓝球专项',
+      prompt:
+        '第四轮：只做蓝球专项——分析蓝球的大小、奇偶、遗漏与近期振幅，给出 2-3 个优先关注的蓝球候选并说明取舍。' +
+        '不要编造数据，不要承诺中奖。控制在 150 字内。',
+      temperature: 0.4,
+      maxTokens: 400,
+    },
+    {
       name: '算法候选终选',
       prompt:
-        '第三轮：只能从上面给出的算法候选池里终选本期号码——红球 6 个、蓝球 1 个，不得自创池外号码。' +
+        '第五轮：综合前面四轮的结论，只能从上面给出的算法候选池里终选本期号码——红球 6 个、蓝球 1 个，不得自创池外号码。' +
         '只输出一个 JSON 对象，不要解释文字、不要代码块围栏。格式：' +
         jsonHintSsq() +
         '。red 必须正好 6 个（1-33，升序、不重复），blue 必须正好 1 个（1-16），且都来自候选池；reasons 的键必须是上面出现过的红球号码。',
@@ -60,7 +76,7 @@ function roundsSsq() {
     {
       name: '终审校验',
       prompt:
-        '第四轮：终审校验上一轮结果——逐个检查：红球是否正好 6 个、在 1-33 之间且不重复；蓝球是否在 1-16 之间；是否都在算法候选池内。' +
+        '第六轮：终审校验上一轮结果——逐个检查：红球是否正好 6 个、在 1-33 之间且不重复；蓝球是否在 1-16 之间；是否都在算法候选池内。' +
         '有不合规的立即替换为候选池里的次优号。只输出最终 JSON（格式同上一轮），不要解释文字、不要代码块围栏。' +
         'risk 必须写明「一等奖概率 1/17721088 不变」。',
       temperature: 0.2,
@@ -384,7 +400,10 @@ export default async function handler(req, res) {
     for (let i = 0; i < ROUNDS.length; i++) {
       const r = ROUNDS[i]
       const ask = { role: 'user', content: i === 0 ? r.prompt + notesBlock : r.prompt }
-      const text = await callAi(llm, [...conv, ask], { maxTokens: 1200, temperature: r.temperature })
+      const text = await callAi(llm, [...conv, ask], {
+        maxTokens: r.maxTokens || 1200,
+        temperature: r.temperature,
+      })
       rounds.push({ name: r.name, text })
       conv.push(ask, { role: 'assistant', content: text })
     }

@@ -51,8 +51,8 @@ const STATUS_KEY = 'daily_push_last'
 const HISTORY_KEY = 'daily_push_history'
 const FRESH_RETRY_MS = 1500
 // AI 终选与站内共用同一套结构版本号，只有同版本的历史结果才复用
-const DIGIT_SCHEMA = 6
-const KL8_SCHEMA = 4
+const DIGIT_SCHEMA = 7
+const KL8_SCHEMA = 5
 // 单个 AI 调用最多等这么久，超时就发算法结果，避免整个推送被拖死
 const AI_TIMEOUT_MS = 38000
 
@@ -585,17 +585,28 @@ async function buildKl8Ai({ draws, built, sql, llm }) {
     const obj = extractJson(raw)
     const picked = [
       ...new Set((Array.isArray(obj?.picks) ? obj.picks : []).map(Number).filter(Number.isInteger)),
-    ].filter((n) => wide.includes(n))
-    if (picked.length === 10) {
+    ]
+      .filter((n) => wide.includes(n))
+      .slice(0, 10)
+    if (picked.length) {
+      // 不足 10 个时按算法融合顺序补齐，保证永远正好 10 码
+      const ten = [...picked]
+      for (const n of algoTen) {
+        if (ten.length >= 10) break
+        if (!ten.includes(n)) ten.push(n)
+      }
       return {
         ...base,
-        ten: picked.sort((a, b) => a - b),
+        ten: ten.slice(0, 10).sort((a, b) => a - b),
         source: 'ai',
-        note: '算法 20 码 → AI 终审完成',
+        note:
+          picked.length === 10
+            ? '算法 20 码 → AI 终审完成'
+            : `AI 终审给出 ${picked.length} 个有效号，其余 ${10 - picked.length} 个由算法融合补齐`,
         summary: String(obj?.summary || '').slice(0, 200),
       }
     }
-    return { ...base, note: 'AI 终审给出的有效号码不足 10 个，已回退算法融合结果' }
+    return { ...base, note: 'AI 终审未给出有效号码，已采用算法融合结果' }
   } catch (e) {
     return { ...base, note: `AI 终审失败（${e.message || e}），已回退算法融合结果` }
   }
