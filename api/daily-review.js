@@ -83,35 +83,7 @@ export default async function handler(req, res) {
 
     // 3. AI 自我复盘：有新打分才尝试（内部有 7 天 / 5 期门槛与超时保护）
     //    ?advice=1 为手动测试开关：即使本期没有新打分也生成一次改善建议
-    const adviceGames = scoredGames.length ? scoredGames : req.query?.advice === '1' ? GAMES : []
-    let note = null
-    let adviceText = ''
-    if (adviceGames.length) {
-      try {
-        const llm = await resolveLlmSettings()
-        if (llm?.llmKey) {
-          const learnedOf = {}
-          for (const g of adviceGames) learnedOf[g] = await loadLearning(sql, g)
-          const recentSummary = await buildRecentSummary(sql, adviceGames, learnedOf)
-          if (scoredGames.length) {
-            note = await maybeGenerateNotes(sql, llm, {
-              games: scoredGames,
-              recentSummary,
-              elapsedMs: Date.now() - started,
-            })
-          }
-          // 经验笔记有门槛（每周最多一条），报告里的改善建议则每晚单独生成一份，不写入长期笔记
-          if (!note) adviceText = await generateAdvice(llm, recentSummary, learning)
-        }
-      } catch (e) {
-        console.error('[daily-review] 经验笔记/改善建议生成失败：', e?.message || e)
-      }
-    }
-
-    // 4. 快乐8 当期复盘记录
-    const review = kl8Draws[0] ? await reviewKl8(sql, kl8Draws[0]) : { skipped: true, reason: 'no_data' }
-
-    // 学习后权重（报告展示用）
+    // 学习后权重（报告展示与建议输入共用）
     const afterOf = {}
     for (const g of GAMES) {
       try {
@@ -120,6 +92,34 @@ export default async function handler(req, res) {
         afterOf[g] = null
       }
     }
+
+    const adviceGames = scoredGames.length ? scoredGames : req.query?.advice === '1' ? GAMES : []
+    let note = null
+    let adviceText = ''
+    if (adviceGames.length) {
+      try {
+        const llm = await resolveLlmSettings()
+        if (llm?.llmKey) {
+          if (scoredGames.length) {
+            const learnedOf = {}
+            for (const g of scoredGames) learnedOf[g] = await loadLearning(sql, g)
+            const recentSummary = await buildRecentSummary(sql, scoredGames, learnedOf)
+            note = await maybeGenerateNotes(sql, llm, {
+              games: scoredGames,
+              recentSummary,
+              elapsedMs: Date.now() - started,
+            })
+          }
+          // 经验笔记有门槛（每周最多一条），报告里的改善建议则每晚单独生成一份，不写入长期笔记
+          if (!note) adviceText = await generateAdvice(llm, learning, afterOf)
+        }
+      } catch (e) {
+        console.error('[daily-review] 经验笔记/改善建议生成失败：', e?.message || e)
+      }
+    }
+
+    // 4. 快乐8 当期复盘记录
+    const review = kl8Draws[0] ? await reviewKl8(sql, kl8Draws[0]) : { skipped: true, reason: 'no_data' }
 
     // 5. 飞书夜间学习报告（含 AI 改善建议）
     const card = buildLearningCard({
@@ -240,15 +240,21 @@ function ruleAdvice(learning, afterOf) {
 }
 
 /** 每晚单独生成一份报告用改善建议（不写入长期经验笔记，也不注入后续分析） */
-async function generateAdvice(llm, recentSummary, learning) {
+async function generateAdvice(llm, learning, afterOf) {
   try {
-    const brief = GAMES.map((g) => {
+    const stateLines = GAMES.map((g) => {
       const r = learning[g] || {}
-      if (!r.skipped) {
-        return `${GAME_LABEL[g]} 第 ${r.drawId} 期，更新 ${(r.updated || []).length} 组权重`
-      }
-      if (r.reason === 'already_scored') return `${GAME_LABEL[g]} 本期无新开奖（上次已学到第 ${r.drawId} 期）`
-      return `${GAME_LABEL[g]} 未参与本期学习`
+      const st = afterOf?.[g]
+      const n = Number(st?.n) || 0
+      const cold = !st || st.coldStart || n < 8
+      const status = !r.skipped
+        ? `本期已学习第 ${r.drawId} 期，更新 ${(r.updated || []).length} 组权重`
+        : r.reason === 'already_scored'
+          ? `本期无新开奖，已学到第 ${r.drawId} 期`
+          : r.reason === 'no_data'
+            ? '本期未抓到开奖数据'
+            : '未参与本期学习'
+      return `${GAME_LABEL[g]}：${status}；累计 ${n} 期样本，${cold ? '冷启动（权重仍按默认值运行）' : '自适应权重已启用'}`
     }).join('\n')
 
     const text = await callAi(
@@ -257,14 +263,14 @@ async function generateAdvice(llm, recentSummary, learning) {
         {
           role: 'system',
           content:
-            '你是彩票选号系统的算法复盘助手。只做方法与工程层面的复盘：针对权重学习、特征有效性、样本量，给出 2-3 条具体可执行的改善建议。硬性要求：不预测号码，不暗示能提高中奖概率，不编造数据，只依据给定数据；样本不足时明确建议保持默认权重继续观察。每行一条，以「· 」开头，每条不超过 45 个汉字，不要额外解释。',
+            '你是彩票选号系统的算法复盘助手。你只能看到各彩种的学习状态与样本量，看不到也无需猜测具体权重数值。请给出 2-3 条接下来可执行的改善建议，聚焦：样本积累节奏、该持续跟踪哪些对比指标（AI 与算法命中差异、专家损失）、当前阶段是否应保持保守。硬性要求：不预测号码；不暗示能提高中奖概率；不编造数据；不提具体权重数值或模型采样参数；样本不足时明确说保持默认权重继续观察。每行一条，以「· 」开头，每条不超过 45 个汉字。',
         },
         {
           role: 'user',
-          content: `【本期学习】\n${brief}\n\n【历史数据】\n${String(recentSummary || '').slice(0, 4000)}`,
+          content: `【各彩种学习状态】\n${stateLines}\n\n补充说明：系统每天开奖后按命中结果更新模型/专家/信号权重；某彩种累计样本不足 8 期时不启用自适应权重，继续用默认值。`,
         },
       ],
-      { maxTokens: 320, temperature: 0.4 },
+      { maxTokens: 300, temperature: 0.4 },
     )
     return String(text || '').trim()
   } catch (e) {
