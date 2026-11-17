@@ -263,16 +263,26 @@ async function generateAdvice(llm, learning, afterOf) {
         {
           role: 'system',
           content:
-            '你是彩票选号系统的算法复盘助手。你只能看到各彩种的学习状态与样本量，看不到也无需猜测具体权重数值。请给出 2-3 条接下来可执行的改善建议，聚焦：样本积累节奏、该持续跟踪哪些对比指标（AI 与算法命中差异、专家损失）、当前阶段是否应保持保守。硬性要求：不预测号码；不暗示能提高中奖概率；不编造数据；不提具体权重数值或模型采样参数；样本不足时明确说保持默认权重继续观察。每行一条，以「· 」开头，每条不超过 45 个汉字。',
+            '你是彩票选号系统的复盘助手。只根据用户给出的【学习状态】写建议，不得引入任何未提供的数字、比例或指标。请给出 2-3 条接下来可执行的改善建议，聚焦：样本积累节奏、该持续跟踪的对比指标（AI 与算法命中差异、专家损失）、当前阶段是否应保持保守。硬性要求：只允许使用给定文本中出现过的数字；禁止使用百分号；禁止描述权重分布、特征维度、方差或采样参数；不预测号码；不暗示能提高中奖概率；样本不足时明确说保持默认权重继续观察。每行一条，以「· 」开头，每条不超过 40 个汉字。',
         },
         {
           role: 'user',
-          content: `【各彩种学习状态】\n${stateLines}\n\n补充说明：系统每天开奖后按命中结果更新模型/专家/信号权重；某彩种累计样本不足 8 期时不启用自适应权重，继续用默认值。`,
+          content: `【学习状态】\n${stateLines}\n\n补充说明：系统每天开奖后按命中结果更新模型/专家/信号权重；某彩种累计样本不足 8 期时不启用自适应权重，继续用默认值。`,
         },
       ],
       { maxTokens: 300, temperature: 0.4 },
     )
-    return String(text || '').trim()
+    // 事实校验：丢弃含百分号、含未提供数字或越界指标的句子，保证卡片里不出现编造数据
+    const allowedNums = new Set((`${stateLines} 8`).match(/\d+/g) || [])
+    const banned = /%|百分|维度|方差|采样|温度|权重分布/
+    const kept = String(text || '')
+      .split('\n')
+      .map((s) => s.trim())
+      .filter(Boolean)
+      .filter((l) => !banned.test(l))
+      .filter((l) => (l.match(/\d+/g) || []).every((x) => allowedNums.has(x)))
+      .slice(0, 3)
+    return kept.join('\n')
   } catch (e) {
     console.error('[daily-review] 改善建议生成失败：', e?.message || e)
     return ''
