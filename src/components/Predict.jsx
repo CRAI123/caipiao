@@ -1,7 +1,7 @@
 // 下期推荐 —— 近期加权频次 + 遗漏打分，输出结构均衡的研究用号码（多玩法 + 导出）
 // ⚠️ 仅为历史数据的加权统计结果，不改变任何号码 25% 的开出概率
 import React, { useEffect, useMemo, useState } from 'react'
-import { Card, Ball, Note, StatCard, Dialog, pad2, yuan } from './common.jsx'
+import { Card, Ball, Note, StatCard, pad2, yuan } from './common.jsx'
 import {
   scoreBalls,
   pickBalanced,
@@ -79,7 +79,6 @@ export default function Predict({ draws, onRefreshData }) {
   const [phase, setPhase] = useState('')
   const [pct, setPct] = useState(0)
   const [elapsed, setElapsed] = useState(0)
-  const [tip, setTip] = useState('')
 
   const { scores, weighted, missing, window } = useMemo(
     () => scoreBalls(draws, { periods: 100, halfLife: 20, hotMode }),
@@ -243,10 +242,7 @@ export default function Predict({ draws, onRefreshData }) {
       }
       if (!Array.isArray(fresh) || !fresh.length) throw new Error('没有取到开奖数据，请稍后重试')
 
-      const prevId = draws?.[0]?.id
-      const freshId = fresh[0].id
-      const hasNew = !prevId || Number(freshId) > Number(prevId)
-      const drawId = Number(freshId) + 1
+      const drawId = Number(fresh[0].id) + 1
 
       // 2. 本期是否已有共享解析
       let cached = null
@@ -255,12 +251,6 @@ export default function Predict({ draws, onRefreshData }) {
         if (p?.exists && p.status === 'done' && p.result) cached = p
       } catch {
         /* 数据库不可用时继续走实时分析 */
-      }
-
-      // 3. 没有新一期开奖，本期也还没有解析 → 提示
-      if (!hasNew && !cached) {
-        setTip(`第 ${drawId - 1} 期已经是目前最新一期，暂时没有新数据。\n新一期开奖后再来点「AI 深度分析」即可。`)
-        return
       }
 
       // 4. 已有共享解析：模拟一段分析等待，让后看的人也有体验
@@ -755,8 +745,6 @@ export default function Predict({ draws, onRefreshData }) {
       </Card>
 
       <BetVerify bet={bet} draws={draws} />
-
-      <Dialog open={Boolean(tip)} text={tip} onClose={() => setTip('')} />
     </div>
   )
 }

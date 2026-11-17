@@ -3,10 +3,10 @@
 //
 // 点击分析时：
 //   1. 先强制拉取最新开奖数据（不用页面上的旧数据）
-//   2. 若期号没有前进且本期还没有共享解析 → 弹「暂时没有新数据」
+//   2. 若还没有新一期开奖，直接用当前最新开奖数据生成解析（不拦截）
 //   3. 本期解析全站共享：首位用户真实调用，后续用户读取并模拟一段分析等待
 import React, { useEffect, useMemo, useRef, useState } from 'react'
-import { Card, Note, Dialog } from './common.jsx'
+import { Card, Note } from './common.jsx'
 import {
   summarizeDigit,
   buildDigitMessages,
@@ -61,7 +61,6 @@ function DigitAIInner({ draws, label = '福彩3D', game = 'fc3d', onRefreshData,
   const [phase, setPhase] = useState('')
   const [pct, setPct] = useState(0)
   const [elapsed, setElapsed] = useState(0)
-  const [tip, setTip] = useState('')
   const [stale, setStale] = useState(false)
 
   const is5 = digitCount === 5
@@ -248,8 +247,6 @@ function DigitAIInner({ draws, label = '福彩3D', game = 'fc3d', onRefreshData,
       const freshSummary = (is5 ? summarizeDigit5 : summarizeDigit)(fresh, 100)
       if (!freshSummary) throw new Error('最新数据不足 10 期，无法分析')
 
-      const prevLatest = draws?.[0]
-      const hasNew = !prevLatest || Number(latestFresh.id) > Number(prevLatest.id)
       const drawId = Number(latestFresh.id)
 
       // 2. 本期是否已有共享解析（旧版结构没有号码，视为需要重算）
@@ -265,11 +262,7 @@ function DigitAIInner({ draws, label = '福彩3D', game = 'fc3d', onRefreshData,
         /* 数据库不可用时继续走实时分析 */
       }
 
-      // 3. 没有新数据、也没有可用的解析 → 提示
-      if (!hasNew && !cached && !old && !force) {
-        setTip(`第 ${drawId} 期开奖数据已经是最新的，还没有新一期开奖，暂时没有新数据。\n新一期开奖后再来点「AI 分析」即可。`)
-        return
-      }
+      // 没有新一期开奖时，直接用当前最新数据生成解析（不再拦截）
 
       // 4. 已有共享结果：模拟一段分析等待，让后面看的人也有体验
       if (cached) {
@@ -627,8 +620,6 @@ function DigitAIInner({ draws, label = '福彩3D', game = 'fc3d', onRefreshData,
           ? '流程与快乐8一致：底层算法对全盘 10 万注打分，选出直选 20 注候选池，AI 只在池内终选 5 注并给出理由；终选不合规自动回退算法前五。概率仍是直选 1/100000，选号方式不会改变这一点。'
           : '流程与快乐8一致：底层算法对全盘打分（直选 1000 注、组六 120 组、组三 90 组），选出直选 12 注 / 组六 8 组 / 组三 5 组的候选池，AI 只在池内终选 3 + 2 + 1 注并给出理由；终选不合规自动回退算法前三。概率仍是直选 1/1000、组六 1/167、组三 1/333，选号方式不会改变这一点。'}
       </Note>
-
-      <Dialog open={Boolean(tip)} text={tip} onClose={() => setTip('')} />
     </Card>
   )
 }
