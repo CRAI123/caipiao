@@ -520,7 +520,65 @@ function parseNote(raw) {
 }
 
 /**
- * 经验笔记生成（daily-push 内并行调用，绝不 throw）。
+ * 拼经验笔记生成输入：各彩种近 10 期打分命中摘要 + 当前权重 + 上一条笔记。
+ * learnedOf 为 { [game]: loadLearning 结果 }。失败一律跳过对应段落，绝不 throw。
+ */
+export async function buildRecentSummary(sql, games, learnedOf = {}) {
+  const parts = []
+  for (const g of games) {
+    try {
+      const rows = await sql`
+        SELECT draw_id, source, meta FROM learning_predictions
+        WHERE game = ${g} AND scored = true
+        ORDER BY draw_id DESC LIMIT 10`
+      const brief = rows.map((r) => {
+        const m = typeof r.meta === 'string' ? JSON.parse(r.meta || '{}') : r.meta || {}
+        const hit =
+          m.hits ??
+          m.straightHits ??
+          (m.redHits != null ? `红${m.redHits}/蓝${m.blueHit ? '中' : '未中'}` : '-')
+        return `${r.draw_id}:${r.source}=${hit}`
+      })
+      parts.push(`【${g} 近 10 期命中】${brief.join(' ') || '无'}`)
+    } catch {
+      /* 单彩种摘要失败不影响笔记生成 */
+    }
+  }
+  try {
+    const w = {}
+    for (const g of games) {
+      const st = learnedOf[g]
+      if (!st) continue
+      w[g] = st.experts
+        ? { n: st.n, experts: st.experts }
+        : {
+            n: st.n,
+            model: st.model?.weights,
+            temp: st.temp?.weights,
+            mix: st.mix?.weights,
+            windows: st.windows?.weights,
+            redSignals: st.redSignals?.weights,
+            blueSignals: st.blueSignals?.weights,
+          }
+    }
+    if (Object.keys(w).length) parts.push(`【当前权重】${JSON.stringify(w)}`)
+  } catch {
+    /* 权重摘要失败不阻塞 */
+  }
+  try {
+    const last = await sql`
+      SELECT content FROM ai_experience_notes
+      WHERE game = 'all' AND active = true
+      ORDER BY created_at DESC LIMIT 1`
+    if (last[0]?.content) parts.push(`【上一条笔记】${String(last[0].content).slice(0, 400)}`)
+  } catch {
+    /* 无上一条笔记也正常 */
+  }
+  return parts.join('\n\n').slice(0, 6000)
+}
+
+/**
+ * 经验笔记生成（daily-push / 夜间学习内并行调用，绝不 throw）。
  * 触发条件（force 可跳过时间/打分门控）：有 sql 与 llm、elapsedMs<35000、
  * games 中至少一个今日实际打分过、距上一条 active 总括笔记 ≥7 天或 ≥5 期新打分。
  * recentSummary 由调用方拼（各彩种近10期命中摘要+当前权重+上一条笔记）。
