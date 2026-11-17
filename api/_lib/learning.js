@@ -414,7 +414,8 @@ export async function scoreAndLearn(sql, game, draws) {
         })
       }
       // ── 逐位专家 log-loss → hedgeUpdate('experts:p{pos}') ──
-      if (preds.some((r) => r.source === 'hedge:experts')) {
+      // 专家模型给的是无条件概率分布，无论有没有推荐行都可按实际开奖推进权重
+      {
         const perExpertLoss = []
         for (let pos = 0; pos < npos; pos++) {
           const losses = experts.map((e) => {

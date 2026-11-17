@@ -45,7 +45,11 @@ export default async function handler(req, res) {
     await ensureTables(sql)
 
     // 1. 并发抓最新开奖（取 100 期，给打分学习的专家模型足够历史；单个彩种失败按空数据跳过）
-    const safeFetch = (fn) => fn(100).catch(() => [])
+    //    注意：排列三/排列五/双色球返回 { draws, source }，快乐8/福彩3D 直接返回数组
+    const safeFetch = (fn) =>
+      fn(100)
+        .then((r) => (Array.isArray(r) ? r : Array.isArray(r?.draws) ? r.draws : []))
+        .catch(() => [])
     const [kl8Draws, fc3dDraws, pl3Draws, pl5Draws, ssqDraws] = await Promise.all([
       safeFetch(fetchKl8Draws),
       safeFetch(fetchFc3dDraws),
