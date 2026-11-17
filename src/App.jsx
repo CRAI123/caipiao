@@ -79,6 +79,24 @@ const PL5_ALGO_INFO = {
   },
 }
 
+// ---------- 打开软件自动抓取：会话级去重（sessionStorage，Tauri 桌面端同样可用） ----------
+const AUTO_FETCH_LABEL = { kl8: '快乐8', fc3d: '福彩3D', pl3: '排列三', pl5: '排列五', ssq: '双色球' }
+const AUTO_FETCH_PREFIX = 'caipiao.autofetch.'
+function isAutoFetched(lottery) {
+  try {
+    return sessionStorage.getItem(AUTO_FETCH_PREFIX + lottery) === '1'
+  } catch {
+    return false
+  }
+}
+function markAutoFetched(lottery) {
+  try {
+    sessionStorage.setItem(AUTO_FETCH_PREFIX + lottery, '1')
+  } catch {
+    /* sessionStorage 不可用时不去重，最多多抓一次 */
+  }
+}
+
 const TABS = [
   { id: 'overview', label: '总览', en: 'OVERVIEW' },
   { id: 'checkin', label: '每日打卡', en: 'CHECK-IN' },
@@ -141,6 +159,7 @@ export default function App() {
   const [pl5LoadErr, setPl5LoadErr] = useState('')
   const [ssqDraws, setSsqDraws] = useState(SSQ_DRAWS)
   const [ssqTab, setSsqTab] = useState('overview')
+  const [autoFetch, setAutoFetch] = useState(null) // 自动抓取状态条 { state: 'loading'|'ok'|'nonew'|'fail', text }
   const [tick, setTick] = useState(0) // 账本变化后刷新「待打卡」标记
   const usingSample = draws[0]?.sample
   const fc3dUsingSample = fc3dDraws[0]?.sample
@@ -188,27 +207,85 @@ export default function App() {
     return list || fc3dDraws
   }, [lottery, pl3Draws, pl5Draws, fc3dDraws])
 
-  // 排列五没有内置快照：首次进入时自动拉取最近 100 期真实开奖
-  useEffect(() => {
-    if (lottery !== 'pl5' || pl5Draws.length) return
-    let alive = true
-    fetchPl5Draws(100)
-      .then((list) => {
-        if (alive && list?.length) setPl5Draws(list)
-      })
-      .catch((e) => {
-        if (alive) setPl5LoadErr(e?.message || '拉取失败')
-      })
-    return () => {
-      alive = false
-    }
-  }, [lottery, pl5Draws.length])
-
   const refreshKl8Draws = useCallback(async () => {
     const list = await fetchKl8Draws(100)
     if (list?.length) setDraws(list)
     return list || draws
   }, [draws])
+
+  const refreshSsqDraws = useCallback(async () => {
+    const list = await fetchSsqDraws(100)
+    if (list?.length) setSsqDraws(list)
+    return list || ssqDraws
+  }, [ssqDraws])
+
+  // 打开软件 / 切换彩种：本会话未自动抓过的彩种，进入时自动抓一次最新开奖
+  // （排列五没有内置快照也由此覆盖；失败时沿用 pl5LoadErr 的空页错误路径）
+  useEffect(() => {
+    if (gate !== 'open') return
+    if (isAutoFetched(lottery)) {
+      setAutoFetch(null) // 抓过的彩种切回来：清掉上一条提示
+      return
+    }
+    markAutoFetched(lottery)
+    let alive = true
+    const prevLatest =
+      lottery === 'kl8'
+        ? draws[0]?.id
+        : lottery === 'ssq'
+          ? ssqDraws[0]?.id
+          : lottery === 'pl5'
+            ? pl5Draws[0]?.id
+            : lottery === 'pl3'
+              ? pl3Draws[0]?.id
+              : fc3dDraws[0]?.id
+    setAutoFetch({ state: 'loading', text: `正在自动抓取${AUTO_FETCH_LABEL[lottery]}最新开奖…` })
+    ;(async () => {
+      try {
+        const list =
+          lottery === 'kl8'
+            ? await refreshKl8Draws()
+            : lottery === 'ssq'
+              ? await refreshSsqDraws()
+              : await refreshDigitDraws()
+        if (!alive) return
+        const latestId = list?.[0]?.id
+        if (latestId == null) {
+          setAutoFetch({
+            state: 'fail',
+            text: `${AUTO_FETCH_LABEL[lottery]}暂未取到开奖数据，可在「数据管理」手动抓取`,
+          })
+          if (lottery === 'pl5') setPl5LoadErr('未取到开奖数据')
+          return
+        }
+        if (!prevLatest || latestId > prevLatest) {
+          setAutoFetch({ state: 'ok', text: `${AUTO_FETCH_LABEL[lottery]}已更新到第 ${latestId} 期` })
+        } else {
+          setAutoFetch({
+            state: 'nonew',
+            text: `暂无新开奖，${AUTO_FETCH_LABEL[lottery]}数据已是最新（截至第 ${latestId} 期）`,
+          })
+        }
+      } catch (e) {
+        if (!alive) return
+        // 静默降级：不弹错误框，只在状态条显示失败文案，用户仍可手动点按钮重试
+        const msg = e?.message || String(e)
+        setAutoFetch({ state: 'fail', text: `${AUTO_FETCH_LABEL[lottery]}自动抓取失败：${msg}` })
+        if (lottery === 'pl5') setPl5LoadErr(msg)
+      }
+    })()
+    return () => {
+      alive = false
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [gate, lottery])
+
+  // 「已更新 / 暂无新数据」提示几秒后自动消失，不打扰
+  useEffect(() => {
+    if (!autoFetch || (autoFetch.state !== 'ok' && autoFetch.state !== 'nonew')) return undefined
+    const t = setTimeout(() => setAutoFetch(null), 8000)
+    return () => clearTimeout(t)
+  }, [autoFetch])
 
   // 进入站点：取设备识别码 → 查 Neon 申请状态 / 管理员身份
   useEffect(() => {
@@ -468,6 +545,14 @@ export default function App() {
       )}
 
       <main className="main">
+        {autoFetch && (
+          <p
+            className={`note note-${autoFetch.state === 'fail' ? 'warn' : 'info'}`}
+            style={{ marginTop: 0 }}
+          >
+            {autoFetch.text}
+          </p>
+        )}
         {lottery === 'ssq' ? (
           <>
             {ssqTab === 'overview' && <SSQOverview draws={ssqDraws} />}
