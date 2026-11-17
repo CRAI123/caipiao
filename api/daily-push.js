@@ -723,7 +723,7 @@ function buildFc3dCard(
             : '概率 直选 1/1000 · 组六 1/167 · 组三 1/333',
         ),
       ),
-      hitLine || line(grey('上期命中：暂无上期推荐记录，下次推送起显示')),
+      hitLine ? line(hitLine) : line(grey('上期命中：暂无上期推荐记录，下次推送起显示')),
       HR,
       line(`**直选复式** ${bets} 注 · ${bets * 2} 元`),
       line(p.posTop.map((list, i) => `${labels[i]} ${red(list.join('/'))}`).join('　')),
@@ -1083,19 +1083,32 @@ export default async function handler(req, res) {
     const payloads = cards
 
     let sent = 0
-    for (const payload of payloads) {
-      const r = await fetch(cfg.webhook, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ ...payload, ...signPart }),
-      })
-      const data = await r.json().catch(() => ({}))
-      if (!r.ok || (data.code ?? 0) !== 0) {
-        const error = `飞书推送失败：${data.msg || `HTTP ${r.status}`}${data.code ? `（${data.code}）` : ''}`
-        await savePushStatus({ at: new Date().toISOString(), ok: false, error, sent, total: payloads.length, fresh })
-        return res.status(502).json({ error })
+    // 单张卡片失败不影响其它彩种：继续发完，最后汇总失败原因
+    const sendErrors = []
+    for (let i = 0; i < payloads.length; i++) {
+      const payload = payloads[i]
+      try {
+        const r = await fetch(cfg.webhook, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ ...payload, ...signPart }),
+        })
+        const data = await r.json().catch(() => ({}))
+        if (!r.ok || (data.code ?? 0) !== 0) {
+          sendErrors.push(
+            `第 ${i + 1} 张：${data.msg || `HTTP ${r.status}`}${data.code ? `（${data.code}）` : ''}`,
+          )
+          continue
+        }
+        sent++
+      } catch (e) {
+        sendErrors.push(`第 ${i + 1} 张：${e.message || e}`)
       }
-      sent++
+    }
+    if (sendErrors.length) {
+      const error = `飞书推送部分失败（已发 ${sent}/${payloads.length}）：${sendErrors.join('；')}`
+      await savePushStatus({ at: new Date().toISOString(), ok: false, error, sent, total: payloads.length, fresh })
+      return res.status(502).json({ error })
     }
 
     // 记录本次推送号码，供下一次推送计算「上期命中」
