@@ -240,6 +240,7 @@ function buildLearningCard({ dateText, learning, beforeOf, afterOf, note, review
     const r = learning[g] || {}
     if (!r.skipped) {
       const updated = Array.isArray(r.updated) ? r.updated.length : 0
+      if (!updated) return line(`${GAME_LABEL[g]} ${grey(`第 ${r.drawId} 期没有待打分的预测行，权重未变`)}`)
       return line(`**${GAME_LABEL[g]}** 已学习第 ${r.drawId} 期 · 更新 ${updated} 组权重`)
     }
     const why =
