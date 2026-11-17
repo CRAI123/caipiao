@@ -459,8 +459,6 @@ function digitAlgoPicks(game, draws) {
       }
 }
 
-/** 拼经验笔记生成输入（实现见 _lib/learning.js，与夜间学习批次共用） */
-
 /** 快乐8：算法 20 码 → AI 终选 10 码，失败回退算法融合 10 码 */
 async function buildKl8Ai({ draws, built, sql, llm }) {
   if (!built?.v7) return null
