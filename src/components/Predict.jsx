@@ -224,9 +224,11 @@ export default function Predict({ draws, onRefreshData }) {
     }
   }
 
+  // 挂载时不自动加载 AI 解析：结果只在用户点击「AI 分析」后展示；切玩法或来了新一期都回到空态
   useEffect(() => {
-    loadDeep()
-    // eslint-disable-next-line react-hooks/exhaustive-deps
+    setDeep(null)
+    setDeepOwner('')
+    setDeepErr('')
   }, [nextDrawId, play])
 
   // 上期复盘：读取快乐8 历史 AI 终选，与最新一期实际开奖对照
@@ -393,22 +395,22 @@ export default function Predict({ draws, onRefreshData }) {
         <span className="toolbar-note">样本 {window} 期 · {hotMode === 'multi' ? '四窗口加权 25/30/30/15' : '半衰期 20 期'}</span>
         <span className="toolbar-sep" />
         <button
-          className="btn-primary"
+          className={deep ? 'btn-ai-ghost' : 'btn-ai-hero'}
           onClick={doDeep}
           disabled={deepBusy || deepChecking}
           title="点击后会自动同步最新开奖数据；每期仅首位用户真实调用 AI，其他人读取共享解析"
         >
           {deepBusy
-            ? '🔬 深度分析中…'
+            ? 'AI 分析中…'
             : deepChecking
               ? '检查本期解析…'
-              : deep?.cached
-                ? '🔬 查看本期解析'
-                : '🔬 AI 深度分析（自动收敛 10 码）'}
+              : deep
+                ? '重新分析'
+                : '✦ AI 分析'}
         </button>
         {(deep?.cached || deepOwner) && (
-          <button className="btn-primary" onClick={() => loadDeep({ simulate: true })} disabled={deepBusy || deepChecking}>
-            🔄 刷新解析
+          <button className="btn-ai-ghost" onClick={() => loadDeep({ simulate: true })} disabled={deepBusy || deepChecking}>
+            刷新解析
           </button>
         )}
         <button
@@ -485,6 +487,16 @@ export default function Predict({ draws, onRefreshData }) {
           <div className="small" style={{ marginTop: 6, whiteSpace: 'pre-wrap', lineHeight: 1.8 }}>{review.text}</div>
           <Note>复盘只用于修正本期选号思路；开奖独立随机，每个号码 25% 的概率不会因此改变。</Note>
         </Card>
+      )}
+
+      {!deep && !deepBusy && (
+        <div className="ai-empty">
+          <div className="ai-empty-mark">✦ ✦ ✦</div>
+          <div className="ai-empty-title">AI 尚未分析本期</div>
+          <div className="ai-empty-sub">
+            点击上方「✦ AI 分析」，12 轮深度分析（3 模型 × 3 温度 + 3 次交叉复核）完成后揭晓结果
+          </div>
+        </div>
       )}
 
       {deep && (
@@ -704,7 +716,7 @@ export default function Predict({ draws, onRefreshData }) {
       {deepErr && <Note tone="warn">AI 深度分析失败：{deepErr}</Note>}
       {deepOwner && !deep && !deepBusy && (
         <Note tone="info">
-          本期已有用户（{deepOwner}）正在分析，完成后点「🔄 刷新解析」即可查看，无需重复点击。
+          本期已有用户（{deepOwner}）正在分析，完成后点「刷新解析」即可查看，无需重复点击。
         </Note>
       )}
 

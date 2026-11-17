@@ -86,68 +86,13 @@ function DigitAIInner({ draws, label = '福彩3D', game = 'fc3d', onRefreshData,
   const busyRef = useRef(false)
   const latestId = Number(draws?.[0]?.id) || 0
 
-  // 切到别的页面再回来时组件会重新挂载，本地状态会丢：从共享缓存恢复本期解析。
-  // 若本期分析还在跑（可能是自己刚点的），继续等待并显示进度。
+  // 挂载时不自动从共享缓存恢复解析：结果只在用户点击「AI 分析」后展示；来了新一期回到空态
   useEffect(() => {
-    if (!latestId) return undefined
-    let alive = true
-    const applyResult = (r, owner) => {
-      setText(r.text)
-      setMeta({
-        model: r.model,
-        at: r.at,
-        cached: true,
-        owner,
-        rounds: r.rounds,
-        roundCount: r.roundCount || r.rounds?.length || 4,
-        picks: r.picks,
-        finalSource: r.finalSource,
-        finalNote: r.finalNote,
-      })
-      if (r.schema !== SCHEMA) setStale(true)
-    }
-    const restore = async () => {
-      let p = null
-      try {
-        p = await peekDigitAi({ game, drawId: latestId })
-      } catch {
-        return
-      }
-      if (!alive || busyRef.current || !p?.exists) return
-      if (p.status === 'done' && p.result?.text) {
-        applyResult(p.result, p.owner)
-        return
-      }
-      if (p.status !== 'running') return
-      setBusy(true)
-      setPct(8)
-      setElapsed(0)
-      setPhase('本期分析仍在进行，正在等待结果…')
-      for (let i = 0; i < 24; i++) {
-        await sleep(5000)
-        if (!alive) return
-        const q = await peekDigitAi({ game, drawId: latestId }).catch(() => null)
-        if (!alive) return
-        if (q?.exists && q.status === 'done' && q.result?.text) {
-          applyResult(q.result, q.owner)
-          setPct(100)
-          setPhase('分析完成')
-          setBusy(false)
-          return
-        }
-        setPct(Math.min(96, 8 + (i + 1) * 4))
-        setElapsed((i + 1) * 5)
-      }
-      if (!alive) return
-      setBusy(false)
-      setPhase('')
-      setError('本期分析仍未完成，请稍后再点一次查看')
-    }
-    restore()
-    return () => {
-      alive = false
-    }
-  }, [game, latestId])
+    setText('')
+    setMeta(null)
+    setStale(false)
+    setError('')
+  }, [latestId])
 
   const picks = useMemo(() => sanitizePicks(meta?.picks, digitCount), [meta, digitCount])
 
@@ -433,8 +378,8 @@ function DigitAIInner({ draws, label = '福彩3D', game = 'fc3d', onRefreshData,
       )}
 
       <div className="toolbar" style={{ marginTop: 8 }}>
-        <button className="tab-btn active" onClick={() => run()} disabled={busy}>
-          {busy ? 'AI 终选中…' : picks ? '重新终选' : '🔬 AI 深度分析（算法候选 → AI 终选）'}
+        <button className={text ? 'btn-ai-ghost' : 'btn-ai-hero'} onClick={() => run()} disabled={busy}>
+          {busy ? 'AI 分析中…' : text ? '重新分析' : '✦ AI 分析'}
         </button>
         <span className="muted small">
           4 轮 AI 分析（结构解读 → 反向质询 → 算法候选终选 → 终审校验），结果全站共享；点击会先同步最新开奖数据
@@ -453,6 +398,16 @@ function DigitAIInner({ draws, label = '福彩3D', game = 'fc3d', onRefreshData,
       )}
 
       {error && <div className="note note-warn">{error}</div>}
+
+      {!text && !busy && (
+        <div className="ai-empty">
+          <div className="ai-empty-mark">✦ ✦ ✦</div>
+          <div className="ai-empty-title">AI 尚未分析本期</div>
+          <div className="ai-empty-sub">
+            点击上方「✦ AI 分析」，4 轮分析（结构解读 → 反向质询 → 算法候选终选 → 终审校验）完成后揭晓结果
+          </div>
+        </div>
+      )}
 
       {text && (
         <>

@@ -79,30 +79,11 @@ function SsqAiCard({ draws, pred }) {
   }, [])
   const review = useMemo(() => buildSsqReview(audit, draws), [audit, draws])
 
-  // 切页回来时从共享缓存恢复本期解析
+  // 挂载时不自动从共享缓存恢复解析：结果只在用户点击「AI 分析」后展示；来了新一期回到空态
   useEffect(() => {
-    if (!latestId) return undefined
-    let alive = true
-    peekDigitAi({ game: 'ssq', drawId: latestId })
-      .then((p) => {
-        if (!alive || busyRef.current || !p?.exists) return
-        if (p.status === 'done' && p.result?.text) {
-          setMeta({
-            model: p.result.model,
-            at: p.result.at,
-            cached: true,
-            owner: p.owner,
-            picks: p.result.picks,
-            finalSource: p.result.finalSource,
-            finalNote: p.result.finalNote,
-          })
-          if (p.result.schema !== AI_SCHEMA) setStale(true)
-        }
-      })
-      .catch(() => {})
-    return () => {
-      alive = false
-    }
+    setMeta(null)
+    setStale(false)
+    setError('')
   }, [latestId])
 
   const onTick = ({ elapsed: s, pct: p, stage }) => {
@@ -237,8 +218,8 @@ function SsqAiCard({ draws, pred }) {
       </div>
 
       <div className="toolbar" style={{ marginTop: 8 }}>
-        <button className="tab-btn active" onClick={run} disabled={busy}>
-          {busy ? 'AI 终选中…' : picks ? '重新终选' : '🔬 AI 深度分析（算法候选 → AI 终选）'}
+        <button className={picks ? 'btn-ai-ghost' : 'btn-ai-hero'} onClick={run} disabled={busy}>
+          {busy ? 'AI 分析中…' : picks ? '重新分析' : '✦ AI 分析'}
         </button>
         <span className="muted small">
           4 轮 AI 分析（结构解读 → 反向质询 → 算法候选终选 → 终审校验），结果全站共享；每期保留最后一次，可在「方法体检」查看是否命中
@@ -257,6 +238,16 @@ function SsqAiCard({ draws, pred }) {
       )}
 
       {error && <div className="note note-warn">{error}</div>}
+
+      {!picks && !busy && (
+        <div className="ai-empty">
+          <div className="ai-empty-mark">✦ ✦ ✦</div>
+          <div className="ai-empty-title">AI 尚未分析本期</div>
+          <div className="ai-empty-sub">
+            点击上方「✦ AI 分析」，4 轮终选（结构解读 → 反向质询 → 算法候选终选 → 终审校验）完成后揭晓结果
+          </div>
+        </div>
+      )}
 
       {picks && (
         <div style={{ marginTop: 10 }}>
