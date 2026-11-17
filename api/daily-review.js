@@ -111,7 +111,7 @@ export default async function handler(req, res) {
             })
           }
           // 经验笔记有门槛（每周最多一条），报告里的改善建议则每晚单独生成一份，不写入长期笔记
-          if (!note) adviceText = await generateAdvice(llm, learning, afterOf)
+          if (!note) adviceText = await generateAdvice(llm, sql, learning)
         }
       } catch (e) {
         console.error('[daily-review] 经验笔记/改善建议生成失败：', e?.message || e)
@@ -240,13 +240,25 @@ function ruleAdvice(learning, afterOf) {
 }
 
 /** 每晚单独生成一份报告用改善建议（不写入长期经验笔记，也不注入后续分析） */
-async function generateAdvice(llm, learning, afterOf) {
+async function generateAdvice(llm, sql, learning) {
   try {
+    // 样本量按“已打分的不同期号”统计，比各参数族内的 n 更贴近实际积累进度
+    const counts = {}
+    for (const g of GAMES) {
+      try {
+        const r = await sql`
+          SELECT count(DISTINCT draw_id)::int AS c FROM learning_predictions
+          WHERE game = ${g} AND scored = true`
+        counts[g] = Number(r[0]?.c) || 0
+      } catch {
+        counts[g] = 0
+      }
+    }
+
     const stateLines = GAMES.map((g) => {
       const r = learning[g] || {}
-      const st = afterOf?.[g]
-      const n = Number(st?.n) || 0
-      const cold = !st || st.coldStart || n < 8
+      const n = counts[g]
+      const cold = n < 8
       const status = !r.skipped
         ? `本期已学习第 ${r.drawId} 期，更新 ${(r.updated || []).length} 组权重`
         : r.reason === 'already_scored'
@@ -254,7 +266,7 @@ async function generateAdvice(llm, learning, afterOf) {
           : r.reason === 'no_data'
             ? '本期未抓到开奖数据'
             : '未参与本期学习'
-      return `${GAME_LABEL[g]}：${status}；累计 ${n} 期样本，${cold ? '冷启动（权重仍按默认值运行）' : '自适应权重已启用'}`
+      return `${GAME_LABEL[g]}：${status}；累计已打分 ${n} 期，${cold ? '冷启动（权重仍按默认值运行）' : '自适应权重已启用'}`
     }).join('\n')
 
     const text = await callAi(
@@ -263,7 +275,7 @@ async function generateAdvice(llm, learning, afterOf) {
         {
           role: 'system',
           content:
-            '你是彩票选号系统的复盘助手。只根据用户给出的【学习状态】写建议，不得引入任何未提供的数字、比例或指标。请给出 2-3 条接下来可执行的改善建议，聚焦：样本积累节奏、该持续跟踪的对比指标（AI 与算法命中差异、专家损失）、当前阶段是否应保持保守。硬性要求：只允许使用给定文本中出现过的数字；禁止使用百分号；禁止描述权重分布、特征维度、方差或采样参数；不预测号码；不暗示能提高中奖概率；样本不足时明确说保持默认权重继续观察。每行一条，以「· 」开头，每条不超过 40 个汉字。',
+            '你是彩票选号系统的复盘助手。只根据用户给出的【学习状态】写建议，不得引入任何未提供的数字、比例或指标。请给出 2-3 条接下来可执行的改善建议，聚焦：样本积累节奏、该持续跟踪的对比指标（AI 与算法命中差异、专家损失）、当前阶段是否应保持保守。硬性要求：只允许使用给定文本中出现过的数字；禁止使用百分号；禁止描述权重分布、特征维度、方差或采样参数；不预测号码；不暗示能提高中奖概率；样本不足时明确说保持默认权重继续观察。第一行直接以「· 」开头，不要任何开场白或自我介绍，每行一条，每条不超过 40 个汉字。',
         },
         {
           role: 'user',
@@ -272,15 +284,16 @@ async function generateAdvice(llm, learning, afterOf) {
       ],
       { maxTokens: 300, temperature: 0.4 },
     )
-    // 事实校验：丢弃含百分号、含未提供数字或越界指标的句子，保证卡片里不出现编造数据
+    // 事实校验：只留「· 」开头的条目；丢弃含百分号、含未提供数字或越界指标的句子
     const allowedNums = new Set((`${stateLines} 8`).match(/\d+/g) || [])
     const banned = /%|百分|维度|方差|采样|温度|权重分布/
     const kept = String(text || '')
       .split('\n')
       .map((s) => s.trim())
-      .filter(Boolean)
+      .filter((l) => /^[·•\-*]/.test(l))
       .filter((l) => !banned.test(l))
       .filter((l) => (l.match(/\d+/g) || []).every((x) => allowedNums.has(x)))
+      .map((l) => `· ${l.replace(/^[·•\-*]\s*/, '')}`)
       .slice(0, 3)
     return kept.join('\n')
   } catch (e) {
