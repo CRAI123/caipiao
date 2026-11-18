@@ -42,6 +42,8 @@ import {
   persistPredictions,
   maybeGenerateNotes,
   buildRecentSummary,
+  writeDigest,
+  deepReviewWeekly,
 } from './_lib/learning.js'
 
 export const config = { maxDuration: 60 }
@@ -1036,6 +1038,27 @@ export default async function handler(req, res) {
         })
       } catch (e) {
         console.error('[daily-push] 学习打分失败：', e.message)
+      }
+    }
+
+    // ②.5 每日学习日报（确定性文本，不调 LLM）；失败静默，不阻塞推送
+    if (sqlAi && scoredGames.length) {
+      await Promise.all(
+        scoredGames.map(async (g) => {
+          try {
+            await writeDigest(sqlAi, g, { drawId: learningSummary[g]?.drawId, result: learningSummary[g] })
+          } catch (e) {
+            console.error('[daily-push] 学习日报生成失败：', e.message)
+          }
+        }),
+      )
+      // 每周深度复盘（≥7 天一次，内部门控）；dry/only 手动调试时跳过
+      if (!isDry && !only) {
+        try {
+          await deepReviewWeekly(sqlAi, scoredGames)
+        } catch (e) {
+          console.error('[daily-push] 每周深度复盘失败：', e.message)
+        }
       }
     }
 

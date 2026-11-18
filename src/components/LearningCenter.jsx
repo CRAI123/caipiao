@@ -1,11 +1,11 @@
 // ============================================================
 // 学习中心 —— AI 自主学习体系可视化（只读，数据契约见 src/lib/learning.js）
-// 内容：诚实声明 / 权重当前值 / 命中走势 / 专家损失曲线 / 经验笔记
+// 内容：诚实声明 / 权重当前值 / 权重演化 / 命中走势 / 专家损失曲线 / 对战榜 / 健康度 / 经验笔记
 // 图表为自绘 SVG（viewBox 自适应宽度），风格同 OmissionChart，不引图表库。
 // ============================================================
 import React, { useCallback, useEffect, useMemo, useState } from 'react'
 import { Card, Note } from './common.jsx'
-import { readLearning } from '../lib/learning.js'
+import { readLearning, normEntropy } from '../lib/learning.js'
 
 const GAME_LABEL = { kl8: '快乐8', fc3d: '福彩3D', pl3: '排列三', pl5: '排列五', ssq: '双色球' }
 
@@ -156,6 +156,106 @@ function buildExpertChart(runs) {
       }),
     })),
   }
+}
+
+/** 历史快照按 param_key 分组；同一天多行只保留最后一条（与 learning_history 按天 upsert 语义一致） */
+function groupHistory(history) {
+  const groups = new Map()
+  for (const h of history || []) {
+    const v = h.value || {}
+    if (!h.paramKey || !h.day || !Array.isArray(v.weights)) continue
+    if (!groups.has(h.paramKey)) groups.set(h.paramKey, new Map())
+    groups.get(h.paramKey).set(h.day, v)
+  }
+  return groups
+}
+
+/** 权重演化曲线：每族一个多系列折线（每 key 一条线，x 轴 day，截尾正好显示 MM-DD）；历史 <2 天的组跳过 */
+function buildHistoryCharts(history) {
+  const out = []
+  for (const [paramKey, byDay] of groupHistory(history)) {
+    const days = [...byDay.keys()].sort()
+    if (days.length < 2) continue
+    const latest = byDay.get(days[days.length - 1])
+    const keys =
+      Array.isArray(latest.keys) && latest.keys.length === latest.weights.length
+        ? latest.keys.map(String)
+        : latest.weights.map((_, i) => String(i))
+    out.push({
+      paramKey,
+      columns: days,
+      series: keys.map((k, i) => ({
+        name: k,
+        color: EXPERT_PALETTE[i % EXPERT_PALETTE.length],
+        values: days.map((d) => {
+          const w = byDay.get(d).weights
+          return w.length === keys.length ? numOrNull(w[i]) : null
+        }),
+      })),
+    })
+  }
+  return out
+}
+
+// 对战榜不统计的过程行（无独立命中口径）
+const BATTLE_SKIP = ['hedge:experts', 'models:kl8', 'mix:kl8', 'signals:ssq']
+
+/** 近 60 期对战榜：各来源 期数 / 近10、近30期平均命中 / 跑赢随机期望比例 / 累计 logLoss */
+function buildBattleBoard(runs, game) {
+  const expected = game === 'kl8' ? 2.5 : game === 'ssq' ? 1.08 : 0.3
+  const bySource = new Map()
+  for (const r of runs) {
+    if (BATTLE_SKIP.includes(r.source)) continue
+    const v = hitValue(r.meta, game)
+    if (v == null || r.drawId == null) continue
+    if (!bySource.has(r.source)) bySource.set(r.source, [])
+    bySource.get(r.source).push({ id: Number(r.drawId), v, loss: numOrNull(r.meta?.logLoss) ?? 0 })
+  }
+  const rows = [...bySource.entries()].map(([src, list]) => {
+    const sorted = [...list].sort((a, b) => a.id - b.id)
+    const vs = sorted.map((x) => x.v)
+    const mean = (arr) => (arr.length ? arr.reduce((a, b) => a + b, 0) / arr.length : null)
+    return {
+      source: src,
+      count: sorted.length,
+      avg10: mean(vs.slice(-10)),
+      avg30: mean(vs.slice(-30)),
+      beat: vs.length ? vs.filter((v) => v > expected).length / vs.length : null,
+      logLoss: sorted.reduce((a, x) => a + (x.loss || 0), 0),
+    }
+  })
+  rows.sort((a, b) => (b.avg30 ?? -Infinity) - (a.avg30 ?? -Infinity))
+  return { rows, expected }
+}
+
+/** 权重波动率：逐日权重一阶差分绝对值均值，取全部参数族近 7 天平均；无数据返回 null */
+function calcVolatility(history) {
+  const cutoff = new Date(Date.now() - 7 * 86400000).toISOString().slice(0, 10)
+  const diffs = []
+  for (const byDay of groupHistory(history).values()) {
+    const days = [...byDay.keys()].filter((d) => d >= cutoff).sort()
+    for (let i = 1; i < days.length; i++) {
+      const a = byDay.get(days[i - 1]).weights
+      const b = byDay.get(days[i]).weights
+      if (!Array.isArray(a) || !Array.isArray(b) || a.length !== b.length || !b.length) continue
+      let acc = 0
+      for (let k = 0; k < b.length; k++) acc += Math.abs((Number(b[k]) || 0) - (Number(a[k]) || 0))
+      diffs.push(acc / b.length)
+    }
+  }
+  if (!diffs.length) return null
+  return diffs.reduce((a, b) => a + b, 0) / diffs.length
+}
+
+/** 专家集中度：当前 state 中 n≥8 族的归一化熵均值；无合格族返回 null */
+function calcConcentration(state) {
+  const ents = []
+  for (const row of state || []) {
+    const v = row.value || {}
+    if (Number(v.n) >= 8 && Array.isArray(v.weights) && v.weights.length >= 2) ents.push(normEntropy(v.weights))
+  }
+  if (!ents.length) return null
+  return ents.reduce((a, b) => a + b, 0) / ents.length
 }
 
 /** 多系列折线图：viewBox 自适应宽度，风格同 OmissionChart */
@@ -327,6 +427,127 @@ function WeightsCard({ state, coldStart }) {
   )
 }
 
+/** 权重演化曲线卡片：每参数族一个多系列折线（x 轴为日期，刻度截尾显示 MM-DD） */
+function HistoryCard({ charts }) {
+  return (
+    <Card title="权重演化 · 近60天" tag="learning_history">
+      {charts.length ? (
+        <div className="learn-params">
+          {charts.map((g) => (
+            <div key={g.paramKey} className="learn-param">
+              <div className="learn-param-head">
+                <strong>{paramLabel(g.paramKey)}</strong>
+                <span className="mono muted small">{g.columns.length} 天</span>
+              </div>
+              <PolylineChart
+                columns={g.columns}
+                series={g.series}
+                ariaLabel={`${paramLabel(g.paramKey)}近60天权重演化`}
+              />
+            </div>
+          ))}
+        </div>
+      ) : (
+        <Note>暂无权重演化历史：每日打分快照积累满 2 天后自动绘制。</Note>
+      )}
+    </Card>
+  )
+}
+
+/** AI vs 算法对战榜：近 60 期已打分记录的来源级历史统计（纯前端聚合） */
+function BattleCard({ battle, game }) {
+  return (
+    <Card title="AI vs 算法对战榜" tag="近 60 期已打分记录">
+      {battle.rows.length ? (
+        <div className="table-scroll">
+          <table className="ledger-table">
+            <thead>
+              <tr>
+                <th>来源</th>
+                <th>期数</th>
+                <th>近10期平均命中</th>
+                <th>近30期平均命中</th>
+                <th>跑赢随机期望</th>
+                <th>累计 logLoss</th>
+              </tr>
+            </thead>
+            <tbody>
+              {battle.rows.map((r) => (
+                <tr key={r.source}>
+                  <td>{SOURCE_LABEL[r.source] || r.source}</td>
+                  <td className="mono">{r.count}</td>
+                  <td className="mono">{r.avg10 == null ? '—' : r.avg10.toFixed(2)}</td>
+                  <td className="mono">{r.avg30 == null ? '—' : r.avg30.toFixed(2)}</td>
+                  <td className="mono">{r.beat == null ? '—' : `${(r.beat * 100).toFixed(0)}%`}</td>
+                  <td className="mono">{r.logLoss.toFixed(2)}</td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </div>
+      ) : (
+        <Note>暂无对战数据：服务端每日打分回填命中记录后自动汇总。</Note>
+      )}
+      <Note>
+        榜单为已打分期次与随机期望（{GAME_LABEL[game] || game} {battle.expected}）的历史对照，
+        只反映过去记录的一致性；开奖独立随机，不代表未来表现、不提高中奖概率。
+      </Note>
+    </Card>
+  )
+}
+
+/** 学习健康度：权重波动率 / 专家集中度 / 样本进度 + 一句综合结论 */
+function HealthCard({ history, state }) {
+  const vol = calcVolatility(history)
+  const conc = calcConcentration(state)
+  const ns = (state || []).map((r) => Number(r.value?.n ?? 0))
+  const minN = ns.length ? Math.min(...ns) : 0
+  const volText = vol == null ? '数据积累中' : vol > 0.05 ? '震荡中' : vol >= 0.01 ? '温和调整' : '已趋稳'
+  const concText =
+    conc == null ? '数据积累中' : conc >= 0.95 ? '接近均匀（学习尚未定型）' : conc >= 0.75 ? '有偏好' : '高度集中'
+  const conclusion = [
+    vol == null ? '波动率数据积累中' : `权重${volText}`,
+    conc == null ? '集中度数据积累中' : `专家${concText}`,
+    `样本进度 ${minN}/8`,
+  ].join('，') + '。学习只优化推荐一致性与可解释性，不提高中奖概率。'
+  return (
+    <Card title="学习健康度" tag="派生指标">
+      <div className="learn-health">
+        <div className={`learn-metric${vol != null && vol > 0.05 ? ' learn-metric-warn' : ''}`}>
+          <span className="learn-metric-label">权重波动率 · 近7天</span>
+          <strong>{volText}</strong>
+          <span className="mono muted small">{vol == null ? '—' : vol.toFixed(4)}</span>
+        </div>
+        <div className="learn-metric">
+          <span className="learn-metric-label">专家集中度（归一化熵）</span>
+          <strong>{conc == null ? '—' : conc.toFixed(3)}</strong>
+          <span className="muted small">{concText}</span>
+        </div>
+        <div className="learn-metric">
+          <span className="learn-metric-label">样本进度 min(n)/8</span>
+          <strong>{minN}/8</strong>
+          <span className="muted small">{minN >= 8 ? '全部参数族已过冷启动阈值' : '仍有参数族未达阈值'}</span>
+        </div>
+      </div>
+      <Note>{conclusion}</Note>
+    </Card>
+  )
+}
+
+/** 每日学习日报：本彩种最新一条 digest 笔记置顶展示 */
+function DigestCard({ note }) {
+  if (!note) return null
+  return (
+    <Card title="今日学习日报" tag="learning_digest">
+      <p className="learn-note-body">{note.content}</p>
+      <div className="learn-note-head mono">
+        <span>{fmtTime(note.createdAt)}</span>
+        {note.meta?.drawId != null && <span className="learn-note-draw">第 {note.meta.drawId} 期</span>}
+      </div>
+    </Card>
+  )
+}
+
 /** 经验笔记卡片流 */
 function NotesCard({ notes }) {
   return (
@@ -335,11 +556,14 @@ function NotesCard({ notes }) {
         <div className="learn-notes">
           {notes.map((nt, idx) => {
             const drawId = nt.meta?.drawId ?? nt.meta?.draw_id ?? null
+            const kind = nt.meta?.kind
             return (
               <div key={nt.id ?? `${nt.createdAt}-${idx}`} className="learn-note-card">
                 <div className="learn-note-head mono">
                   <span>{fmtTime(nt.createdAt)}</span>
                   <span className="learn-note-game">{GAME_LABEL[nt.game] || nt.game || '全站'}</span>
+                  {kind === 'digest' && <span className="learn-note-game learn-note-kind">日报</span>}
+                  {kind === 'weekly' && <span className="learn-note-game learn-note-kind">周报</span>}
                   {drawId != null && <span className="learn-note-draw">第 {drawId} 期</span>}
                 </div>
                 <p className="learn-note-body">{nt.content}</p>
@@ -378,8 +602,12 @@ function LearningCenterInner({ game }) {
   }, [load])
 
   const runs = useMemo(() => data?.runs || [], [data])
+  const history = useMemo(() => data?.history || [], [data])
   const hitChart = useMemo(() => buildHitChart(runs, game), [runs, game])
   const expertChart = useMemo(() => buildExpertChart(runs), [runs])
+  const historyCharts = useMemo(() => buildHistoryCharts(history), [history])
+  const battle = useMemo(() => buildBattleBoard(runs, game), [runs, game])
+  const digestNote = useMemo(() => (data?.notes || []).find((n) => n.meta?.kind === 'digest') || null, [data])
   const isDigit = game === 'fc3d' || game === 'pl3' || game === 'pl5'
 
   return (
@@ -409,7 +637,11 @@ function LearningCenterInner({ game }) {
         </Card>
       ) : (
         <>
+          <DigestCard note={digestNote} />
+
           <WeightsCard state={data.state} coldStart={data.coldStart} />
+
+          <HistoryCard charts={historyCharts} />
 
           <Card title="命中走势 · 近 30 期" tag="learning_predictions">
             {hitChart ? (
@@ -438,6 +670,10 @@ function LearningCenterInner({ game }) {
               )}
             </Card>
           )}
+
+          <BattleCard battle={battle} game={game} />
+
+          <HealthCard history={history} state={data.state} />
 
           <NotesCard notes={data.notes} />
         </>

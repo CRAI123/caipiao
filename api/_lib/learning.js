@@ -25,6 +25,7 @@ import {
   ssqSignalScores,
 } from '../../src/lib/ssqPredict.js'
 import { callAi } from './ai.js'
+import { readConfig, writeConfig } from './neon.js'
 
 /** 冷启动阈值：样本数 n < 8 的参数族一律回退代码默认值 */
 export const MIN_SAMPLES = 8
@@ -241,6 +242,7 @@ export async function notesForPrompt(sql, game) {
     const rows = await sql`
       SELECT content FROM ai_experience_notes
       WHERE game IN (${game}, 'all') AND active = true
+        AND COALESCE(meta->>'kind', '') <> 'digest'
       ORDER BY created_at DESC
       LIMIT 3`
     return rows
@@ -276,15 +278,40 @@ export async function scoreAndLearn(sql, game, draws) {
     const d = LEARN_DEFAULTS[game]
     if (!d) return { skipped: true, reason: 'unknown_game' }
     const updated = []
+    const changes = [] // 本期各键权重新旧变动（供日报与前端展示）
+    const hitsOut = {} // 本期各来源命中数
+    const today = new Date().toISOString().slice(0, 10)
     /** 取族当前状态（库里 n>=阈值 用库值，否则默认） */
     const getFamily = (paramKey, keys, weights) => {
       const v = stateRows.get(paramKey)
       if (v && v.n >= MIN_SAMPLES && Array.isArray(v.weights) && v.weights.length === keys.length) return v
       return newStateValue(keys, weights)
     }
-    const saveFamily = async (paramKey, value) => {
-      await upsertState(sql, game, paramKey, { ...value, lastDrawId: drawId })
+    const saveFamily = async (paramKey, value, prev) => {
+      const saved = { ...value, lastDrawId: drawId }
+      await upsertState(sql, game, paramKey, saved)
       updated.push(paramKey)
+      // 权重演化快照：upsert 进 learning_history（失败静默，不影响打分主流程）
+      try {
+        const json = JSON.stringify(saved)
+        await sql`
+          INSERT INTO learning_history (game, param_key, day, value, updated_at)
+          VALUES (${game}, ${paramKey}, ${today}, ${json}::jsonb, now())
+          ON CONFLICT (game, param_key, day) DO UPDATE
+            SET value = EXCLUDED.value, updated_at = now()`
+      } catch {
+        /* 快照失败不影响打分 */
+      }
+      // 对比新旧 weights 逐键记录实际变动（只记 |to-from|>1e-6 的）
+      if (prev && Array.isArray(prev.weights) && Array.isArray(saved.weights)) {
+        const keys = saved.keys || prev.keys || []
+        saved.weights.forEach((to, i) => {
+          const from = prev.weights[i]
+          if (typeof from === 'number' && typeof to === 'number' && Math.abs(to - from) > 1e-6) {
+            changes.push({ paramKey, key: keys[i] ?? String(i), from, to })
+          }
+        })
+      }
     }
     const markScored = async (source, meta) => {
       const json = JSON.stringify(meta)
@@ -309,6 +336,7 @@ export async function scoreAndLearn(sql, game, draws) {
         const hits = picks.filter((n) => actualSet.has(n)).length
         const loss = hitLoss(hits, 10, 0.25)
         rowLoss[source] = loss
+        hitsOut[source] = hits
         await markScored(source, { actual: actual.nums, hits, logLoss: +loss.toFixed(4) })
       }
       // ── 模型 × 温度：从 kl8_ai_deep_runs.result.round1Picks 逐条打分 ──
@@ -349,8 +377,8 @@ export async function scoreAndLearn(sql, game, draws) {
         const neutral = hitLoss(10 * 0.25, 10, 0.25)
         const mLosses = avgLosses(perModel, modelFam.keys)
         const tLosses = avgLosses(perTemp, tempFam.keys)
-        await saveFamily('model', hedgeUpdate(modelFam, mLosses.map((l) => (l == null ? neutral : l))))
-        await saveFamily('temp', hedgeUpdate(tempFam, tLosses.map((l) => (l == null ? neutral : l))))
+        await saveFamily('model', hedgeUpdate(modelFam, mLosses.map((l) => (l == null ? neutral : l))), modelFam)
+        await saveFamily('temp', hedgeUpdate(tempFam, tLosses.map((l) => (l == null ? neutral : l))), tempFam)
         if (preds.some((r) => r.source === 'models:kl8')) {
           await markScored('models:kl8', {
             actual: actual.nums,
@@ -362,7 +390,7 @@ export async function scoreAndLearn(sql, game, draws) {
       // ── AI/算法混合比 ──
       if (rowLoss['ai:final'] != null && rowLoss['algo:v7'] != null) {
         const mixFam = getFamily('mix', d.mix.keys, d.mix.weights)
-        await saveFamily('mix', mixUpdate(mixFam, rowLoss['algo:v7'], rowLoss['ai:final']))
+        await saveFamily('mix', mixUpdate(mixFam, rowLoss['algo:v7'], rowLoss['ai:final']), mixFam)
         if (preds.some((r) => r.source === 'mix:kl8')) {
           await markScored('mix:kl8', {
             lossAlgo: +rowLoss['algo:v7'].toFixed(4),
@@ -383,7 +411,7 @@ export async function scoreAndLearn(sql, game, draws) {
         const hits = actual.nums.filter((n) => top.has(n)).length
         return hitLoss(hits, 30, 0.25)
       })
-      await saveFamily('windows', hedgeUpdate(winFam, winLosses))
+      await saveFamily('windows', hedgeUpdate(winFam, winLosses), winFam)
     } else if (game === 'fc3d' || game === 'pl3' || game === 'pl5') {
       const npos = digitPositions(game)
       const experts = digitExperts(game)
@@ -405,6 +433,7 @@ export async function scoreAndLearn(sql, game, draws) {
           }
         }
         const loss = hitLoss(straightHits, npos, 0.1)
+        hitsOut[source] = straightHits
         await markScored(source, {
           actual: actual.num,
           straightHits,
@@ -424,7 +453,7 @@ export async function scoreAndLearn(sql, game, draws) {
           })
           perExpertLoss.push(losses.map((l) => +l.toFixed(4)))
           const fam = getFamily(`experts:p${pos}`, d.experts.keys, d.experts.weights)
-          await saveFamily(`experts:p${pos}`, hedgeUpdate(fam, losses))
+          await saveFamily(`experts:p${pos}`, hedgeUpdate(fam, losses), fam)
         }
         await markScored('hedge:experts', { actual: actual.num, perExpertLoss })
       }
@@ -438,6 +467,9 @@ export async function scoreAndLearn(sql, game, draws) {
         const blueHit = picks.blue === actual.blue
         // AI 行红球可能 6-8 个，按实际选号数计损失（每号期望命中概率 6/33）
         const loss = hitLoss(redHits, picks.red.length, 6 / 33) + hitLoss(blueHit ? 1 : 0, 1, 1 / 16)
+        // 命中数以 redHits+蓝球 记总分，另记 blueHit 0/1 键供日报补蓝球结果
+        hitsOut[source] = redHits + (blueHit ? 1 : 0)
+        hitsOut[`${source}:blueHit`] = blueHit ? 1 : 0
         await markScored(source, {
           actual: { red: actual.red, blue: actual.blue },
           redHits,
@@ -461,8 +493,8 @@ export async function scoreAndLearn(sql, game, draws) {
         const blueLosses = signalLosses(sig.blue, d.blueSignals.keys, 16, new Set([actual.blue]))
         const redFam = getFamily('redSignals', d.redSignals.keys, d.redSignals.weights)
         const blueFam = getFamily('blueSignals', d.blueSignals.keys, d.blueSignals.weights)
-        await saveFamily('redSignals', hedgeUpdate(redFam, redLosses))
-        await saveFamily('blueSignals', hedgeUpdate(blueFam, blueLosses))
+        await saveFamily('redSignals', hedgeUpdate(redFam, redLosses), redFam)
+        await saveFamily('blueSignals', hedgeUpdate(blueFam, blueLosses), blueFam)
         await markScored('signals:ssq', {
           actual: { red: actual.red, blue: actual.blue },
           redSignalLoss: Object.fromEntries(d.redSignals.keys.map((k, i) => [k, +redLosses[i].toFixed(4)])),
@@ -471,7 +503,7 @@ export async function scoreAndLearn(sql, game, draws) {
       }
     }
 
-    return { skipped: false, drawId, updated }
+    return { skipped: false, drawId, updated, hits: hitsOut, changes }
   } catch (e) {
     console.error('[learning] scoreAndLearn 失败：', e?.message || e)
     return { skipped: true, error: String(e?.message || e) }
@@ -648,6 +680,294 @@ export async function maybeGenerateNotes(sql, llm, { games = [], recentSummary =
     return { id: ins[0]?.id, note: note.slice(0, 400) }
   } catch (e) {
     console.error('[learning] maybeGenerateNotes 失败：', e?.message || e)
+    return null
+  }
+}
+
+// ────────────────────────── 每日学习日报 + 每周深度复盘 ──────────────────────────
+
+const DIGEST_LABEL = {
+  'algo:v7': '算法',
+  'algo:pool': '算法池',
+  'algo:ssq': '算法',
+  'ai:final': 'AI终选',
+  'ai:site': '站内AI',
+}
+
+/** 权重数值展示：最多 4 位小数、去尾零（0.15000→0.15） */
+const fmtW = (v) => String(Number(Number(v).toFixed(4)))
+
+/**
+ * 拼学习日报纯文本（纯函数，不依赖 DB，≤200 字）：
+ * 例 `第2026312期打分：算法命中5、AI终选命中6（AI占优）；今日最大权重变动 windows[24] 0.15→0.17；样本n=23`
+ * 无 hits 数据时退化为只报权重变动条数；ssq 补蓝球结果。
+ */
+export function buildDigestText(game, { drawId, result, sampleN } = {}) {
+  const hits = (result && result.hits) || {}
+  const changes = Array.isArray(result && result.changes) ? result.changes : []
+  const id = drawId ?? (result && result.drawId) ?? '?'
+  // 比较对：kl8 algo:v7 vs AI；数字彩 algo:pool vs AI；双色球 algo:ssq vs AI
+  const algoKey = game === 'kl8' ? 'algo:v7' : game === 'ssq' ? 'algo:ssq' : 'algo:pool'
+  const aiKeys = game === 'kl8' ? ['ai:final', 'ai:site'] : ['ai:site', 'ai:final']
+  // 双色球总分含蓝球，展示时拆回红球命中并补蓝球结果
+  const redOf = (k) => (typeof hits[k] !== 'number' ? null : game === 'ssq' ? hits[k] - (hits[`${k}:blueHit`] || 0) : hits[k])
+  const blueOf = (k) => (game === 'ssq' ? `，${hits[`${k}:blueHit`] === 1 ? '蓝中' : '蓝未中'}` : '')
+  const segs = []
+  const algoVal = redOf(algoKey)
+  if (algoVal != null) segs.push(`${DIGEST_LABEL[algoKey]}命中${algoVal}${blueOf(algoKey)}`)
+  let bestKey = null
+  let bestVal = null
+  for (const k of aiKeys) {
+    const v = redOf(k)
+    if (v != null && (bestVal == null || v > bestVal)) {
+      bestVal = v
+      bestKey = k
+    }
+  }
+  if (bestKey != null) segs.push(`${DIGEST_LABEL[bestKey]}命中${bestVal}${blueOf(bestKey)}`)
+  let body
+  if (segs.length) {
+    body = segs.join('、')
+    if (algoVal != null && bestVal != null) {
+      body += bestVal > algoVal ? '（AI占优）' : bestVal < algoVal ? '（算法占优）' : '（持平）'
+    }
+    if (changes.length) {
+      const max = changes.reduce((a, b) => (Math.abs(b.to - b.from) > Math.abs(a.to - a.from) ? b : a))
+      body += `；今日最大权重变动 ${max.paramKey}[${max.key}] ${fmtW(max.from)}→${fmtW(max.to)}`
+    }
+  } else {
+    // 无命中数据可报：退化为只报权重变动条数
+    body = `今日权重变动${changes.length}条`
+  }
+  if (typeof sampleN === 'number' && Number.isFinite(sampleN)) body += `；样本n=${sampleN}`
+  return `第${id}期打分：${body}`.slice(0, 200)
+}
+
+/**
+ * 每日学习日报：确定性拼装 scoreAndLearn 返回值（不调 LLM），写 kind='digest' 笔记。
+ * 每彩种只保留最新一条（更早 digest 置 active=false，不挤占真实笔记 12 条配额）。
+ * 全程 try/catch 静默，绝不 throw。
+ */
+export async function writeDigest(sql, game, { drawId, result } = {}) {
+  try {
+    if (!sql || !game || !result || result.skipped) return null
+    // 当前最大样本数（日报尾「样本n」；查询失败省略该段）
+    let sampleN = null
+    try {
+      const rows = await sql`SELECT value FROM learning_state WHERE game = ${game}`
+      for (const r of rows) {
+        const n = Number(parseJson(r.value)?.n ?? NaN)
+        if (Number.isFinite(n) && n > (sampleN ?? -1)) sampleN = n
+      }
+    } catch {
+      /* 样本数查询失败不影响日报 */
+    }
+    const id = drawId ?? result.drawId ?? null
+    const content = buildDigestText(game, { drawId: id, result, sampleN })
+    if (!content) return null
+    const meta = JSON.stringify({ kind: 'digest', drawId: id })
+    const ins = await sql`
+      INSERT INTO ai_experience_notes (game, content, meta)
+      VALUES (${game}, ${content}, ${meta}::jsonb)
+      RETURNING id`
+    const newId = ins[0]?.id
+    if (newId != null) {
+      // 清理只针对 digest 行：每天只留最新一条日报
+      await sql`
+        UPDATE ai_experience_notes SET active = false
+        WHERE game = ${game} AND active = true
+          AND meta->>'kind' = 'digest' AND id < ${newId}`
+    }
+    return { id: newId, content }
+  } catch (e) {
+    console.error('[learning] writeDigest 失败：', e?.message || e)
+    return null
+  }
+}
+
+/** 每周深度复盘最小间隔（毫秒） */
+const DEEP_REVIEW_MS = 7 * 86400000
+
+/**
+ * 每周深度复盘（批量重优化）：距上次 ≥7 天才执行，用各彩种近 24 期已打分记录
+ * 重建平均损失向量，按 eta=0.8 一次性成型（与前端 proHedge 批量版对齐）。
+ * 批量重优化不算新样本：lastDrawId 保持原值、n 不 +1；结果快照进 learning_history。
+ * 生成 game='all' 周报笔记（kind='weekly'，保留最近 4 条 active）。
+ * 全程 try/catch 绝不 throw；无 DATABASE_URL / 未到周期返回 null。
+ */
+export async function deepReviewWeekly(sql, games) {
+  try {
+    if (!sql || !Array.isArray(games) || !games.length) return null
+    let lastTs = NaN
+    try {
+      const raw = await readConfig(sql, 'learning.lastDeepReview')
+      lastTs = Date.parse(typeof raw === 'string' ? raw : String(raw ?? ''))
+    } catch {
+      /* 配置读不到按从未执行处理 */
+    }
+    if (Number.isFinite(lastTs) && Date.now() - lastTs < DEEP_REVIEW_MS) return null
+    const today = new Date().toISOString().slice(0, 10)
+    const fromDay = new Date(Date.now() - DEEP_REVIEW_MS).toISOString().slice(0, 10)
+    const report = []
+    for (const game of games) {
+      const d = LEARN_DEFAULTS[game]
+      if (!d) continue
+      const stateRows = await readStateRows(sql, game)
+      const getFamily = (paramKey, keys, weights) => {
+        const v = stateRows.get(paramKey)
+        if (v && v.n >= MIN_SAMPLES && Array.isArray(v.weights) && v.weights.length === keys.length) return v
+        return newStateValue(keys, weights)
+      }
+      // 近 24 期已打分行（每期多个来源行，按期号去重取最近 24 期）
+      const rows = await sql`
+        SELECT draw_id, source, meta FROM learning_predictions
+        WHERE game = ${game} AND scored = true
+        ORDER BY draw_id DESC LIMIT 500`
+      const drawIds = [...new Set(rows.map((r) => r.draw_id))].slice(0, 24)
+      if (drawIds.length < 4) continue
+      const idSet = new Set(drawIds)
+      const metasOf = new Map()
+      for (const r of rows) {
+        if (!idSet.has(r.draw_id)) continue
+        const m = parseJson(r.meta)
+        if (!m) continue
+        if (!metasOf.has(r.source)) metasOf.set(r.source, [])
+        metasOf.get(r.source).push(m)
+      }
+      const adjusted = []
+      const famChanges = []
+      const saveReviewed = async (paramKey, fam, next) => {
+        // 批量重优化不算新样本：n 与 lastDrawId 保持原值
+        const value = { ...next, n: fam.n ?? 0, lastDrawId: fam.lastDrawId ?? null }
+        await upsertState(sql, game, paramKey, value)
+        try {
+          const json = JSON.stringify(value)
+          await sql`
+            INSERT INTO learning_history (game, param_key, day, value, updated_at)
+            VALUES (${game}, ${paramKey}, ${today}, ${json}::jsonb, now())
+            ON CONFLICT (game, param_key, day) DO UPDATE
+              SET value = EXCLUDED.value, updated_at = now()`
+        } catch {
+          /* 快照失败不影响复盘 */
+        }
+        adjusted.push(paramKey)
+        const keys = value.keys || fam.keys || []
+        value.weights.forEach((to, i) => {
+          const from = fam.weights[i]
+          if (typeof from === 'number' && typeof to === 'number' && Math.abs(to - from) > 1e-6) {
+            famChanges.push({ paramKey, key: keys[i] ?? String(i), from, to })
+          }
+        })
+      }
+      // 各来源对象型损失按 key 跨期求均值；无数据键用其他键均值兜底，全无数据返回 null
+      const meanLossByKeys = (source, field, keys) => {
+        const ms = metasOf.get(source) || []
+        const out = keys.map((k) => {
+          const vals = ms.map((m) => Number(m[field]?.[k])).filter((v) => Number.isFinite(v))
+          return vals.length ? vals.reduce((a, b) => a + b, 0) / vals.length : null
+        })
+        const known = out.filter((v) => v != null)
+        if (!known.length) return null
+        const fb = known.reduce((a, b) => a + b, 0) / known.length
+        return out.map((v) => (v == null ? fb : v))
+      }
+      const avgLogLoss = (source) => {
+        const vals = (metasOf.get(source) || []).map((m) => Number(m.logLoss)).filter((v) => Number.isFinite(v))
+        return vals.length ? vals.reduce((a, b) => a + b, 0) / vals.length : null
+      }
+      if (game === 'kl8') {
+        const mLoss = meanLossByKeys('models:kl8', 'modelLoss', d.model.keys)
+        if (mLoss) {
+          const fam = getFamily('model', d.model.keys, d.model.weights)
+          await saveReviewed('model', fam, hedgeUpdate(fam, mLoss, { eta: 0.8 }))
+        }
+        const tLoss = meanLossByKeys('models:kl8', 'tempLoss', d.temp.keys)
+        if (tLoss) {
+          const fam = getFamily('temp', d.temp.keys, d.temp.weights)
+          await saveReviewed('temp', fam, hedgeUpdate(fam, tLoss, { eta: 0.8 }))
+        }
+        // mix 连续等效：w_ai = clamp(w_ai*exp(0.8*(lossAlgo-lossAi)), 0.3, 0.7)
+        const lossAlgo = avgLogLoss('algo:v7')
+        const lossAi = avgLogLoss('ai:final')
+        if (lossAlgo != null && lossAi != null) {
+          const fam = getFamily('mix', d.mix.keys, d.mix.weights)
+          const wAi = clamp(fam.weights[0] * Math.exp(0.8 * (lossAlgo - lossAi)), 0.3, 0.7)
+          await saveReviewed('mix', fam, { ...fam, weights: [wAi, 1 - wAi] })
+        }
+        // windows 逐期损失未入库，周复盘跳过（逐日增量更新已覆盖）
+      } else if (d.experts) {
+        // 数字彩：hedge:experts 行 perExpertLoss[pos][e]，各专家跨位跨期求均值（同前端均值口径）
+        const hs = metasOf.get('hedge:experts') || []
+        const perExpert = d.experts.keys.map(() => [])
+        for (const m of hs) {
+          if (!Array.isArray(m.perExpertLoss)) continue
+          for (const posArr of m.perExpertLoss) {
+            if (!Array.isArray(posArr)) continue
+            posArr.forEach((l, e) => {
+              const x = Number(l)
+              if (Number.isFinite(x) && perExpert[e]) perExpert[e].push(x)
+            })
+          }
+        }
+        const losses = perExpert.map((arr) => (arr.length ? arr.reduce((a, b) => a + b, 0) / arr.length : null))
+        const known = losses.filter((v) => v != null)
+        if (known.length) {
+          const fb = known.reduce((a, b) => a + b, 0) / known.length
+          const vec = losses.map((v) => (v == null ? fb : v))
+          for (let pos = 0; pos < d.experts.positions; pos++) {
+            const paramKey = `experts:p${pos}`
+            const fam = getFamily(paramKey, d.experts.keys, d.experts.weights)
+            await saveReviewed(paramKey, fam, hedgeUpdate(fam, vec, { eta: 0.8 }))
+          }
+        }
+      } else if (game === 'ssq') {
+        const rLoss = meanLossByKeys('signals:ssq', 'redSignalLoss', d.redSignals.keys)
+        if (rLoss) {
+          const fam = getFamily('redSignals', d.redSignals.keys, d.redSignals.weights)
+          await saveReviewed('redSignals', fam, hedgeUpdate(fam, rLoss, { eta: 0.8 }))
+        }
+        const bLoss = meanLossByKeys('signals:ssq', 'blueSignalLoss', d.blueSignals.keys)
+        if (bLoss) {
+          const fam = getFamily('blueSignals', d.blueSignals.keys, d.blueSignals.weights)
+          await saveReviewed('blueSignals', fam, hedgeUpdate(fam, bLoss, { eta: 0.8 }))
+        }
+      }
+      if (adjusted.length) {
+        famChanges.sort((a, b) => Math.abs(b.to - b.from) - Math.abs(a.to - a.from))
+        report.push({
+          game,
+          families: adjusted,
+          top: famChanges
+            .slice(0, 2)
+            .map((c) => `${c.paramKey}[${c.key}] ${fmtW(c.from)}→${fmtW(c.to)}`),
+        })
+      }
+    }
+    if (!report.length) return null
+    // 周报笔记：game='all'，只保留最近 4 条 active weekly
+    const lines = report.map((r) => `${r.game}调整${r.families.join('、')}${r.top.length ? `（最大变动 ${r.top.join('，')}）` : ''}`)
+    const content = `每周深度复盘（${fromDay}~${today}，近24期均值批量重优化 eta=0.8）：${lines.join('；')}。仅调整信号权重的历史一致性，不提高中奖概率。`.slice(0, 300)
+    const meta = JSON.stringify({
+      kind: 'weekly',
+      games: report.map((r) => r.game),
+      fromDay,
+      toDay: today,
+    })
+    await sql`
+      INSERT INTO ai_experience_notes (game, content, meta)
+      VALUES ('all', ${content}, ${meta}::jsonb)`
+    await sql`
+      UPDATE ai_experience_notes SET active = false
+      WHERE game = 'all' AND active = true AND meta->>'kind' = 'weekly'
+        AND id NOT IN (
+          SELECT id FROM ai_experience_notes
+          WHERE game = 'all' AND active = true AND meta->>'kind' = 'weekly'
+          ORDER BY created_at DESC LIMIT 4
+        )`
+    await writeConfig(sql, 'learning.lastDeepReview', new Date().toISOString())
+    return { performed: true, games: report.map((r) => r.game), content }
+  } catch (e) {
+    console.error('[learning] deepReviewWeekly 失败：', e?.message || e)
     return null
   }
 }

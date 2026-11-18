@@ -12,7 +12,7 @@ export default async function handler(req, res) {
       const game = String(req.query.game || 'kl8')
       const sql = getSql()
       await ensureTables(sql)
-      const [state, runs, notes] = await Promise.all([
+      const [state, runs, notes, history] = await Promise.all([
         sql`SELECT param_key, value FROM learning_state WHERE game = ${game} ORDER BY param_key`,
         sql`
           SELECT draw_id, source, picks, meta, scored, updated_at
@@ -26,7 +26,19 @@ export default async function handler(req, res) {
           WHERE game IN (${game}, 'all') AND active = true
           ORDER BY created_at DESC
           LIMIT 12`,
+        sql`
+          SELECT param_key, day, value FROM learning_history
+          WHERE game = ${game} AND day >= CURRENT_DATE - INTERVAL '60 days'
+          ORDER BY day`,
       ])
+      const parseMaybe = (v) => {
+        if (typeof v !== 'string') return v
+        try {
+          return JSON.parse(v)
+        } catch {
+          return v
+        }
+      }
       return res.status(200).json({
         ok: true,
         game,
@@ -39,6 +51,11 @@ export default async function handler(req, res) {
           updatedAt: r.updated_at,
         })),
         notes: notes.map((r) => ({ id: r.id, game: r.game, content: r.content, meta: r.meta, createdAt: r.created_at })),
+        history: history.map((r) => ({
+          paramKey: r.param_key,
+          day: String(r.day).slice(0, 10),
+          value: parseMaybe(r.value),
+        })),
       })
     } catch (e) {
       console.error('get-reviews learning error:', e)

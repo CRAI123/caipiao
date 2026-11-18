@@ -107,6 +107,23 @@ export async function ensureTables(sql) {
   await sql`
     CREATE INDEX IF NOT EXISTS aen_active_idx
       ON ai_experience_notes (game, active, created_at DESC)`
+  // 权重演化历史：每期打分后各参数族新状态的按天快照（学习中心近60天曲线数据源）
+  await sql`
+    CREATE TABLE IF NOT EXISTS learning_history (
+      game text NOT NULL,
+      param_key text NOT NULL,
+      day date NOT NULL,
+      value jsonb NOT NULL,
+      updated_at timestamptz NOT NULL DEFAULT now(),
+      PRIMARY KEY (game, param_key, day)
+    )`
+  // 共享配置表：服务端也要保证存在（周复盘门控时间戳依赖；DDL 与前端 access.js 一致）
+  await sql`
+    CREATE TABLE IF NOT EXISTS admin_config (
+      key text PRIMARY KEY,
+      value text NOT NULL,
+      updated_at timestamptz NOT NULL DEFAULT now()
+    )`
 }
 
 /** 读取 admin_config 表的共享配置 */

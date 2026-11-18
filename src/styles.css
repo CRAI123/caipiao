@@ -1728,6 +1728,26 @@ code {
 
 .learn-chart { margin-top: 4px; }
 
+/* 学习健康度指标块 */
+.learn-health {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(200px, 1fr));
+  gap: 12px;
+}
+.learn-metric {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  border: 1px solid var(--ink-08);
+  border-radius: 6px;
+  background: var(--paper);
+  padding: 10px 12px;
+}
+.learn-metric-label { font-size: 12px; color: var(--ink-60); }
+.learn-metric strong { font-size: 16px; }
+.learn-metric-warn { border-color: var(--amber); background: var(--amber-soft); }
+.learn-metric-warn strong { color: var(--amber); }
+
 .learn-notes { display: flex; flex-direction: column; gap: 10px; }
 .learn-note-card {
   border: 1px solid var(--ink-08);
@@ -1745,6 +1765,7 @@ code {
   margin-bottom: 6px;
 }
 .learn-note-game { color: var(--blue); }
+.learn-note-kind { color: var(--amber); }
 .learn-note-draw { color: var(--red); }
 .learn-note-body {
   margin: 0;
