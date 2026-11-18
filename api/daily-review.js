@@ -379,11 +379,18 @@ async function prewarmNext(llm, sql, drawMap, afterOf) {
     })
 
   try {
-    // 先并发跑一轮
-    await Promise.all(tasks.map(run))
-    // 失败的串行重试一次（并发容易被上游限流，串行更稳）
-    for (const t of tasks) {
-      if (failed[t.g] && out[t.g] == null) await run(t)
+    // 并发跑一轮，但整体限时 20s：夜间批次不能被上游模型拖过 60s 上限
+    const all = Promise.all(tasks.map(run))
+    let timer = null
+    const timeout = new Promise((resolve) => {
+      timer = setTimeout(() => resolve('timeout'), 20000)
+    })
+    const result = await Promise.race([all, timeout])
+    if (timer) clearTimeout(timer)
+    if (result === 'timeout') {
+      for (const t of tasks) {
+        if (out[t.g] == null && !failed[t.g]) failed[t.g] = '预生成超时'
+      }
     }
   } catch (e) {
     console.error('[daily-review] 次日 AI 预生成失败：', e?.message || e)
