@@ -4,6 +4,7 @@ import React, { useMemo, useState } from 'react'
 import { Card, Note, StatCard } from './common.jsx'
 import AiHitLog from './AiHitLog.jsx'
 import * as fc3dEngine from '../lib/fc3dPredict.js'
+import { auditVersionCompare } from '../lib/fusion.js'
 
 const PERIODS = [20, 30, 50, 80]
 
@@ -106,6 +107,25 @@ export default function FC3DAudit({
       pos: 48.8, // 每位取 2 码时，至少中 1 位的概率 = 1 - 0.8³
     }
   }, [compare])
+
+  // 版本对比 · 近 100 期：逐期回算各版本直选按位命中（v4 区间参考不跑引擎，单列注明）
+  const versionCompare = useMemo(() => {
+    const keys = Object.keys(predictFns).filter((k) => typeof engine[predictFns[k]] === 'function')
+    if (keys.length < 2 || draws.length < 45) return null
+    const rows = auditVersionCompare(
+      engine,
+      keys.filter((k) => k !== 'v4'),
+      (k) => predictFns[k],
+      draws,
+      { periods: 100, minTrain: 40 },
+    )
+    const full = []
+    for (const k of keys) {
+      if (k === 'v4') full.push({ key: 'v4', status: 'indicator', n: 0 })
+      else full.push(rows.find((r) => r.key === k))
+    }
+    return full
+  }, [engine, predictFns, draws])
 
   // 最新一期的回滚验证
   const rollback = useMemo(() => {
@@ -264,6 +284,72 @@ export default function FC3DAudit({
             <br />
             <b>「理论上限」列</b>是按同样取值个数、在真实均匀分布下能拿到的最高命中率。可以看到实测值
             已经贴着上限——想再高只能加宽区间（多加取值），那是纯粹的覆盖面扩张，没有任何信息增益。
+          </Note>
+        </Card>
+      )}
+
+      {/* 版本对比 · 近 100 期 */}
+      {versionCompare && (
+        <Card title="版本对比 · 近100期" tag="walk-forward 逐期回算 · 直选按位命中">
+          <div className="table-scroll">
+            <table className="ledger-table">
+              <thead>
+                <tr>
+                  <th>版本</th>
+                  <th>回测期数</th>
+                  <th>平均命中/期</th>
+                  <th>随机期望</th>
+                  <th>跑赢随机期望期数占比</th>
+                  <th>最长连续脱靶</th>
+                  <th>结论</th>
+                </tr>
+              </thead>
+              <tbody>
+                {versionCompare.map((r) => {
+                  const name =
+                    r.key === 'v1'
+                      ? '经典 v1'
+                      : r.key === 'v2'
+                        ? v2Label
+                        : r.key === 'v4'
+                          ? 'v4 技术指标'
+                          : proLabel
+                  if (r.status !== 'ok') {
+                    return (
+                      <tr key={r.key}>
+                        <td>{name}</td>
+                        <td colSpan={6} className="muted">
+                          {r.status === 'indicator'
+                            ? '区间参考 · 不参与命中统计（无逐期按位命中概念）'
+                            : r.status === 'no-pos'
+                              ? '无定位输出 · 不参与按位命中统计'
+                              : '数据不足，无法回算'}
+                        </td>
+                      </tr>
+                    )
+                  }
+                  return (
+                    <tr key={r.key}>
+                      <td>{name}</td>
+                      <td className="mono">{r.n}</td>
+                      <td className="mono">
+                        <b>{r.avgHit}</b>
+                      </td>
+                      <td className="mono muted">{r.expected}</td>
+                      <td className="mono">{r.beatRate}%</td>
+                      <td className="mono">{r.longestMiss} 期</td>
+                      <td>{r.conclusion}</td>
+                    </tr>
+                  )
+                })}
+              </tbody>
+            </table>
+          </div>
+          <Note>
+            按位命中 = 该位置实际号码落在版本输出的该位 Top2 候选内，命中位数 ÷ 位数；随机期望由候选个数
+            推得（每位 Top2 → 2/10 = 0.2），与算法无关。
+            <br />
+            <b>所有版本的长期命中都会收敛到随机期望，差异属于正常波动。</b>
           </Note>
         </Card>
       )}

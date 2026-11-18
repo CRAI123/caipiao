@@ -1,9 +1,22 @@
 // 福彩3D 下期推荐 —— 基于多维度术语评分的下期推算 + 上期回算验证
 // 算法档位由 algoInfo 驱动：福彩3D 两档（v1/v2），排列三三档（v1/v2/pro）
+// 多版本时默认输出跨版本「融合推荐」（见 lib/fusion.js），单版本档位折叠进高级区
 import React, { useEffect, useMemo, useState } from 'react'
 import * as fc3dEngine from '../lib/fc3dPredict.js'
 import { readLearning } from '../lib/learning.js'
+import {
+  walkForwardStats,
+  fusionWeights,
+  fuseView,
+  hasPosTop,
+  adaptPosTop,
+  FUSION_WALK_PERIODS,
+  FUSION_TEMPERATURE,
+} from '../lib/fusion.js'
 import DigitAI from './DigitAI.jsx'
+
+const FUSION_KEY = 'fusion'
+const shortKey = (k) => (k === 'pro' ? 'Pro' : k)
 
 function DigitBall({ d, hot, cold, omit }) {
   let cls = 'digit-ball'
@@ -44,12 +57,76 @@ export default function FC3D({
   algoFn = ALGO_FN,
   defaultCover = 6,
 }) {
-  const [algo, setAlgo] = useState(
-    Object.keys(algoInfo).find((k) => algoInfo[k].recommend) || 'v2',
-  )
+  const [algo, setAlgo] = useState(null) // null = 未选择：有融合能力时默认融合，否则用推荐档
+  const [showPicker, setShowPicker] = useState(false)
+  const [showWeights, setShowWeights] = useState(false)
   const [cover, setCover] = useState(defaultCover)
   const [coverRate, setCoverRate] = useState(0.8)
-  const fn = algoFn[algo] || Object.values(algoFn)[0]
+
+  // 可融合探测：跑一遍各非 v4 版本的当前输出，按结构（posTop）判定能否参与融合。
+  // v4 是指标区间参考，按产品约定不进入融合。
+  const probe = useMemo(() => {
+    const out = {}
+    for (const k of Object.keys(algoInfo)) {
+      if (k === 'v4') continue
+      const name = algoFn[k] && algoFn[k].predict
+      if (!name || typeof engine[name] !== 'function') continue
+      try {
+        out[k] = engine[name](draws, { cover: 6, coverRate: 0.8 })
+      } catch {
+        out[k] = null
+      }
+    }
+    return out
+  }, [draws, engine, algoInfo, algoFn])
+  const fusionKeys = useMemo(
+    () => Object.keys(probe).filter((k) => hasPosTop(adaptPosTop(probe[k]))),
+    [probe],
+  )
+  const fusionAvailable = fusionKeys.length >= 2
+
+  // walk-forward 近 30 期定权 + 当前期融合输出（不随 cover/coverRate 变化重算定权）
+  const fusionStats = useMemo(
+    () =>
+      fusionAvailable
+        ? walkForwardStats(
+            engine,
+            fusionKeys,
+            (k) => algoFn[k].predict,
+            draws,
+            { periods: FUSION_WALK_PERIODS, minTrain: 40 },
+          )
+        : null,
+    [fusionAvailable, engine, fusionKeys, algoFn, draws],
+  )
+  const fusion = useMemo(() => {
+    if (!fusionAvailable || !fusionStats) return null
+    const { weights, equalized } = fusionWeights(fusionStats, fusionKeys)
+    return {
+      weights,
+      equalized,
+      view: fuseView(engine, fusionKeys, (k) => algoFn[k].predict, draws, weights, { coverRate }),
+    }
+  }, [fusionAvailable, fusionStats, engine, fusionKeys, algoFn, draws, coverRate])
+
+  const defaultAlgo = Object.keys(algoInfo).find((k) => algoInfo[k].recommend) || 'v2'
+  // 数据变化导致融合失效 / algo 键不存在时回退到默认档，避免 algoInfo[algoCur] 取空
+  const algoCur =
+    algo === FUSION_KEY
+      ? fusionAvailable
+        ? FUSION_KEY
+        : defaultAlgo
+      : algo && algoInfo[algo]
+        ? algo
+        : fusionAvailable
+          ? FUSION_KEY
+          : defaultAlgo
+  const isFusion = algoCur === FUSION_KEY && !!fusion
+  // 融合视图下，辅助明细取权重最高的可融合版本
+  const primary = isFusion
+    ? fusionKeys.reduce((a, b) => (fusion.weights[a] >= fusion.weights[b] ? a : b), fusionKeys[0])
+    : algoCur
+  const fn = algoFn[primary] || Object.values(algoFn)[0]
 
   // 学习中心自适应权重：挂载时读一次（切彩种随 game 重读）；none/coldStart 不传 override
   const [learning, setLearning] = useState(null)
@@ -120,21 +197,65 @@ export default function FC3D({
         <h2>下期推荐推算</h2>
         <p>
           基于 {draws.length} 期历史数据推算下期参考号码。当前算法：
-          <b style={{ margin: '0 4px' }}>{algoInfo[algo].name}</b>
-          <span className="muted">（{algoInfo[algo].desc}）</span>
+          <b style={{ margin: '0 4px' }}>{isFusion ? '融合推荐' : algoInfo[algoCur].name}</b>
+          <span className="muted">
+            （
+            {isFusion
+              ? `按近 ${FUSION_WALK_PERIODS} 期回测权重合并 ${fusionKeys.map((k) => algoInfo[k].name).join(' 与 ')} 的定位候选`
+              : algoInfo[algoCur].desc}
+            ）
+          </span>
         </p>
-        <div className="algo-toggle">
-          {Object.entries(algoInfo).map(([k, v]) => (
-            <button
-              key={k}
-              className={`tab-btn ${algo === k ? 'active' : ''}`}
-              onClick={() => setAlgo(k)}
-            >
-              {v.name}
-              {v.recommend && <em style={{ color: 'var(--red)' }}> · 推荐</em>}
-            </button>
-          ))}
-        </div>
+        {fusionAvailable ? (
+          <div className="algo-toggle">
+            {!showPicker && isFusion ? (
+              <button className="tab-btn" onClick={() => setShowPicker(true)}>
+                ▸ 切换单版本（{Object.keys(algoInfo).map(shortKey).join('/')}）
+              </button>
+            ) : (
+              <>
+                <button
+                  className={`tab-btn ${isFusion ? 'active' : ''}`}
+                  onClick={() => {
+                    setAlgo(FUSION_KEY)
+                    setShowPicker(false)
+                  }}
+                >
+                  融合推荐
+                  <em style={{ color: 'var(--red)' }}> · 默认</em>
+                </button>
+                {Object.entries(algoInfo).map(([k, v]) => (
+                  <button
+                    key={k}
+                    className={`tab-btn ${algoCur === k ? 'active' : ''}`}
+                    onClick={() => setAlgo(k)}
+                  >
+                    {v.name}
+                    {v.recommend && <em style={{ color: 'var(--red)' }}> · 推荐</em>}
+                  </button>
+                ))}
+                {isFusion && (
+                  <button className="tab-btn" onClick={() => setShowPicker(false)}>
+                    ▾ 收起
+                  </button>
+                )}
+              </>
+            )}
+          </div>
+        ) : (
+          <div className="algo-toggle">
+            {Object.entries(algoInfo).map(([k, v]) => (
+              <button
+                key={k}
+                className={`tab-btn ${algoCur === k ? 'active' : ''}`}
+                onClick={() => setAlgo(k)}
+              >
+                {v.name}
+                {v.recommend && <em style={{ color: 'var(--red)' }}> · 推荐</em>}
+              </button>
+            ))}
+          </div>
+        )}
         <div className="algo-toggle" style={{ marginTop: 8 }}>
           <span className="muted small" style={{ alignSelf: 'center', marginRight: 6 }}>
             区间覆盖目标
@@ -168,6 +289,122 @@ export default function FC3D({
         digitCount={digitCount}
         onRefreshData={onRefreshData}
       />
+
+      {/* 融合推荐：跨版本定位候选加权合并 */}
+      {isFusion && (
+        <div className="odd-card">
+          <div className="odd-card-head">
+            <h3>融合推荐 · 定位候选加权合并</h3>
+            <span
+              className="muted small"
+              style={{ cursor: 'pointer' }}
+              onClick={() => setShowWeights((s) => !s)}
+            >
+              {fusionKeys.map((k) => `${shortKey(k)} ${Math.round(fusion.weights[k] * 100)}%`).join(' · ')}
+              {' '}▸ 权重详情
+            </span>
+          </div>
+          {showWeights && (
+            <div className="muted small" style={{ margin: '6px 0 10px' }}>
+              权重来自近 {FUSION_WALK_PERIODS} 期逐期回算（每期只用它之前的数据）：
+              {fusionKeys
+                .map(
+                  (k) =>
+                    `${algoInfo[k].name} 平均按位命中 ${
+                      fusionStats[k]?.status === 'ok' ? fusionStats[k].avgHit.toFixed(2) : '—'
+                    }（${fusionStats[k]?.n || 0} 期）`,
+                )
+                .join('；')}
+              。{fusion.equalized ? '样本不足，已退化为等权' : `weights = softmax(平均命中 × ${FUSION_TEMPERATURE})`}
+            </div>
+          )}
+
+          <div className="predict-row">
+            <div className="predict-label">定位候选</div>
+            <div className="predict-value">
+              {fusion.view.posDist.map((pd, i) => (
+                <span key={i} className="pos-rec">
+                  <b>{positions[i] || `${i + 1}位`}</b>
+                  {pd.prob
+                    .map((v, d) => ({ v, d, sources: pd.sources[d] }))
+                    .filter((x) => x.v > 0)
+                    .sort((a, b) => b.v - a.v)
+                    .slice(0, 3)
+                    .map((x) => (
+                      <span
+                        key={x.d}
+                        className="digit-ball small"
+                        title={`融合概率 ${(x.v * 100).toFixed(1)}% · 来自 ${x.sources.map(shortKey).join('/')}`}
+                      >
+                        {x.d}
+                        <em>{Math.round(x.v * 100)}</em>
+                      </span>
+                    ))}
+                </span>
+              ))}
+            </div>
+          </div>
+
+          <div className="predict-sub" style={{ marginTop: 10 }}>直选组合 Top {fusion.view.combos.length}</div>
+          <div className="table-scroll">
+            <table className="ledger-table">
+              <thead>
+                <tr>
+                  <th>排名</th>
+                  <th>号码</th>
+                  <th>融合概率</th>
+                  <th>和值</th>
+                  <th>跨度</th>
+                  <th>形态</th>
+                </tr>
+              </thead>
+              <tbody>
+                {fusion.view.combos.map((c) => (
+                  <tr key={c.num.join('-')}>
+                    <td className="mono">{c.rank}</td>
+                    <td className="mono">
+                      <b>{c.num.join(' ')}</b>
+                    </td>
+                    <td className="mono">{c.prob}%</td>
+                    <td className="mono">{c.sum}</td>
+                    <td className="mono">{c.span}</td>
+                    <td>{c.form}</td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+
+          <div className="metric-grid" style={{ marginTop: 12 }}>
+            <div className="metric-card">
+              <div className="metric-name">和值参考</div>
+              <div className="metric-value">
+                {fusion.view.sumRange[0]} – {fusion.view.sumRange[1]}
+              </div>
+              <div className="metric-sub">由合并分布推得 · 覆盖目标 {Math.round(coverRate * 100)}%</div>
+            </div>
+            <div className="metric-card">
+              <div className="metric-name">跨度参考</div>
+              <div className="metric-value">
+                {fusion.view.spanRange[0]} – {fusion.view.spanRange[1]}
+              </div>
+              <div className="metric-sub">由合并分布推得 · 覆盖目标 {Math.round(coverRate * 100)}%</div>
+            </div>
+          </div>
+
+          <div className="note note-info" style={{ marginTop: 12 }}>
+            融合不提高中奖概率——它只是把「该选哪个版本」的不确定性摊平成加权组合，
+            长期命中仍收敛随机期望（按位 Top2 候选的随机期望为每位 2/10）。
+            v4 为走势区间参考，不进入融合；v1 经典综合评分没有定位输出，同样不参与融合。
+          </div>
+        </div>
+      )}
+
+      {isFusion && (
+        <div className="muted small" style={{ margin: '10px 0 6px' }}>
+          以下为辅助明细 · 来自 {algoInfo[primary].name}（融合权重最高 {Math.round(fusion.weights[primary] * 100)}%）
+        </div>
+      )}
 
       {/* 上期开奖 */}
       <div className="predict-row">
@@ -263,8 +500,8 @@ export default function FC3D({
         </div>
       )}
 
-      {/* v2 定位推荐 */}
-      {pred.posTop && (
+      {/* v2 定位推荐（融合视图已由融合卡输出，不重复展示） */}
+      {!isFusion && pred.posTop && (
         <div className="predict-row">
           <div className="predict-label">定位推荐</div>
           <div className="predict-value">
@@ -281,7 +518,7 @@ export default function FC3D({
       )}
 
       {/* v3 Pro 增强输出：结构约束后的 Top 组合 + 直选方案 + 专家权重 */}
-      {pred.topCombos && (
+      {!isFusion && pred.topCombos && (
         <div className="odd-card">
           <div className="odd-card-head">
             <h3>v3 Pro 增强输出</h3>
