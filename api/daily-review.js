@@ -317,57 +317,79 @@ async function generateAdvice(llm, sql, learning) {
 /** 预生成次日 AI 终选（14:00 推送直接读缓存）；任何失败都静默降级，不影响学习主流程 */
 async function prewarmNext(llm, sql, drawMap, afterOf) {
   const out = { kl8: null, fc3d: null, pl3: null, pl5: null }
+  const failed = {}
+  const tasks = []
+
+  const kd = drawMap.kl8
+  if (Array.isArray(kd) && kd.length > 1) {
+    tasks.push({
+      g: 'kl8',
+      fn: async () => {
+        const built = buildKl8(kd, afterOf?.kl8 || null)
+        const ai = await buildKl8Ai({ draws: kd, built, sql, llm })
+        // 只有 AI 真正给出 10 码才缓存，回退算法结果不缓存，留给 14:00 再试一次
+        if (!ai?.nextId || ai.source !== 'ai' || !Array.isArray(ai.ten) || ai.ten.length !== 10) {
+          failed.kl8 = ai?.note || 'AI 未给出有效结果'
+          return
+        }
+        await writeConfig(
+          sql,
+          'push_prewarm_kl8',
+          JSON.stringify({
+            nextId: ai.nextId,
+            schema: KL8_SCHEMA,
+            ten: ai.ten,
+            source: ai.source,
+            note: ai.note || '',
+            summary: ai.summary || '',
+            at: new Date().toISOString(),
+          }),
+        )
+        out.kl8 = { drawId: ai.nextId, source: ai.source }
+        delete failed.kl8
+      },
+    })
+  }
+
+  for (const [g, label] of [
+    ['fc3d', '福彩3D'],
+    ['pl3', '排列三'],
+    ['pl5', '排列五'],
+  ]) {
+    const d = drawMap[g]
+    if (!Array.isArray(d) || d.length < 2) continue
+    tasks.push({
+      g,
+      fn: async () => {
+        // 数字彩的结果由 buildDigitAi 自己写进 digit_ai_runs，14:00 推送按同版本直接复用
+        const ai = await buildDigitAi({ game: g, label, draws: d, sql, llm })
+        if (ai?.source !== 'ai') {
+          failed[g] = ai?.note || 'AI 未给出有效结果'
+          return
+        }
+        out[g] = { drawId: ai.drawId, source: ai.source }
+        delete failed[g]
+      },
+    })
+  }
+
+  const run = (t) =>
+    t.fn().catch((e) => {
+      failed[t.g] = String(e?.message || e)
+    })
+
   try {
-    const jobs = []
-
-    const kd = drawMap.kl8
-    if (Array.isArray(kd) && kd.length > 1) {
-      jobs.push(
-        (async () => {
-          const built = buildKl8(kd, afterOf?.kl8 || null)
-          const ai = await buildKl8Ai({ draws: kd, built, sql, llm })
-          // 只有 AI 真正给出 10 码才缓存，回退算法结果不缓存，留给 14:00 再试一次
-          if (!ai?.nextId || ai.source !== 'ai' || !Array.isArray(ai.ten) || ai.ten.length !== 10) return
-          await writeConfig(
-            sql,
-            'push_prewarm_kl8',
-            JSON.stringify({
-              nextId: ai.nextId,
-              schema: KL8_SCHEMA,
-              ten: ai.ten,
-              source: ai.source,
-              note: ai.note || '',
-              summary: ai.summary || '',
-              at: new Date().toISOString(),
-            }),
-          )
-          out.kl8 = { drawId: ai.nextId, source: ai.source }
-        })().catch(() => {}),
-      )
+    // 先并发跑一轮
+    await Promise.all(tasks.map(run))
+    // 失败的串行重试一次（并发容易被上游限流，串行更稳）
+    for (const t of tasks) {
+      if (failed[t.g] && out[t.g] == null) await run(t)
     }
-
-    for (const [g, label] of [
-      ['fc3d', '福彩3D'],
-      ['pl3', '排列三'],
-      ['pl5', '排列五'],
-    ]) {
-      const d = drawMap[g]
-      if (!Array.isArray(d) || d.length < 2) continue
-      jobs.push(
-        (async () => {
-          // 数字彩的结果由 buildDigitAi 自己写进 digit_ai_runs，14:00 推送按同版本直接复用
-          const ai = await buildDigitAi({ game: g, label, draws: d, sql, llm })
-          if (ai?.source !== 'ai') return
-          out[g] = { drawId: ai.drawId, source: ai.source }
-        })().catch(() => {}),
-      )
-    }
-
-    await Promise.all(jobs)
   } catch (e) {
     console.error('[daily-review] 次日 AI 预生成失败：', e?.message || e)
   }
-  return out
+
+  return { ...out, ...(Object.keys(failed).length ? { failed } : {}) }
 }
 
 /** 夜晚学习报告卡片 */
@@ -406,10 +428,14 @@ function buildLearningCard({ dateText, learning, beforeOf, afterOf, note, advice
       : null
 
   const prewarmed = prewarm ? GAMES.filter((g) => prewarm[g]) : []
+  const prewarmFailed = prewarm?.failed ? Object.keys(prewarm.failed).map((g) => GAME_LABEL[g] || g) : []
   const prewarmLine = prewarmed.length
     ? line(
         `${grey('次日 AI 终选已预生成：')}${prewarmed.map((g) => GAME_LABEL[g]).join('、')}${grey('（14:00 推送直接复用）')}`,
       )
+    : null
+  const prewarmFailLine = prewarmFailed.length
+    ? line(grey(`预生成失败：${prewarmFailed.join('、')}（14:00 推送时会重试）`))
     : null
 
   const advice = ruleAdvice(learning, afterOf)
@@ -427,6 +453,7 @@ function buildLearningCard({ dateText, learning, beforeOf, afterOf, note, advice
         ...rows,
         reviewLine,
         prewarmLine,
+        prewarmFailLine,
         HR,
         ...(weightLines.length ? [line('**当前权重**（百分比，按族内归一）'), ...weightLines, HR] : []),
         line('**AI 复盘与改善建议**'),
