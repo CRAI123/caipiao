@@ -4,3 +4,5 @@ node_modules/
 dist/
 .commit_msg_tmp.txt
 .trae/
+yancaishi.apk
+apk-output/
