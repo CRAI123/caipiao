@@ -112,7 +112,7 @@ export default function Settings() {
   const [lastPush, setLastPush] = useState(null)
   async function loadLastPush() {
     try {
-      const r = await fetch('/api/daily-push?status=1')
+      const r = await fetch(`${apiBase()}/api/daily-push?status=1`)
       const d = await r.json()
       setLastPush(d.last || null)
     } catch {

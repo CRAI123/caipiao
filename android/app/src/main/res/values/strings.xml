@@ -1,0 +1,7 @@
+<?xml version='1.0' encoding='utf-8'?>
+<resources>
+    <string name="app_name">研彩室</string>
+    <string name="title_activity_main">研彩室</string>
+    <string name="package_name">cn.rayzo.yancaishi</string>
+    <string name="custom_url_scheme">cn.rayzo.yancaishi</string>
+</resources>

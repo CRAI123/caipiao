@@ -1,0 +1,12 @@
+{
+  "appId": "cn.rayzo.yancaishi",
+  "appName": "研彩室",
+  "webDir": "dist",
+  "server": {
+    "androidScheme": "https"
+  },
+  "android": {
+    "backgroundColor": "#f2ecdd",
+    "allowMixedContent": false
+  }
+}

@@ -3,9 +3,7 @@
 // 接口特点：每期 lotteryDrawResult 返回 "3 9 8" 三位数字（百十个）
 // ============================================================
 
-import { isTauri } from './tauri.js'
-
-const WEB_BASE = 'https://cai.rayzo.cn' // 桌面端没有本地 /api，走线上代理
+import { apiBase } from './api.js'
 
 /** 把 "3 9 8" / "3,9,8" / "398" 统一解析成 [3, 9, 8] */
 function parseResult(raw) {
@@ -34,7 +32,7 @@ function fromOfficialList(list) {
  * 返回 { id, date, num: [百, 十, 个] } 数组，最新在前。
  */
 export async function fetchPl3Draws(count = 100) {
-  const url = `${isTauri() ? WEB_BASE : ''}/api/pl3-proxy?count=${count}`
+  const url = `${apiBase()}/api/pl3-proxy?count=${count}`
 
   let res
   try {

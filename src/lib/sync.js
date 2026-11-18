@@ -9,6 +9,7 @@ import { analyzeJournal } from './ai.js'
 import { journalStats } from './journal.js'
 import { ensureAccessTables, getSharedLlmConfig, getSharedLarkConfig } from './access.js'
 import { isTauri, invoke } from './tauri.js'
+import { apiBase } from './api.js'
 
 /** 把一条记录上传 Neon，成功返回带上同步时间的新记录 */
 export async function syncRecordToNeon(rec) {
@@ -122,7 +123,7 @@ export async function syncToLark(records) {
   }
 
   // 浏览器端：走服务端代理，避免飞书 OpenAPI 的跨域限制
-  const res = await fetch('/api/lark-proxy', {
+  const res = await fetch(`${apiBase()}/api/lark-proxy`, {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify({

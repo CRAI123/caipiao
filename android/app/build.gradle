@@ -1,0 +1,71 @@
+apply plugin: 'com.android.application'
+
+// 版本号可由 CI 注入：./gradlew assembleDebug -PversionName=1.0.1 -PversionCode=12
+def appVersionName = project.hasProperty('versionName') ? project.versionName : '1.0.0'
+def appVersionCode = project.hasProperty('versionCode') ? project.versionCode.toInteger() : 1
+
+android {
+    namespace "cn.rayzo.yancaishi"
+    compileSdk rootProject.ext.compileSdkVersion
+    defaultConfig {
+        applicationId "cn.rayzo.yancaishi"
+        minSdkVersion rootProject.ext.minSdkVersion
+        targetSdkVersion rootProject.ext.targetSdkVersion
+        versionCode appVersionCode
+        versionName appVersionName
+        testInstrumentationRunner "androidx.test.runner.AndroidJUnitRunner"
+        aaptOptions {
+             // Files and dirs to omit from the packaged assets dir, modified to accommodate modern web apps.
+             // Default: https://android.googlesource.com/platform/frameworks/base/+/282e181b58cf72b6ca770dc7ca5f91f135444502/tools/aapt/AaptAssets.cpp#61
+            ignoreAssetsPattern '!.svn:!.git:!.ds_store:!*.scc:.*:!CVS:!thumbs.db:!picasa.ini:!*~'
+        }
+    }
+    // 固定签名：保证云端每次构建出的 APK 签名一致，才能覆盖安装实现应用内更新
+    // （个人自用安装包；如需上架应用商店请替换为自己的私有 keystore）
+    signingConfigs {
+        debug {
+            storeFile file('yancaishi.keystore')
+            storePassword 'yancaishi2026'
+            keyAlias 'yancaishi'
+            keyPassword 'yancaishi2026'
+        }
+    }
+    buildTypes {
+        debug {
+            signingConfig signingConfigs.debug
+        }
+        release {
+            minifyEnabled false
+            proguardFiles getDefaultProguardFile('proguard-android.txt'), 'proguard-rules.pro'
+        }
+    }
+}
+
+repositories {
+    flatDir{
+        dirs '../capacitor-cordova-android-plugins/src/main/libs', 'libs'
+    }
+}
+
+dependencies {
+    implementation fileTree(include: ['*.jar'], dir: 'libs')
+    implementation "androidx.appcompat:appcompat:$androidxAppCompatVersion"
+    implementation "androidx.coordinatorlayout:coordinatorlayout:$androidxCoordinatorLayoutVersion"
+    implementation "androidx.core:core-splashscreen:$coreSplashScreenVersion"
+    implementation project(':capacitor-android')
+    testImplementation "junit:junit:$junitVersion"
+    androidTestImplementation "androidx.test.ext:junit:$androidxJunitVersion"
+    androidTestImplementation "androidx.test.espresso:espresso-core:$androidxEspressoCoreVersion"
+    implementation project(':capacitor-cordova-android-plugins')
+}
+
+apply from: 'capacitor.build.gradle'
+
+try {
+    def servicesJSON = file('google-services.json')
+    if (servicesJSON.text) {
+        apply plugin: 'com.google.gms.google-services'
+    }
+} catch(Exception e) {
+    logger.info("google-services.json not found, google-services plugin not applied. Push Notifications won't work")
+}

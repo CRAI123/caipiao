@@ -17,9 +17,14 @@ export function apiBase() {
   return ''
 }
 
+/** 拼接 API 完整地址（APK / 桌面端等非本站环境会自动补线上域名） */
+export function apiUrl(path) {
+  return `${apiBase()}${path}`
+}
+
 /** 通用 fetch 封装 */
 async function apiFetch(path, options = {}) {
-  const url = `${apiBase()}${path}`
+  const url = apiUrl(path)
   const res = await fetch(url, {
     headers: { 'Content-Type': 'application/json', ...(options.headers || {}) },
     ...options,

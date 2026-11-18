@@ -3,9 +3,7 @@
 // 每期：6 个红球（01-33）+ 1 个蓝球（01-16）
 // ============================================================
 
-import { isTauri } from './tauri.js'
-
-const WEB_BASE = 'https://cai.rayzo.cn' // 桌面端没有本地 /api，走线上代理
+import { apiBase } from './api.js'
 
 /** 校验并规范化一期开奖 */
 function normalize(d) {
@@ -24,7 +22,7 @@ function normalize(d) {
  * 返回 { id, date, red: [6], blue } 数组，最新在前。
  */
 export async function fetchSsqDraws(count = 100) {
-  const url = `${isTauri() ? WEB_BASE : ''}/api/ssq-proxy?count=${count}`
+  const url = `${apiBase()}/api/ssq-proxy?count=${count}`
 
   let res
   try {

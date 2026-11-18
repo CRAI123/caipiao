@@ -4,6 +4,7 @@
 // ============================================================
 
 import { isTauri, invoke } from './tauri.js'
+import { apiUrl } from './api.js'
 
 const CWL_BASE = 'https://www.cwl.gov.cn'
 const API_PATH = '/cwl_admin/front/cwlkj/search/kjxx/findDrawNotice'
@@ -29,9 +30,11 @@ export async function fetchFc3dDraws(count = 100) {
       throw new Error(`桌面端抓取失败：${e?.message || e}`)
     }
   } else {
-    const url = `/api/cwl-proxy?path=${encodeURIComponent(
-      `${API_PATH}?${query}`,
-    )}&referer=${encodeURIComponent(REFERER_3D)}`
+    const url = apiUrl(
+      `/api/cwl-proxy?path=${encodeURIComponent(
+        `${API_PATH}?${query}`,
+      )}&referer=${encodeURIComponent(REFERER_3D)}`,
+    )
     let res
     try {
       res = await fetch(url, { headers: { Accept: 'application/json' } })

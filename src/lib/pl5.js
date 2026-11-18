@@ -3,9 +3,7 @@
 // 接口特点：每期 lotteryDrawResult 返回 "0 3 2 4 3" 五位数字（万千百十个）
 // ============================================================
 
-import { isTauri } from './tauri.js'
-
-const WEB_BASE = 'https://cai.rayzo.cn' // 桌面端没有本地 /api，走线上代理
+import { apiBase } from './api.js'
 
 /** 把 "0 3 2 4 3" / "0,3,2,4,3" / "03243" 统一解析成 [0,3,2,4,3] */
 function parseResult(raw) {
@@ -34,7 +32,7 @@ function fromOfficialList(list) {
  * 返回 { id, date, num: [万, 千, 百, 十, 个] } 数组，最新在前。
  */
 export async function fetchPl5Draws(count = 100) {
-  const url = `${isTauri() ? WEB_BASE : ''}/api/pl3-proxy?game=pl5&count=${count}`
+  const url = `${apiBase()}/api/pl3-proxy?game=pl5&count=${count}`
 
   let res
   try {

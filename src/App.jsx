@@ -16,6 +16,7 @@ import Journal from './components/Journal.jsx'
 import DataManager from './components/DataManager.jsx'
 import Settings from './components/Settings.jsx'
 import ChangelogDialog from './components/ChangelogDialog.jsx'
+import UpdatePrompt from './components/UpdatePrompt.jsx'
 import { CHANGELOG } from './data/changelog.js'
 import AccessGate from './components/AccessGate.jsx'
 import Admin from './components/Admin.jsx'
@@ -57,6 +58,7 @@ import { loadSettings, isNeonReady } from './lib/settings.js'
 import { getSql } from './lib/neon.js'
 import { ensureAccessTables, fetchMyRequest, listAdmins } from './lib/access.js'
 import { getDeviceId } from './lib/device.js'
+import { checkAppUpdate } from './lib/update.js'
 
 // 排列三专用推算引擎的算法说明（v1 与福彩3D共用，v2/v3 为排列三模式，pro 为增强档）
 const PL3_ALGO_INFO = {
@@ -213,6 +215,23 @@ export default function App() {
   const changelogAutoShown = useRef(false)
   const changelogLatest = CHANGELOG[0]?.version || ''
   const changelogUnread = seenVersion !== changelogLatest
+
+  // ---------- APK 新版本提示（仅原生端生效，网页端 checkAppUpdate 直接返回 null） ----------
+  const [appUpdate, setAppUpdate] = useState(null)
+
+  useEffect(() => {
+    if (gate !== 'open') return undefined
+    let alive = true
+    const timer = setTimeout(() => {
+      checkAppUpdate().then((u) => {
+        if (alive && u) setAppUpdate(u)
+      })
+    }, 2000)
+    return () => {
+      alive = false
+      clearTimeout(timer)
+    }
+  }, [gate])
 
   useEffect(() => {
     if (gate !== 'open' || !changelogLatest || changelogAutoShown.current) return
@@ -382,6 +401,22 @@ export default function App() {
     return !getRecord(loadJournal(), latest.date)
   }, [draws, tick])
 
+  // 手机端页签是横向滚动的，切换后把当前页签滚到可视区域中间
+  const navRef = useRef(null)
+  const activeTabId = lottery === 'ssq' ? ssqTab : isDigit ? digitTab : tab
+  useEffect(() => {
+    const nav = navRef.current
+    if (!nav || nav.scrollWidth <= nav.clientWidth) return
+    const el = nav.querySelector('.tab-btn.active')
+    if (!el) return
+    nav.scrollTo({
+      left: Math.max(0, el.offsetLeft - (nav.clientWidth - el.offsetWidth) / 2),
+      behavior: 'smooth',
+    })
+    // 手机端切页后回到内容顶部，避免停留在上一页的滚动位置
+    if (window.innerWidth <= 820) window.scrollTo({ top: 0 })
+  }, [activeTabId, lottery])
+
   // ---------- 门禁 / 后台优先渲染 ----------
   if (gate === 'loading') {
     return (
@@ -543,7 +578,7 @@ export default function App() {
 
       {/* 导航 */}
       {lottery === 'kl8' && (
-        <nav className="tabs" aria-label="页面导航">
+        <nav className="tabs" aria-label="页面导航" ref={navRef}>
           {TABS.map((t) => (
             <button
               key={t.id}
@@ -559,7 +594,7 @@ export default function App() {
         </nav>
       )}
       {isDigit && (
-        <nav className="tabs" aria-label={`${digitLabel} 页面导航`}>
+        <nav className="tabs" aria-label={`${digitLabel} 页面导航`} ref={navRef}>
           {FC3D_TABS.map((t) => (
             <button
               key={t.id}
@@ -574,7 +609,7 @@ export default function App() {
       )}
 
       {lottery === 'ssq' && (
-        <nav className="tabs" aria-label="双色球 页面导航">
+        <nav className="tabs" aria-label="双色球 页面导航" ref={navRef}>
           {SSQ_TABS.map((t) => (
             <button
               key={t.id}
@@ -795,6 +830,35 @@ export default function App() {
         </p>
         <p className="mono">research · not betting advice · 18+ only</p>
       </footer>
+
+      {/* 手机端底部彩种导航（桌面端隐藏） */}
+      <nav className="mobile-dock" aria-label="彩种切换">
+        {[
+          { id: 'kl8', label: '快乐8', glyph: '八' },
+          { id: 'fc3d', label: '福彩3D', glyph: '3' },
+          { id: 'pl3', label: '排列三', glyph: '三' },
+          { id: 'pl5', label: '排列五', glyph: '五' },
+          { id: 'ssq', label: '双色球', glyph: '双' },
+        ].map((it) => (
+          <button
+            key={it.id}
+            type="button"
+            className={`dock-item ${lottery === it.id ? 'active' : ''}`}
+            aria-current={lottery === it.id ? 'page' : undefined}
+            onClick={() => setLottery(it.id)}
+          >
+            <span className="dock-glyph" aria-hidden="true">
+              {it.glyph}
+            </span>
+            <span className="dock-label">{it.label}</span>
+          </button>
+        ))}
+      </nav>
+
+      {/* 新版本提示：等更新公告关掉再弹，避免两个弹窗叠在一起 */}
+      {appUpdate && !changelogOpen && (
+        <UpdatePrompt update={appUpdate} onClose={() => setAppUpdate(null)} />
+      )}
 
       <ChangelogDialog open={changelogOpen} onClose={closeChangelog} />
     </div>
