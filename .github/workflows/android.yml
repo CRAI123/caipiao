@@ -57,6 +57,13 @@ jobs:
       - name: Sync Capacitor Android
         run: npx cap sync android
 
+      - name: Strip Windows installers from Android assets
+        # public/updates 里是桌面版 exe（约 107MB），网页版从 cai.rayzo.cn 直接下载即可；
+        # 原生端不展示介绍页，打进 APK 只会让安装包膨胀到 112MB
+        run: |
+          rm -rf android/app/src/main/assets/public/updates
+          du -sh android/app/src/main/assets/public
+
       - name: Build APK
         run: |
           chmod +x android/gradlew
