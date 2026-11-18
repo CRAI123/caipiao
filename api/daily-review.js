@@ -5,7 +5,7 @@
 // 3. AI 自我复盘：达到门槛时沉淀一条经验笔记，注入后续分析
 // 4. 快乐8 当期复盘记录（预测 vs 开奖 + AI 总结，无预测或已复盘则跳过）
 
-import { getSql, ensureTables } from './_lib/neon.js'
+import { getSql, ensureTables, writeConfig } from './_lib/neon.js'
 import { fetchKl8Draws } from './_lib/kl8.js'
 import { fetchFc3dDraws } from './_lib/fc3d.js'
 import { fetchPl3Draws } from './_lib/pl3.js'
@@ -21,6 +21,7 @@ import {
   maybeGenerateNotes,
 } from './_lib/learning.js'
 import { loadFeishuTarget, sendFeishuCard } from './_lib/feishu.js'
+import { buildKl8, buildKl8Ai, buildDigitAi, KL8_SCHEMA } from './daily-push.js'
 
 export const config = { maxDuration: 60 }
 
@@ -93,30 +94,39 @@ export default async function handler(req, res) {
       }
     }
 
+    let llm = null
+    try {
+      llm = await resolveLlmSettings()
+    } catch {
+      llm = null
+    }
+    const hasLlm = Boolean(llm?.llmKey)
+
+    // 预生成次日 AI 终选（14:00 推送直接读缓存）与经验笔记并行跑，避免夜间批次超时
+    const prewarmTask = hasLlm ? prewarmNext(llm, sql, drawMap, afterOf) : Promise.resolve(null)
+
     const adviceGames = scoredGames.length ? scoredGames : req.query?.advice === '1' ? GAMES : []
     let note = null
     let adviceText = ''
-    if (adviceGames.length) {
+    if (adviceGames.length && hasLlm) {
       try {
-        const llm = await resolveLlmSettings()
-        if (llm?.llmKey) {
-          if (scoredGames.length) {
-            const learnedOf = {}
-            for (const g of scoredGames) learnedOf[g] = await loadLearning(sql, g)
-            const recentSummary = await buildRecentSummary(sql, scoredGames, learnedOf)
-            note = await maybeGenerateNotes(sql, llm, {
-              games: scoredGames,
-              recentSummary,
-              elapsedMs: Date.now() - started,
-            })
-          }
-          // 经验笔记有门槛（每周最多一条），报告里的改善建议则每晚单独生成一份，不写入长期笔记
-          if (!note) adviceText = await generateAdvice(llm, sql, learning)
+        if (scoredGames.length) {
+          const learnedOf = {}
+          for (const g of scoredGames) learnedOf[g] = await loadLearning(sql, g)
+          const recentSummary = await buildRecentSummary(sql, scoredGames, learnedOf)
+          note = await maybeGenerateNotes(sql, llm, {
+            games: scoredGames,
+            recentSummary,
+            elapsedMs: Date.now() - started,
+          })
         }
+        // 经验笔记有门槛（每周最多一条），报告里的改善建议则每晚单独生成一份，不写入长期笔记
+        if (!note) adviceText = await generateAdvice(llm, sql, learning)
       } catch (e) {
         console.error('[daily-review] 经验笔记/改善建议生成失败：', e?.message || e)
       }
     }
+    const prewarm = await prewarmTask
 
     // 4. 快乐8 当期复盘记录
     const review = kl8Draws[0] ? await reviewKl8(sql, kl8Draws[0]) : { skipped: true, reason: 'no_data' }
@@ -130,6 +140,7 @@ export default async function handler(req, res) {
       note,
       adviceText,
       review,
+      prewarm,
       elapsedMs: Date.now() - started,
     })
     let feishu = { ok: false, error: 'dry' }
@@ -155,6 +166,7 @@ export default async function handler(req, res) {
       learning,
       noteGenerated: Boolean(note),
       advice: note?.note || adviceText || '',
+      prewarm,
       review,
       feishu,
       ...(isDry ? { card } : {}),
@@ -302,8 +314,64 @@ async function generateAdvice(llm, sql, learning) {
   }
 }
 
-/** 夜间学习报告卡片 */
-function buildLearningCard({ dateText, learning, beforeOf, afterOf, note, adviceText, review, elapsedMs }) {
+/** 预生成次日 AI 终选（14:00 推送直接读缓存）；任何失败都静默降级，不影响学习主流程 */
+async function prewarmNext(llm, sql, drawMap, afterOf) {
+  const out = { kl8: null, fc3d: null, pl3: null, pl5: null }
+  try {
+    const jobs = []
+
+    const kd = drawMap.kl8
+    if (Array.isArray(kd) && kd.length > 1) {
+      jobs.push(
+        (async () => {
+          const built = buildKl8(kd, afterOf?.kl8 || null)
+          const ai = await buildKl8Ai({ draws: kd, built, sql, llm })
+          // 只有 AI 真正给出 10 码才缓存，回退算法结果不缓存，留给 14:00 再试一次
+          if (!ai?.nextId || ai.source !== 'ai' || !Array.isArray(ai.ten) || ai.ten.length !== 10) return
+          await writeConfig(
+            sql,
+            'push_prewarm_kl8',
+            JSON.stringify({
+              nextId: ai.nextId,
+              schema: KL8_SCHEMA,
+              ten: ai.ten,
+              source: ai.source,
+              note: ai.note || '',
+              summary: ai.summary || '',
+              at: new Date().toISOString(),
+            }),
+          )
+          out.kl8 = { drawId: ai.nextId, source: ai.source }
+        })().catch(() => {}),
+      )
+    }
+
+    for (const [g, label] of [
+      ['fc3d', '福彩3D'],
+      ['pl3', '排列三'],
+      ['pl5', '排列五'],
+    ]) {
+      const d = drawMap[g]
+      if (!Array.isArray(d) || d.length < 2) continue
+      jobs.push(
+        (async () => {
+          // 数字彩的结果由 buildDigitAi 自己写进 digit_ai_runs，14:00 推送按同版本直接复用
+          const ai = await buildDigitAi({ game: g, label, draws: d, sql, llm })
+          if (ai?.source !== 'ai') return
+          out[g] = { drawId: ai.drawId, source: ai.source }
+        })().catch(() => {}),
+      )
+    }
+
+    await Promise.all(jobs)
+  } catch (e) {
+    console.error('[daily-review] 次日 AI 预生成失败：', e?.message || e)
+  }
+  return out
+}
+
+/** 夜晚学习报告卡片 */
+function buildLearningCard({ dateText, learning, beforeOf, afterOf, note, adviceText, review, prewarm, elapsedMs }) {
   const line = (content) => ({ tag: 'div', text: { tag: 'lark_md', content } })
   const grey = (s) => `<font color='grey'>${s}</font>`
   const HR = { tag: 'hr' }
@@ -337,6 +405,13 @@ function buildLearningCard({ dateText, learning, beforeOf, afterOf, note, advice
       ? line(`**快乐8 复盘** 第 ${review.drawId} 期命中 ${review.hits}/10，单注奖金 ${review.prize} 元`)
       : null
 
+  const prewarmed = prewarm ? GAMES.filter((g) => prewarm[g]) : []
+  const prewarmLine = prewarmed.length
+    ? line(
+        `${grey('次日 AI 终选已预生成：')}${prewarmed.map((g) => GAME_LABEL[g]).join('、')}${grey('（14:00 推送直接复用）')}`,
+      )
+    : null
+
   const advice = ruleAdvice(learning, afterOf)
 
   return {
@@ -351,6 +426,7 @@ function buildLearningCard({ dateText, learning, beforeOf, afterOf, note, advice
         line(grey(`开奖后自我学习 · 用时 ${(elapsedMs / 1000).toFixed(1)}s`)),
         ...rows,
         reviewLine,
+        prewarmLine,
         HR,
         ...(weightLines.length ? [line('**当前权重**（百分比，按族内归一）'), ...weightLines, HR] : []),
         line('**AI 复盘与改善建议**'),

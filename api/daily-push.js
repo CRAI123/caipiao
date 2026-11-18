@@ -53,7 +53,9 @@ const HISTORY_KEY = 'daily_push_history'
 const FRESH_RETRY_MS = 1500
 // AI 终选与站内共用同一套结构版本号，只有同版本的历史结果才复用
 const DIGIT_SCHEMA = 7
-const KL8_SCHEMA = 5
+export const KL8_SCHEMA = 5
+// 夜间学习批次（22:00）预生成的次日快乐8终选，14:00 推送直接复用
+const PREWARM_KL8_KEY = 'push_prewarm_kl8'
 // 单个 AI 调用最多等这么久，超时就发算法结果，避免整个推送被拖死
 const AI_TIMEOUT_MS = 38000
 
@@ -119,7 +121,7 @@ async function loadConfig() {
 }
 
 /** 快乐8：v7 多窗口加权评分（站内推荐页同款）+ 三注分注参考；learned 非冷启动时注入窗口权重 */
-function buildKl8(draws, learned = null) {
+export function buildKl8(draws, learned = null) {
   const history = draws.slice(0, 200)
   const nextId = history[0].id + 1
   // state.windows（{keys:['100',...], weights:[...]}）→ v7Recommend 需要的 [{w,weight}]
@@ -293,7 +295,7 @@ async function persistDigitRun(sql, payload) {
 }
 
 /** 3D / 排列三 / 排列五：算法候选池 + AI 终选（3D/排列三 3+2+1，排列五 5 注直选），失败回退算法前几 */
-async function buildDigitAi({ game, label, draws, sql, llm }) {
+export async function buildDigitAi({ game, label, draws, sql, llm }) {
   const started = Date.now()
   const is5 = game === 'pl5'
   const digitCount = is5 ? 5 : 3
@@ -460,7 +462,7 @@ function digitAlgoPicks(game, draws) {
 }
 
 /** 快乐8：算法 20 码 → AI 终选 10 码，失败回退算法融合 10 码 */
-async function buildKl8Ai({ draws, built, sql, llm }) {
+export async function buildKl8Ai({ draws, built, sql, llm }) {
   if (!built?.v7) return null
   const history = draws.slice(0, 200)
   const nextId = built.nextId
@@ -486,6 +488,32 @@ async function buildKl8Ai({ draws, built, sql, llm }) {
       }
     } catch {
       /* 读缓存失败继续现算 */
+    }
+  }
+
+  // 1.5) 夜间学习批次（22:00）预生成的本期终选 → 直接复用，避免 14:00 推送再等 AI
+  if (sql) {
+    try {
+      const raw = await readConfig(sql, PREWARM_KL8_KEY)
+      const p = raw ? JSON.parse(raw) : null
+      if (
+        p &&
+        p.nextId === nextId &&
+        p.schema === KL8_SCHEMA &&
+        Array.isArray(p.ten) &&
+        p.ten.length === 10
+      ) {
+        return {
+          ...base,
+          ten: [...p.ten].sort((a, b) => a - b),
+          source: p.source || 'ai',
+          note: p.note || '',
+          summary: p.summary || '',
+          cached: true,
+        }
+      }
+    } catch {
+      /* 预生成结果读不到就现算 */
     }
   }
 
