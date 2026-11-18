@@ -1,7 +1,14 @@
 import React from 'react'
 import ReactDOM from 'react-dom/client'
+import { Capacitor } from '@capacitor/core'
 import App from './App.jsx'
+import LandingPage from './LandingPage.jsx'
 import './styles.css'
+
+// 浏览器首页用于产品介绍；/app、Android 与 Windows 原生壳直接进入研究工具。
+const isDesktopApp = Boolean(window.__TAURI_INTERNALS__ || window.__TAURI__)
+const appPath = window.location.pathname.replace(/\/+$/, '')
+const showResearchApp = Capacitor.isNativePlatform() || isDesktopApp || appPath === '/app'
 
 // 兜底：任何模块渲染抛错时显示可读错误，而不是整页白屏
 class ErrorBoundary extends React.Component {
@@ -62,7 +69,7 @@ class ErrorBoundary extends React.Component {
 ReactDOM.createRoot(document.getElementById('root')).render(
   <React.StrictMode>
     <ErrorBoundary>
-      <App />
+      {showResearchApp ? <App /> : <LandingPage />}
     </ErrorBoundary>
   </React.StrictMode>,
 )

@@ -1,4 +1,10 @@
 {
+  "rewrites": [
+    {
+      "source": "/app",
+      "destination": "/index.html"
+    }
+  ],
   "crons": [
     {
       "path": "/api/daily-review",
