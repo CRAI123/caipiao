@@ -109,7 +109,7 @@ function DigitAIInner({ draws, label = '福彩3D', game = 'fc3d', onRefreshData,
     }),
     [algo, is5],
   )
-  // 算法候选池：3 位为直选 12 注 / 组六 8 组 / 组三 5 组；5 位为直选 20 注
+  // 算法候选池：3 位为直选 24 注 / 组六 12 组 / 组三 8 组；5 位为直选 20 注
   const pool = useMemo(
     () => (summary ? (is5 ? pl5CandidatePool(summary) : digitCandidatePool(summary)) : null),
     [summary, is5],
@@ -349,12 +349,15 @@ function DigitAIInner({ draws, label = '福彩3D', game = 'fc3d', onRefreshData,
       <div className="predict-row">
         <div className="predict-label">算法候选 · 直选</div>
         <div className="predict-value">
-          {(pool?.straight || []).map((n) => (
+          {(pool?.straight || []).slice(0, 12).map((n) => (
             <span key={n} className="draw-num">
               {n}
             </span>
           ))}
-          <span className="muted small">{(pool?.straight || []).length} 注</span>
+          <span className="muted small">
+            共 {(pool?.straight || []).length} 注
+            {(pool?.straight || []).length > 12 ? '（显示前 12）' : ''}
+          </span>
         </div>
       </div>
       {!is5 && (
@@ -362,23 +365,26 @@ function DigitAIInner({ draws, label = '福彩3D', game = 'fc3d', onRefreshData,
           <div className="predict-row">
             <div className="predict-label">算法候选 · 组六</div>
             <div className="predict-value">
-              {(pool?.group || []).map((n) => (
+              {(pool?.group || []).slice(0, 8).map((n) => (
                 <span key={n} className="draw-num">
                   {n}
                 </span>
               ))}
-              <span className="muted small">{(pool?.group || []).length} 组</span>
+              <span className="muted small">
+                共 {(pool?.group || []).length} 组
+                {(pool?.group || []).length > 8 ? '（显示前 8）' : ''}
+              </span>
             </div>
           </div>
           <div className="predict-row">
             <div className="predict-label">算法候选 · 组三</div>
             <div className="predict-value">
-              {(pool?.group3 || []).map((n) => (
+              {(pool?.group3 || []).slice(0, 8).map((n) => (
                 <span key={n} className="draw-num">
                   {n}
                 </span>
               ))}
-              <span className="muted small">{(pool?.group3 || []).length} 组</span>
+              <span className="muted small">共 {(pool?.group3 || []).length} 组</span>
             </div>
           </div>
         </>

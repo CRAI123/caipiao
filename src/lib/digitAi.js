@@ -6,6 +6,52 @@
 //    不提高任何一注的中奖概率（直选 1/1000，组六 1/167）。
 // ============================================================
 
+/**
+ * 数字彩候选池宽度（3D / 排列三）。
+ * 终选目标是 3 注直选 + 2 注组六 + 1 注组三，池子必须留足否决空间，
+ * 否则「AI 终选」只是从两三个选项里挑，起不到复核作用。
+ */
+export const DIGIT_POOL_LIMITS = { straight: 24, group: 12, group3: 8 }
+
+/** 取数组里评分最高的 k 个下标 */
+function topIdx(arr, k) {
+  return arr
+    .map((v, d) => ({ d, v }))
+    .sort((a, b) => b.v - a.v)
+    .slice(0, k)
+    .map((x) => x.d)
+}
+
+/**
+ * 先按「覆盖度」贪心挑选，再按分数补齐。
+ * 纯按分数取前 N 时，结果常挤在同一两个数字上（实测某位只覆盖 2 个数字），
+ * AI 看到的池子其实很窄。这里优先选能带来新覆盖的组合，再用高分组合补满。
+ */
+function diversify(items, limit, keyFn, need) {
+  const covered = new Set()
+  const picked = []
+  const rest = []
+  for (const it of items) {
+    if (picked.length >= limit) {
+      rest.push(it)
+      continue
+    }
+    const keys = keyFn(it)
+    const gain = keys.filter((k) => need.has(k) && !covered.has(k)).length
+    if (gain > 0) {
+      keys.forEach((k) => covered.add(k))
+      picked.push(it)
+    } else {
+      rest.push(it)
+    }
+  }
+  for (const it of rest) {
+    if (picked.length >= limit) break
+    picked.push(it)
+  }
+  return picked
+}
+
 /** 把 draws（最新在前）整理成近 n 期统计 */
 export function summarizeDigit(draws, n = 100) {
   const picked = draws
@@ -63,28 +109,31 @@ export function summarizeDigit(draws, n = 100) {
       )
     }),
   )
+  // 池宽：每位取前 4 个数字交叉（4³ = 64 注），再按分数截取。
+  // 原先只取前 2（合计 8 注），AI 终选 3 注时几乎没有否决空间，等于替 AI 做了决定。
+  const POS_TOP = 4
   const topDigits = score.map((arr) =>
     arr
       .map((v, d) => ({ d, v }))
       .sort((a, b) => b.v - a.v)
-      .slice(0, 3)
+      .slice(0, POS_TOP)
       .map((x) => x.d),
   )
 
-  // 直选候选：每位取前 2，共 8 注，按分数和排序
+  // 直选候选：每位前 4 交叉，共 64 注，按分数和排序
   const straight = []
-  for (const a of topDigits[0].slice(0, 2))
-    for (const b of topDigits[1].slice(0, 2))
-      for (const c of topDigits[2].slice(0, 2))
+  for (const a of topDigits[0])
+    for (const b of topDigits[1])
+      for (const c of topDigits[2])
         straight.push({ num: [a, b, c], v: score[0][a] + score[1][b] + score[2][c] })
   straight.sort((x, y) => y.v - x.v)
 
-  // 组选候选：取综合分最高的 5 个数字，生成 3 个不同数字的组六，按分数和排序
+  // 组选候选：取综合分最高的 7 个数字（C(7,3) = 35 组），再按分数截取
   const digitScore = Array.from({ length: 10 }, (_, d) => (score[0][d] + score[1][d] + score[2][d]) / 3)
   const pool = digitScore
     .map((v, d) => ({ d, v }))
     .sort((a, b) => b.v - a.v)
-    .slice(0, 5)
+    .slice(0, 7)
     .map((x) => x.d)
   const group = []
   for (let i = 0; i < pool.length; i++)
@@ -96,6 +145,21 @@ export function summarizeDigit(draws, n = 100) {
         })
   group.sort((x, y) => y.v - x.v)
 
+  // 组三候选：从综合分前 6 个数字里生成全部 AAB 组合（30 组）。
+  // 原先只输出 1 组，AI 无从取舍，等于硬塞一个答案。
+  const group3Pool = digitScore
+    .map((v, d) => ({ d, v }))
+    .sort((a, b) => b.v - a.v)
+    .slice(0, 6)
+    .map((x) => x.d)
+  const group3 = []
+  for (const d of group3Pool)
+    for (const e of group3Pool) {
+      if (e === d) continue
+      group3.push({ num: [d, d, e], v: 2 * digitScore[d] + digitScore[e] })
+    }
+  group3.sort((x, y) => y.v - x.v)
+
   const sortedSums = [...sums].sort((a, b) => a - b)
   const q = (r) => sortedSums[Math.min(total - 1, Math.floor(total * r))]
   const sortedSpans = [...spans].sort((a, b) => a - b)
@@ -103,6 +167,12 @@ export function summarizeDigit(draws, n = 100) {
   const avg = (arr) => arr.reduce((a, b) => a + b, 0) / arr.length
 
   const share = (arr) => arr.map((c) => Math.round((c / total) * 100))
+
+  // 覆盖目标：直选按「位置:数字」，组选按数字本身
+  const straightNeed = new Set()
+  topDigits.forEach((arr, p) => arr.forEach((d) => straightNeed.add(`p${p}:${d}`)))
+  const groupNeed = new Set(topIdx(digitScore, 7).map((d) => `d:${d}`))
+  const group3Need = new Set(topIdx(digitScore, 6).map((d) => `d:${d}`))
 
   return {
     total,
@@ -118,12 +188,17 @@ export function summarizeDigit(draws, n = 100) {
     formDist,
     repeatRate: Math.round((repeated / total) * 100),
     candidates: {
-      straight: straight.slice(0, 5).map((x) => x.num),
-      group: group.slice(0, 3).map((x) => x.num),
-      group3: [[topDigits[0][0], topDigits[1][0], topDigits[2][0]]],
+      straight: diversify(straight, DIGIT_POOL_LIMITS.straight, (x) => x.num.map((d, p) => `p${p}:${d}`), straightNeed).map(
+        (x) => x.num,
+      ),
+      group: diversify(group, DIGIT_POOL_LIMITS.group, (x) => x.num.map((d) => `d:${d}`), groupNeed).map((x) => x.num),
+      group3: diversify(group3, DIGIT_POOL_LIMITS.group3, (x) => [...new Set(x.num)].map((d) => `d:${d}`), group3Need).map(
+        (x) => x.num,
+      ),
     },
     straightAll: straight,
     groupAll: group,
+    group3All: group3,
     posScore: score,
     digitScore,
     share,
@@ -163,15 +238,26 @@ export function rankDigitCandidates(summary) {
 
 /**
  * 算法候选池：从全盘评分里取前列，交给 AI 终选
- * 默认直选 12 注、组六 8 组、组三 5 组（终选需要 3 / 2 / 1，留出否决空间）
+ * 默认取 DIGIT_POOL_LIMITS（直选 24 注、组六 12 组、组三 8 组），
+ * 终选只需 3 / 2 / 1，留出约 6~8 倍的否决空间。
  */
-export function digitCandidatePool(summary, limits = { straight: 12, group: 8, group3: 5 }) {
+export function digitCandidatePool(summary, limits = DIGIT_POOL_LIMITS) {
   const rank = rankDigitCandidates(summary)
   if (!rank) return { straight: [], group: [], group3: [] }
+  const ps = summary.posScore
+  const ds = summary.digitScore
+  const straightNeed = new Set()
+  ps.forEach((arr, p) => topIdx(arr, 4).forEach((d) => straightNeed.add(`p${p}:${d}`)))
+  const groupNeed = new Set(topIdx(ds, 7).map((d) => `d:${d}`))
+  const group3Need = new Set(topIdx(ds, 6).map((d) => `d:${d}`))
   return {
-    straight: rank.straight.slice(0, limits.straight).map((x) => x.num),
-    group: rank.group.slice(0, limits.group).map((x) => x.num),
-    group3: rank.group3.slice(0, limits.group3).map((x) => x.num),
+    straight: diversify(rank.straight, limits.straight, (x) => [...x.num].map((c, p) => `p${p}:${c}`), straightNeed).map(
+      (x) => x.num,
+    ),
+    group: diversify(rank.group, limits.group, (x) => [...x.num].map((c) => `d:${c}`), groupNeed).map((x) => x.num),
+    group3: diversify(rank.group3, limits.group3, (x) => [...new Set([...x.num])].map((c) => `d:${c}`), group3Need).map(
+      (x) => x.num,
+    ),
   }
 }
 
@@ -181,7 +267,7 @@ const SYSTEM_PROMPT = `你是「研彩室」的彩票数据分析助手，服务
 1. 只能使用用户消息里给出的统计数据，不得编造统计数字，不得引入外部资料。
 2. 福彩3D/排列三每期从 000–999 等概率产生，直选单注中奖概率恒为 1/1000，组六约 1/167，与你选什么号无关。开奖相互独立，不存在可利用的「规律」「趋势」「必出胆码」。
 3. 你不得声称任何组合更容易中奖，不得承诺命中，不得鼓励加大投入或追号。
-4. 选号流程固定为「算法先选、AI 终选」：程序已按频率/遗漏/同位转移对全盘打分（直选 1000 注、组六 120 组、组三 90 组），并给出算法候选池（直选 12 注、组六 8 组、组三 5 组）。你必须只在这个候选池内终选，不得自创池外号码。
+4. 选号流程固定为「算法先选、AI 终选」：程序已按频率/遗漏/同位转移对全盘打分（直选 1000 注、组六 120 组、组三 90 组），并给出算法候选池（直选 ${DIGIT_POOL_LIMITS.straight} 注、组六 ${DIGIT_POOL_LIMITS.group} 组、组三 ${DIGIT_POOL_LIMITS.group3} 组）。你必须只在这个候选池内终选，不得自创池外号码。
 5. 必须明确说明：以下是历史分布下的参考组合，不改变中奖概率，彩票期望回报为负。
 
 【输出结构】（简体中文，纯文本，不要 Markdown 表格）
@@ -220,9 +306,9 @@ export function buildDigitMessages(summary, label = '排列三', review = '') {
     fmtPos('个位', 2),
     '',
     '底层算法全盘评分（频率35% + 近30期30% + 遗漏15% + 同位转移20%），已从全盘 1000/120/90 里选出候选池：',
-    `- 直选候选池 12 注：${fmtAlgo(rank?.straight, 12)}`,
-    `- 组六候选池 8 组：${fmtAlgo(rank?.group, 8)}`,
-    `- 组三候选池 5 组：${fmtAlgo(rank?.group3, 5)}`,
+    `- 直选候选池 ${DIGIT_POOL_LIMITS.straight} 注：${fmtAlgo(rank?.straight, DIGIT_POOL_LIMITS.straight)}`,
+    `- 组六候选池 ${DIGIT_POOL_LIMITS.group} 组：${fmtAlgo(rank?.group, DIGIT_POOL_LIMITS.group)}`,
+    `- 组三候选池 ${DIGIT_POOL_LIMITS.group3} 组：${fmtAlgo(rank?.group3, DIGIT_POOL_LIMITS.group3)}`,
     '',
     ...(review
       ? [
@@ -327,13 +413,13 @@ export function summarizeDigit5(draws, n = 100) {
       .map((x) => x.d),
   )
 
-  // 直选候选：每位取前 2，共 32 注
+  // 直选候选：每位取前 3，共 243 注；再按分数截取前 20 交 AI 终选 5 注
   const straight = []
-  for (const a of topDigits[0].slice(0, 2))
-    for (const b of topDigits[1].slice(0, 2))
-      for (const c of topDigits[2].slice(0, 2))
-        for (const e of topDigits[3].slice(0, 2))
-          for (const f of topDigits[4].slice(0, 2))
+  for (const a of topDigits[0].slice(0, 3))
+    for (const b of topDigits[1].slice(0, 3))
+      for (const c of topDigits[2].slice(0, 3))
+        for (const e of topDigits[3].slice(0, 3))
+          for (const f of topDigits[4].slice(0, 3))
             straight.push({
               num: [a, b, c, e, f],
               v: score[0][a] + score[1][b] + score[2][c] + score[3][e] + score[4][f],
@@ -360,7 +446,7 @@ export function summarizeDigit5(draws, n = 100) {
     bigDist,
     formDist,
     repeatRate: Math.round((repeated / total) * 100),
-    candidates: { straight: straight.slice(0, 10).map((x) => x.num.join('')) },
+    candidates: { straight: straight.slice(0, 20).map((x) => x.num.join('')) },
     straightAll: straight,
     posScore: score,
     digitScore,
