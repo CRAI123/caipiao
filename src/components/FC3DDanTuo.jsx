@@ -1,6 +1,7 @@
 // 福彩3D 复式胆拖 —— 选胆码、拖码，自动计算注数与金额
 import React, { useState, useMemo } from 'react'
 import { Card, Note } from './common.jsx'
+import WheelPanel from './WheelPanel.jsx'
 import { DIGITS } from '../lib/fc3dStats.js'
 
 const PLAY_TYPES = [
@@ -153,6 +154,17 @@ export default function FC3DDanTuo({ label = '福彩3D', digitCount = 3 }) {
             : '组六/组三为组选玩法，直选为定位复式。胆拖可缩小选号范围、控制投注金额。'}
         </Note>
       </Card>
+
+      {/* 保底缩水：复用上方的胆码/拖码选择 */}
+      <WheelPanel
+        kind="digit"
+        pool={tuo}
+        dan={dan}
+        kOptions={digitCount === 5 ? [5] : [3]}
+        tOptions={[2, 3]}
+        defaultK={digitCount === 5 ? 5 : 3}
+        defaultT={2}
+      />
     </div>
   )
 }

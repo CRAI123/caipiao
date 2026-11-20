@@ -1,6 +1,7 @@
 // 双色球 复式胆拖 —— 红球胆码/拖码 + 蓝球，自动算注数与金额
 import React, { useMemo, useState } from 'react'
 import { Card, Note, Ball } from './common.jsx'
+import WheelPanel from './WheelPanel.jsx'
 import { RED_NUMS, BLUE_NUMS, predictSSQ } from '../lib/ssqPredict.js'
 
 function combinationCount(n, k) {
@@ -238,6 +239,17 @@ export default function SSQDanTuo({ draws = [] }) {
           ))}
         </div>
       </div>
+
+      {/* 保底缩水：复用上方的胆码/拖码（普通复式则把红球复选当作号码池） */}
+      <WheelPanel
+        kind="ssq"
+        pool={mode === 'full' ? fullRed : tuo}
+        dan={mode === 'full' ? [] : dan}
+        kOptions={[6]}
+        tOptions={[4, 5, 6]}
+        defaultK={6}
+        defaultT={4}
+      />
     </div>
   )
 }

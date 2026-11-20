@@ -5,6 +5,7 @@ import { Card, Note, StatCard } from './common.jsx'
 import AiHitLog from './AiHitLog.jsx'
 import * as fc3dEngine from '../lib/fc3dPredict.js'
 import { auditVersionCompare } from '../lib/fusion.js'
+import RandomnessCard from './RandomnessCard.jsx'
 
 const PERIODS = [20, 30, 50, 80]
 
@@ -144,6 +145,7 @@ export default function FC3DAudit({
     return (
       <div className="page">
         <Note>数据不足，至少需要 40 期才能进行滚动回测。</Note>
+        <RandomnessCard draws={draws} game={game} maxNum={10} />
       </div>
     )
   }
@@ -483,6 +485,8 @@ export default function FC3DAudit({
         如果推算结果和机选的理论值几乎重合——这正是预期结果。历史频次、遗漏、形态都不携带对未来的信息，
         体检页的存在就是为了防止「看起来有规律」的错觉。请把它当作数据学习工具，而不是投注依据。
       </Note>
+
+      <RandomnessCard draws={draws} game={game} maxNum={10} />
     </div>
   )
 }

@@ -3,6 +3,7 @@ import React, { useMemo, useState } from 'react'
 import { Card, StatCard, Note, Ball } from './common.jsx'
 import { walkForwardAuditSSQ, PRIZE_TABLE } from '../lib/ssqPredict.js'
 import AiHitLog from './AiHitLog.jsx'
+import RandomnessCard from './RandomnessCard.jsx'
 
 const PERIODS = [30, 50, 80, 120]
 
@@ -181,6 +182,8 @@ export default function SSQAudit({ draws }) {
         回测结果与理论基准的差异属于随机波动。样本越小波动越大，
         请勿把某一时段的“超出基准”理解为方法有效。
       </Note>
+
+      <RandomnessCard draws={draws} game="ssq" maxNum={33} />
     </div>
   )
 }

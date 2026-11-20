@@ -2,21 +2,15 @@
 import React, { useState } from 'react'
 import { Card, Note, Ball } from './common.jsx'
 import { prizeLevel, PRIZE_TABLE } from '../lib/ssqPredict.js'
-
-/** 各奖级的中奖组合数与概率（总组合 17,721,088） */
-const ODDS = [
-  { level: '一等奖', combos: 1 },
-  { level: '二等奖', combos: 15 },
-  { level: '三等奖', combos: 162 },
-  { level: '四等奖', combos: 7695 },
-  { level: '五等奖', combos: 137475 },
-  { level: '六等奖', combos: 1043640 },
-]
-const TOTAL = 17721088
+import { SSQ_PRIZES, expectedReturn, fmtProb, fmtOneIn, fmtAmount } from '../lib/odds.js'
+import '../odds.css'
 
 /** 展示用号码：0 个红球时给一个示意 */
 const SAMPLE_RED = [4, 11, 17, 23, 28, 32]
 const SAMPLE_BLUE = 9
+
+/** 单注 2 元口径的期望值（决定返奖率与每注期望亏损） */
+const RET = expectedReturn(SSQ_PRIZES, 2)
 
 export default function SSQPrize() {
   const [redHits, setRedHits] = useState(3)
@@ -24,9 +18,6 @@ export default function SSQPrize() {
 
   const level = prizeLevel(redHits, blueHit)
   const row = PRIZE_TABLE.find((p) => p.level === level)
-
-  const winCombos = ODDS.reduce((s, o) => s + o.combos, 0)
-  const winRate = ((winCombos / TOTAL) * 100).toFixed(2)
 
   return (
     <div className="page">
@@ -111,16 +102,14 @@ export default function SSQPrize() {
             </thead>
             <tbody>
               {PRIZE_TABLE.map((p) => {
-                const o = ODDS.find((x) => x.level === p.level)
+                const o = SSQ_PRIZES.find((x) => x.level === p.level)
                 return (
                   <tr key={p.level}>
                     <td>{p.level}</td>
                     <td className="mono">{p.condition}</td>
                     <td className="mono">{p.money}</td>
                     <td className="mono">{o ? o.combos.toLocaleString('zh-CN') : '—'}</td>
-                    <td className="mono">
-                      {o ? `1 / ${Math.round(TOTAL / o.combos).toLocaleString('zh-CN')}` : '—'}
-                    </td>
+                    <td className="mono">{o ? fmtOneIn(o.prob) : '—'}</td>
                   </tr>
                 )
               })}
@@ -128,8 +117,78 @@ export default function SSQPrize() {
           </table>
         </div>
         <Note>
-          任意一注双色球的中奖概率约 {winRate}%（约 1 / 15）。一等奖、二等奖为浮动奖，
-          奖金取决于当期销量与中奖注数；三至六等奖为固定奖。返奖率长期约 50%。
+          任意一注双色球的中奖概率为 {(RET.totalProb * 100).toFixed(4)}%（{fmtOneIn(RET.totalProb)}）。
+          一等奖、二等奖为浮动奖，奖金取决于当期销量与中奖注数；三至六等奖为固定奖。返奖率长期约 50%。
+        </Note>
+      </Card>
+
+      {/* 精确概率表：全部奖级由组合数学直接算出，可逐项验算 */}
+      <Card title="精确概率表" tag="超几何分布 · 逐项可验算">
+        <div className="table-scroll">
+          <table className="ledger-table odds-table">
+            <thead>
+              <tr>
+                <th>奖级</th>
+                <th>中奖条件</th>
+                <th>中奖概率</th>
+                <th>单注奖金</th>
+                <th>期望值贡献</th>
+              </tr>
+            </thead>
+            <tbody>
+              {SSQ_PRIZES.map((p) => (
+                <tr key={p.level}>
+                  <td>
+                    <b>{p.level}</b>
+                  </td>
+                  <td className="mono small">{p.condition}</td>
+                  <td>
+                    <span className="odds-prob">{fmtProb(p.prob)}</span>
+                    <span className="odds-onein">{fmtOneIn(p.prob)}</span>
+                  </td>
+                  <td className="mono">
+                    {p.prize.toLocaleString('zh-CN')} 元
+                    {p.prizeNote && <span className="odds-sub">{p.prizeNote}</span>}
+                  </td>
+                  <td className="mono">
+                    {fmtAmount(p.prob * p.prize)} 元
+                  </td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </div>
+
+        <div className="odds-summary">
+          <div className="odds-summary-item">
+            <span>合计中奖概率</span>
+            <b>{(RET.totalProb * 100).toFixed(4)}%</b>
+            <i className="odds-sub">{fmtOneIn(RET.totalProb)}（任一奖级）</i>
+          </div>
+          <div className="odds-summary-item">
+            <span>总期望回报率</span>
+            <b>{(RET.returnRate * 100).toFixed(2)}%</b>
+            <i className="odds-sub">
+              单注期望奖金 {RET.ev.toFixed(4)} 元 / 投入 2 元（浮动奖按 500 万、20 万估算）
+            </i>
+          </div>
+          <div className="odds-summary-item odds-neutral">
+            <span>每 2 元投注的期望亏损</span>
+            <b>{RET.lossPerTicket.toFixed(4)} 元</b>
+            <i className="odds-sub">每 1 元投入期望亏损 {RET.lossPerYuan.toFixed(4)} 元</i>
+          </div>
+        </div>
+
+        <div className="odds-derive">
+          <div>红球命中 k 个：C(6,k) · C(27,6−k) / C(33,6)，C(33,6) = 1,107,568</div>
+          <div>蓝球与红球独立：命中 1/16，未中 15/16；全部单注 1,107,568 × 16 = 17,721,088</div>
+          <div>四等奖 =（5 红且蓝未中）∪（4 红且蓝命中）；五等奖同理，互斥事件概率相加</div>
+          <div>六等奖 = 蓝球命中 且 红球命中 0–2 个：C(6,0)C(27,6)+C(6,1)C(27,5)+C(6,2)C(27,4) = 1,043,640 注</div>
+        </div>
+
+        <Note tone="warn">
+          精确概率由组合数学直接推导，可逐项验算；无论怎么选号，单注中奖概率不变；
+          表中期望回报率长期为负（返奖率约 50%），这是彩票的设计属性。
         </Note>
       </Card>
 

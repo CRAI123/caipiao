@@ -1,0 +1,104 @@
+/* 随机性检验卡片 —— 独立样式表，类名统一 rnd- 前缀，避免与主样式冲突 */
+.rnd-summary {
+  margin: 2px 0 10px;
+  font-size: 13.5px;
+  line-height: 1.7;
+  color: var(--ink-80);
+}
+
+.rnd-summary b {
+  color: var(--ink);
+  font-variant-numeric: tabular-nums;
+}
+
+.rnd-table-wrap {
+  overflow-x: auto;
+  border: 1px solid var(--ink-20);
+  background: rgba(250, 246, 234, 0.6);
+}
+
+.rnd-table {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: 13px;
+}
+
+.rnd-table th {
+  padding: 8px 10px;
+  text-align: left;
+  font-size: 11.5px;
+  font-weight: 600;
+  letter-spacing: 0.06em;
+  color: var(--ink-60);
+  border-bottom: 2px solid var(--ink-20);
+  white-space: nowrap;
+}
+
+.rnd-table td {
+  padding: 8px 10px;
+  border-bottom: 1px dashed var(--ink-20);
+  vertical-align: top;
+}
+
+.rnd-table tbody tr:last-child td {
+  border-bottom: none;
+}
+
+.rnd-table tbody tr:hover {
+  background: rgba(194, 58, 43, 0.04);
+}
+
+.rnd-name {
+  min-width: 190px;
+  color: var(--ink);
+}
+
+.rnd-name small {
+  display: block;
+  margin-top: 3px;
+  font-size: 11.5px;
+  line-height: 1.55;
+  color: var(--ink-60);
+}
+
+.rnd-stat {
+  white-space: nowrap;
+  color: var(--ink-80);
+}
+
+.rnd-p {
+  white-space: nowrap;
+  font-variant-numeric: tabular-nums;
+}
+
+.rnd-badge {
+  display: inline-block;
+  padding: 1px 8px;
+  border: 1px solid currentColor;
+  border-radius: 3px;
+  font-size: 11.5px;
+  font-weight: 700;
+  letter-spacing: 0.04em;
+  white-space: nowrap;
+}
+
+/* pass 用沉稳的墨蓝，warn 用琥珀，fail 用朱红 */
+.rnd-verdict-pass { color: var(--blue); }
+.rnd-verdict-warn { color: var(--amber); }
+.rnd-verdict-fail { color: var(--red-deep); }
+
+.rnd-footnote {
+  margin: 12px 0 0;
+  padding-top: 10px;
+  border-top: 1px dashed var(--ink-20);
+  font-size: 12px;
+  line-height: 1.75;
+  color: var(--ink-60);
+}
+
+@media (max-width: 640px) {
+  .rnd-table { font-size: 12px; }
+  .rnd-table th,
+  .rnd-table td { padding: 7px 8px; }
+  .rnd-name { min-width: 150px; }
+}

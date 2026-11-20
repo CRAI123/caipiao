@@ -5,6 +5,16 @@ import { Card, Note, StatCard, yuan } from './common.jsx'
 import { loadJournal, persistJournal, upsertRecord, getRecord, buildFc3dRecord } from '../lib/journal.js'
 import { loadSettings, isNeonReady } from '../lib/settings.js'
 import { syncRecordToNeon } from '../lib/sync.js'
+import {
+  DIGIT_PRIZES,
+  DIGIT_SHAPE,
+  PL5_PRIZES,
+  expectedReturn,
+  fmtProb,
+  fmtOneIn,
+  fmtAmount,
+} from '../lib/odds.js'
+import '../odds.css'
 
 const PLAYS = [
   { id: 'direct', name: '直选', amount: 1040, desc: '三位号码与开奖完全相同（位置一致）' },
@@ -114,6 +124,12 @@ export default function FC3DPrize({
   const net = prize - cost
 
   const askPlay = rows.length > 0 && !play
+
+  // 精确概率表：按当前彩种切换（3D / 排三 三位、排五 五位）
+  const oddsRows = digitCount === 5 ? PL5_PRIZES : DIGIT_PRIZES
+  const perPlay = oddsRows.map((r) => expectedReturn([r], UNIT))
+  const avgRate = perPlay.reduce((s, x) => s + x.returnRate, 0) / perPlay.length
+  const avgLoss = perPlay.reduce((s, x) => s + x.lossPerTicket, 0) / perPlay.length
 
   // 本期是否已经有账本记录（同一天同一彩种只保留一条）
   const existingRec = useMemo(
@@ -334,6 +350,104 @@ export default function FC3DPrize({
           </Card>
         </>
       )}
+
+      {/* 精确概率表：三位号码 10³=1000 种、五位号码 10⁵=100000 种，全部等可能 */}
+      <Card title="精确概率表" tag={`${label} · 等可能号码计数`}>
+        <div className="table-scroll">
+          <table className="ledger-table odds-table">
+            <thead>
+              <tr>
+                <th>玩法</th>
+                <th>中奖条件</th>
+                <th>单注中奖概率</th>
+                {digitCount === 3 && <th>开奖形态占比</th>}
+                <th>单注奖金</th>
+                <th>期望值贡献</th>
+              </tr>
+            </thead>
+            <tbody>
+              {oddsRows.map((r) => (
+                <tr key={r.level}>
+                  <td>
+                    <b>{r.level}</b>
+                  </td>
+                  <td className="mono small">{r.condition}</td>
+                  <td>
+                    <span className="odds-prob">{fmtProb(r.prob)}</span>
+                    <span className="odds-onein">{fmtOneIn(r.prob)}</span>
+                  </td>
+                  {digitCount === 3 && (
+                    <td className="mono small">
+                      {r.shapeShare
+                        ? `${(r.shapeShare * 100).toFixed(2)}%（${r.shapeCount}/1,000）`
+                        : '—（不限定形态）'}
+                    </td>
+                  )}
+                  <td className="mono">{r.prize.toLocaleString('zh-CN')} 元</td>
+                  <td className="mono">{fmtAmount(r.prob * r.prize)} 元</td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </div>
+
+        {digitCount === 3 && (
+          <div className="odds-shape">
+            {DIGIT_SHAPE.map((s) => (
+              <span key={s.id} className="odds-shape-item">
+                {s.label}：{(s.prob * 100).toFixed(1)}%
+                <i>（{s.derive}）</i>
+              </span>
+            ))}
+            <span className="odds-shape-item">
+              10 + 270 + 720 = 1,000，覆盖全部开奖形态
+            </span>
+          </div>
+        )}
+
+        <div className="odds-summary">
+          <div className="odds-summary-item">
+            <span>合计中奖概率（单注）</span>
+            <b>{oddsRows.map((r) => fmtOneIn(r.prob)).join(' / ')}</b>
+            <i className="odds-sub">
+              {digitCount === 5 ? '直选' : '直选 / 组选3 / 组选6'}
+            </i>
+          </div>
+          <div className="odds-summary-item">
+            <span>总期望回报率</span>
+            <b>{(avgRate * 100).toFixed(2)}%</b>
+            <i className="odds-sub">
+              单注期望奖金 {perPlay.map((x) => x.ev.toFixed(3)).join(' / ')} 元 / 投入 2 元
+            </i>
+          </div>
+          <div className="odds-summary-item odds-neutral">
+            <span>每 2 元投注的期望亏损</span>
+            <b>{avgLoss.toFixed(4)} 元</b>
+            <i className="odds-sub">每 1 元投入期望亏损 {(avgLoss / UNIT).toFixed(4)} 元</i>
+          </div>
+        </div>
+
+        <div className="odds-derive">
+          {digitCount === 5 ? (
+            <>
+              <div>00000–99999：10⁵ = 100,000 个等可能开奖号码</div>
+              <div>直选只有 1 个号码与投注完全一致 → 1/100,000</div>
+            </>
+          ) : (
+            <>
+              <div>直选：与开奖逐位相同，只有 1 个开奖号码 → 1/1,000</div>
+              <div>组选3：投注 AAB，开奖为 AAB / ABA / BAA 共 3 种排列 → 3/1,000</div>
+              <div>组选6：投注 ABC，开奖为 3! = 6 种排列 → 6/1,000</div>
+              <div>27% 是“开奖为组三形态”的占比，不是某一注组选3 的中奖概率</div>
+            </>
+          )}
+        </div>
+
+        <Note tone="warn">
+          精确概率由组合数学直接推导，可逐项验算；无论怎么选号，单注中奖概率不变；
+          表中期望回报率长期为负（返奖率约 50%），这是彩票的设计属性。
+        </Note>
+      </Card>
     </div>
   )
 }
