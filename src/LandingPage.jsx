@@ -2,7 +2,7 @@ import React, { useEffect, useState } from 'react'
 import logoImg from './assets/logo.webp'
 import './landing.css'
 
-const DESKTOP_DOWNLOAD = '/updates/yanchaishi_0.1.46_x64-setup.exe'
+const DESKTOP_DOWNLOAD = '/updates/yanchaishi_0.1.47_x64-setup.exe'
 
 const RESEARCH_STEPS = [
   { id: '01', title: '同步开奖', text: '汇集公开开奖数据，保留完整期号与号码档案。' },
