@@ -16,6 +16,8 @@ import {
   ZONE4,
   SSQ_RED_SIGNALS,
   SSQ_BLUE_SIGNALS,
+  wilsonInterval,
+  BLUE_MAX,
 } from '../lib/ssqPredict.js'
 import { readLearning } from '../lib/learning.js'
 import { runDigitAi, peekDigitAi, auditDigitAi } from '../lib/api.js'
@@ -432,6 +434,14 @@ export default function SSQPredict({ draws }) {
   const hitSet = new Set(pred.red)
   const hitBlue = pred.blue === latest.blue
 
+  // 蓝球命中率的统计解读：点估计必须配置信区间，否则 6% 看着像算法失效，
+  // 实际上单注 1/16 = 6.25%，几十期的波动本就该在这个量级。
+  const blueHits = bt.rows.filter((r) => r.blueHit).length
+  const blueN = bt.rows.length
+  const blueCi = wilsonInterval(blueHits, blueN)
+  const blueBaseline = 1 / BLUE_MAX
+  const ciCoversBaseline = blueCi.low <= blueBaseline && blueBaseline <= blueCi.high
+
   return (
     <div className="page">
       <Card title="下期推荐" tag={`基于 ${draws.length} 期历史 · 第 ${latest.id + 1} 期`}>
@@ -496,6 +506,90 @@ export default function SSQPredict({ draws }) {
         <StatCard label="候选池" value={pred.candidates.length} tone="amber" note="参与组合枚举的号码" />
         <StatCard label="杀号" value={pred.kill.length} tone="green" note="评分最低，仅供参照" />
       </div>
+
+      <Card title="蓝球命中率解读" tag="小样本别误读">
+        <div className="table-scroll">
+          <table className="ledger-table">
+            <thead>
+              <tr>
+                <th>口径</th>
+                <th>数值</th>
+                <th>说明</th>
+              </tr>
+            </thead>
+            <tbody>
+              <tr>
+                <td>近 {blueN} 期命中</td>
+                <td className="mono">{blueHits} 次</td>
+                <td className="muted small">单蓝命中即算一次</td>
+              </tr>
+              <tr>
+                <td>观测命中率</td>
+                <td className="mono">{(blueCi.p * 100).toFixed(1)}%</td>
+                <td className="muted small">点估计，受样本量影响大</td>
+              </tr>
+              <tr>
+                <td>95% 置信区间</td>
+                <td className="mono">
+                  {(blueCi.low * 100).toFixed(1)}% ~ {(blueCi.high * 100).toFixed(1)}%
+                </td>
+                <td className="muted small">威尔逊区间</td>
+              </tr>
+              <tr>
+                <td>纯随机基准</td>
+                <td className="mono text-blue">{(blueBaseline * 100).toFixed(2)}%</td>
+                <td className="muted small">1 / 16，单注理论值</td>
+              </tr>
+              <tr>
+                <td>结论</td>
+                <td className="mono">{ciCoversBaseline ? '与随机无显著差异' : '偏离基准'}</td>
+                <td className="muted small">
+                  {ciCoversBaseline
+                    ? '区间包含基准值，说明波动属于噪声'
+                    : '区间不包含基准值，需扩大样本再判断'}
+                </td>
+              </tr>
+            </tbody>
+          </table>
+        </div>
+        <Note tone="info">
+          蓝球只有 16 个号，无论用什么方法，单注命中率上限就是 6.25%。几十期的观测值在 4%~10% 之间波动都属正常，
+          不能据此判断算法好坏；样本越小越容易被偶然结果误导。
+        </Note>
+      </Card>
+
+      <Card title="蓝球覆盖与成本" tag="唯一能提高命中率的办法">
+        <div className="table-scroll">
+          <table className="ledger-table">
+            <thead>
+              <tr>
+                <th>蓝球个数</th>
+                <th>单注命中率</th>
+                <th>每期投入</th>
+                <th>六等奖期望</th>
+                <th>回报率</th>
+              </tr>
+            </thead>
+            <tbody>
+              {[1, 2, 3, 4, 5, 8, 16].map((n) => (
+                <tr key={n} className={n === 1 ? 'ssq-row-active' : ''}>
+                  <td className="mono">{n} 个</td>
+                  <td className="mono">{((n / BLUE_MAX) * 100).toFixed(1)}%</td>
+                  <td className="mono">{n * 2} 元</td>
+                  <td className="mono">{((n / BLUE_MAX) * 5).toFixed(2)} 元</td>
+                  <td className="mono text-red">
+                    {((((n / BLUE_MAX) * 5) / (n * 2)) * 100).toFixed(1)}%
+                  </td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </div>
+        <Note tone="warn">
+          命中率随蓝球个数线性上升，但回报率恒为 15.6%——概率完全是用钱买来的，单位金额的期望一分没变。
+          全包 16 个蓝球必中奖，但每期要投入 32 元，最差只中 5 元六等奖。
+        </Note>
+      </Card>
 
       <Card title="十步研判流程" tag="书中方法体系">
         <ol className="ssq-steps">

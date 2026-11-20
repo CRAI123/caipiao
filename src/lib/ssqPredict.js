@@ -816,6 +816,19 @@ export function backtestSSQ(draws, { periods = 30, minTrain = 30, predict = pred
   }
 }
 
+/**
+ * 威尔逊置信区间：小样本下比正态近似更可靠。
+ * 用途：判断命中率是否显著偏离随机基准——区间包含基准值即说明差异在噪声范围内。
+ */
+export function wilsonInterval(hits, n, z = 1.96) {
+  if (!n) return { low: 0, high: 0, p: 0 }
+  const p = hits / n
+  const denom = 1 + (z * z) / n
+  const center = (p + (z * z) / (2 * n)) / denom
+  const margin = (z * Math.sqrt((p * (1 - p)) / n + (z * z) / (4 * n * n))) / denom
+  return { low: Math.max(0, center - margin), high: Math.min(1, center + margin), p }
+}
+
 /** 方法体检：滚动回测的详细版（含中奖等级） */
 export function walkForwardAuditSSQ(draws, { periods = 50, minTrain = 30 } = {}) {
   const n = Math.min(periods, Math.max(0, draws.length - minTrain))
