@@ -22,6 +22,7 @@ import { fetchSsqDraws } from './_lib/ssq.js'
 import { resolveLlmSettings, callAi } from './_lib/ai.js'
 import { scoreBalls, pickBalanced, BALL_MAX, comb } from '../src/lib/stats.js'
 import { v7Recommend } from '../src/lib/kl8V7.js'
+import { KL8_PLAY, KL8_PLAY_LABEL } from '../src/lib/kl8Math.js'
 import {
   summarizeDigit,
   digitCandidatePool,
@@ -131,16 +132,16 @@ export function buildKl8(draws, learned = null) {
     learned && !learned.coldStart && Array.isArray(learned.windows?.weights)
       ? learned.windows.weights.map((weight, i) => ({ w: Number(learned.windows.keys[i]), weight }))
       : null
-  const v7 = v7Recommend(history, { play: 10, nextId, windowWeightsOverride: winOverride })
+  const v7 = v7Recommend(history, { play: KL8_PLAY, nextId, windowWeightsOverride: winOverride })
   const { scores } = scoreBalls(history, { periods: 100, halfLife: 20, hotMode: 'mix' })
   const ranked = Array.from({ length: BALL_MAX }, (_, i) => i + 1)
     .map((n) => ({ n, score: scores[n] }))
     .sort((a, b) => b.score - a.score)
-  const picks = (v7?.picks?.length === 10 ? [...v7.picks] : pickBalanced(ranked, 10).map((x) => x.n)).sort(
+  const picks = (v7?.picks?.length === KL8_PLAY ? [...v7.picks] : pickBalanced(ranked, KL8_PLAY).map((x) => x.n)).sort(
     (a, b) => a - b,
   )
   const groups = [0, 3, 6].map((off) =>
-    pickBalanced(ranked.slice(off), 10).map((x) => x.n).sort((a, b) => a - b),
+    pickBalanced(ranked.slice(off), KL8_PLAY).map((x) => x.n).sort((a, b) => a - b),
   )
   return { latest: history[0], nextId, v7, picks, groups }
 }
@@ -198,7 +199,7 @@ function buildSsq(draws, learned = null) {
 
 // ============================================================
 // AI 终选：算法先选 → AI 只在候选池内终选
-// 与站内规则一致（3D / 排列三 直选 3 + 组六 2 + 组三 1；快乐8 算法 20 码 → AI 终选 10 码），
+// 与站内规则一致（3D / 排列三 直选 3 + 组六 2 + 组三 1；快乐8 算法 20 码 → AI 终选 6 码），
 // 优先复用全站共享结果，没有才现场调用一次大模型，失败一律回退算法结果。
 // ============================================================
 
@@ -463,7 +464,7 @@ function digitAlgoPicks(game, draws) {
       }
 }
 
-/** 快乐8：算法 20 码 → AI 终选 10 码，失败回退算法融合 10 码 */
+/** 快乐8：算法 20 码 → AI 终选 6 码，失败回退算法融合 6 码 */
 export async function buildKl8Ai({ draws, built, sql, llm }) {
   if (!built?.v7) return null
   const history = draws.slice(0, 200)
@@ -472,14 +473,14 @@ export async function buildKl8Ai({ draws, built, sql, llm }) {
   const wide = balancedFromPool(built.v7.pool, 20)
   const base = { nextId, wide, ten: algoTen, source: 'algo', note: '', summary: '', cached: false }
 
-  // 1) 全站已有本期深度分析 → 复用它的终选 10 码
+  // 1) 全站已有本期深度分析 → 复用它的终选 6 码
   if (sql) {
     try {
       const rows = await sql`
         SELECT result FROM kl8_ai_deep_runs
-        WHERE draw_id = ${nextId} AND play = 10 AND status = 'done'`
+        WHERE draw_id = ${nextId} AND play = ${KL8_PLAY} AND status = 'done'`
       const r = rows[0]?.result
-      if (r && r.schema === KL8_SCHEMA && Array.isArray(r.final10) && r.final10.length === 10) {
+      if (r && r.schema === KL8_SCHEMA && Array.isArray(r.final10) && r.final10.length === KL8_PLAY) {
         return {
           ...base,
           ten: [...r.final10].sort((a, b) => a - b),
@@ -503,7 +504,7 @@ export async function buildKl8Ai({ draws, built, sql, llm }) {
         p.nextId === nextId &&
         p.schema === KL8_SCHEMA &&
         Array.isArray(p.ten) &&
-        p.ten.length === 10
+        p.ten.length === KL8_PLAY
       ) {
         return {
           ...base,
@@ -519,7 +520,7 @@ export async function buildKl8Ai({ draws, built, sql, llm }) {
     }
   }
 
-  // 2) 现场调用一次大模型：从算法 20 码里终选 10 码
+  // 2) 现场调用一次大模型：从算法 20 码里终选 6 码
   try {
     // 注入 AI 自我复盘沉淀的历史经验笔记（空串跳过）
     const notes = await notesForPrompt(sql, 'kl8')
@@ -533,7 +534,7 @@ export async function buildKl8Ai({ draws, built, sql, llm }) {
       {
         role: 'user',
         content: [
-          `目标：第 ${nextId} 期，玩法「选十」，给出 10 个号码。`,
+          `目标：第 ${nextId} 期，玩法「${KL8_PLAY_LABEL[KL8_PLAY]}」，给出 ${KL8_PLAY} 个号码。`,
           '',
           `最近 5 期开奖：`,
           ...history
@@ -549,8 +550,8 @@ export async function buildKl8Ai({ draws, built, sql, llm }) {
               ]
             : []),
           '',
-          '请从上面 20 个候选里终选正好 10 个（可以放弃排名靠后的号），并给每个号一句话理由。' +
-            '只输出 JSON：{"picks":[号码 x10],"reasons":{"01":"一句话"},"summary":"60 字内"}。',
+          `请从上面 20 个候选里终选正好 ${KL8_PLAY} 个（可以放弃排名靠后的号），并给每个号一句话理由。` +
+            `只输出 JSON：{"picks":[号码 x${KL8_PLAY}],"reasons":{"01":"一句话"},"summary":"60 字内"}。`,
         ].join('\n'),
       },
     ]
@@ -563,22 +564,22 @@ export async function buildKl8Ai({ draws, built, sql, llm }) {
       ...new Set((Array.isArray(obj?.picks) ? obj.picks : []).map(Number).filter(Number.isInteger)),
     ]
       .filter((n) => wide.includes(n))
-      .slice(0, 10)
+      .slice(0, KL8_PLAY)
     if (picked.length) {
-      // 不足 10 个时按算法融合顺序补齐，保证永远正好 10 码
+      // 不足时按算法融合顺序补齐，保证永远正好 KL8_PLAY 码
       const ten = [...picked]
       for (const n of algoTen) {
-        if (ten.length >= 10) break
+        if (ten.length >= KL8_PLAY) break
         if (!ten.includes(n)) ten.push(n)
       }
       return {
         ...base,
-        ten: ten.slice(0, 10).sort((a, b) => a - b),
+        ten: ten.slice(0, KL8_PLAY).sort((a, b) => a - b),
         source: 'ai',
         note:
-          picked.length === 10
+          picked.length === KL8_PLAY
             ? '算法 20 码 → AI 终审完成'
-            : `AI 终审给出 ${picked.length} 个有效号，其余 ${10 - picked.length} 个由算法融合补齐`,
+            : `AI 终审给出 ${picked.length} 个有效号，其余 ${KL8_PLAY - picked.length} 个由算法融合补齐`,
         summary: String(obj?.summary || '').slice(0, 200),
       }
     }
@@ -679,7 +680,7 @@ async function kl8AiPrev(sql, draws, prev) {
     try {
       const rows = await sql`
         SELECT result FROM kl8_ai_deep_runs
-        WHERE draw_id = ${Number(latest.id)} AND play = 10 AND status = 'done'`
+        WHERE draw_id = ${Number(latest.id)} AND play = ${KL8_PLAY} AND status = 'done'`
       const r = rows[0]?.result
       if (r?.schema === KL8_SCHEMA && Array.isArray(r.final10)) return r.final10
     } catch {
@@ -741,23 +742,23 @@ const HR = { tag: 'hr' }
 
 function buildKl8Card(kl8, ai, title, warning, hits = null) {
   const picks = kl8.picks.map(pad).join(' ')
-  const firstPrize = Math.round(comb(BALL_MAX, 10) / comb(20, 10))
+  const firstPrize = Math.round(comb(BALL_MAX, KL8_PLAY) / comb(20, KL8_PLAY))
   return buildCard({
     title,
     template: 'blue',
     warning,
     blocks: [
       line(`上期开奖：${grey(kl8.latest.nums.map(pad).join(' '))}`),
-      line(`**概率** 每号每期恒 25%；选十中十约 1/${firstPrize.toLocaleString('en-US')}（单注 2 元）`),
+      line(`**概率** 每号每期恒 25%；${KL8_PLAY_LABEL[KL8_PLAY]}中${KL8_PLAY}约 1/${firstPrize.toLocaleString('en-US')}（单注 2 元）`),
       hits
         ? line(
-            `**上期命中**（第 ${hits.drawId} 期）：算法十码 ${hits.algo}/10 · AI 终审 ${
-              hits.ai === null || hits.ai === undefined ? '无记录' : `${hits.ai}/10`
+            `**上期命中**（第 ${hits.drawId} 期）：算法${KL8_PLAY}码 ${hits.algo}/${KL8_PLAY} · AI 终审 ${
+              hits.ai === null || hits.ai === undefined ? '无记录' : `${hits.ai}/${KL8_PLAY}`
             }`,
           )
         : line(grey('上期命中：暂无上期推荐记录，下次推送起显示')),
       HR,
-      line(`**算法推荐十码**（v7 多窗口加权评分）\n<font color='red'>${picks}</font>`),
+      line(`**算法推荐${KL8_PLAY}码**（v7 多窗口加权评分）\n<font color='red'>${picks}</font>`),
       HR,
       line('**三注参考**'),
       line(`① ${kl8.groups[0].map(pad).join(' ')}`),
@@ -768,14 +769,14 @@ function buildKl8Card(kl8, ai, title, warning, hits = null) {
   })
 }
 
-/** 快乐8 AI 终审区块：算法 20 码 → AI 终选 10 码 */
+/** 快乐8 AI 终审区块：算法 20 码 → AI 终选 6 码 */
 function kl8AiLines(ai) {
   if (!ai) return []
   const tag = ai.source === 'ai' ? 'AI 终审' : '算法融合'
   const head = ai.source === 'ai' ? '算法 20 码 → AI 终审' : 'AI 未通过，已回退算法融合'
   return [
     HR,
-    line(`**${tag} · 第 ${ai.nextId} 期 10 码**（${head}）\n<font color='red'>${ai.ten.map(pad).join(' ')}</font>`),
+    line(`**${tag} · 第 ${ai.nextId} 期 ${KL8_PLAY} 码**（${head}）\n<font color='red'>${ai.ten.map(pad).join(' ')}</font>`),
     line(grey(`算法候选 20 码：${ai.wide.map(pad).join(' ')}`)),
     ai.summary ? line(grey(ai.summary)) : null,
     line(grey(`${ai.note || ''}${ai.cached ? ' · 复用站内已生成结果' : ''}`)),

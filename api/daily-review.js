@@ -22,10 +22,11 @@ import {
 } from './_lib/learning.js'
 import { loadFeishuTarget, sendFeishuCard } from './_lib/feishu.js'
 import { buildKl8, buildKl8Ai, buildDigitAi, KL8_SCHEMA } from './daily-push.js'
+import { KL8_PLAY, KL8_PLAY_LABEL } from '../src/lib/kl8Math.js'
 
 export const config = { maxDuration: 60 }
 
-const PLAY = 10 // 快乐8 默认选十
+const PLAY = KL8_PLAY // 快乐8 默认玩法：选六（与每日推送同口径）
 const GAMES = ['kl8', 'fc3d', 'pl3', 'pl5', 'ssq']
 const GAME_LABEL = { kl8: '快乐8', fc3d: '福彩3D', pl3: '排列三', pl5: '排列五', ssq: '双色球' }
 
@@ -327,8 +328,8 @@ async function prewarmNext(llm, sql, drawMap, afterOf) {
       fn: async () => {
         const built = buildKl8(kd, afterOf?.kl8 || null)
         const ai = await buildKl8Ai({ draws: kd, built, sql, llm })
-        // 只有 AI 真正给出 10 码才缓存，回退算法结果不缓存，留给 14:00 再试一次
-        if (!ai?.nextId || ai.source !== 'ai' || !Array.isArray(ai.ten) || ai.ten.length !== 10) {
+        // 只有 AI 真正给出完整号码才缓存，回退算法结果不缓存，留给 14:00 再试一次
+        if (!ai?.nextId || ai.source !== 'ai' || !Array.isArray(ai.ten) || ai.ten.length !== PLAY) {
           failed.kl8 = ai?.note || 'AI 未给出有效结果'
           return
         }
@@ -431,7 +432,7 @@ function buildLearningCard({ dateText, learning, beforeOf, afterOf, note, advice
 
   const reviewLine =
     review && !review.skipped && review.hits != null
-      ? line(`**快乐8 复盘** 第 ${review.drawId} 期命中 ${review.hits}/10，单注奖金 ${review.prize} 元`)
+      ? line(`**快乐8 复盘** 第 ${review.drawId} 期命中 ${review.hits}/${PLAY}，单注奖金 ${review.prize} 元`)
       : null
 
   const prewarmed = prewarm ? GAMES.filter((g) => prewarm[g]) : []
@@ -513,8 +514,8 @@ async function reviewKl8(sql, latest) {
     const llm = await resolveLlmSettings()
     const wonLabel = won ? '中奖' : '未中奖'
     const systemPrompt = won
-      ? `你是购彩复盘助手。用户本期快乐8（选十）中奖了，请帮他总结这次选号方法为什么有效，以及哪些特征值得关注。务必在结尾提醒：开奖是独立随机事件，本次中奖纯属运气，不代表方法可复制。输出用简体中文，300字以内。`
-      : `你是购彩复盘助手。用户本期快乐8（选十）未中奖，请客观总结本期选号与开奖的差异，给出温和的复盘建议。务必在结尾提醒：开奖是独立随机事件，任何选号方法都不能提高中奖概率，理性购彩。输出用简体中文，300字以内。`
+      ? `你是购彩复盘助手。用户本期快乐8（${KL8_PLAY_LABEL[PLAY]}）中奖了，请帮他总结这次选号方法为什么有效，以及哪些特征值得关注。务必在结尾提醒：开奖是独立随机事件，本次中奖纯属运气，不代表方法可复制。输出用简体中文，300字以内。`
+      : `你是购彩复盘助手。用户本期快乐8（${KL8_PLAY_LABEL[PLAY]}）未中奖，请客观总结本期选号与开奖的差异，给出温和的复盘建议。务必在结尾提醒：开奖是独立随机事件，任何选号方法都不能提高中奖概率，理性购彩。输出用简体中文，300字以内。`
 
     const userMsg = [
       `第 ${latest.id} 期（${date}）复盘：`,

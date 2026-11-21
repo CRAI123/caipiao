@@ -17,6 +17,7 @@ import { PRO_EXPERTS as PL3_EXPERTS } from '../../src/lib/pl3Predict.js'
 import { PRO_EXPERTS as PL5_EXPERTS } from '../../src/lib/pl5Predict.js'
 import { FC3D_EXPERTS } from '../../src/lib/fc3dPredict.js'
 import { WINDOWS as KL8_WINDOWS } from '../../src/lib/kl8V7.js'
+import { KL8_PLAY } from '../../src/lib/kl8Math.js'
 import {
   SSQ_RED_SIGNALS,
   SSQ_BLUE_SIGNALS,
@@ -343,7 +344,7 @@ export async function scoreAndLearn(sql, game, draws) {
       const modelFam = getFamily('model', d.model.keys, d.model.weights)
       const tempFam = getFamily('temp', d.temp.keys, d.temp.weights)
       const runRows = await sql`
-        SELECT result FROM kl8_ai_deep_runs WHERE draw_id = ${drawId} AND play = 10 LIMIT 1`
+        SELECT result FROM kl8_ai_deep_runs WHERE draw_id = ${drawId} AND play = ${KL8_PLAY} LIMIT 1`
       const result = parseJson(runRows[0]?.result)
       const round1 = result?.round1Picks || result?.result?.round1Picks
       if (Array.isArray(round1) && round1.length) {

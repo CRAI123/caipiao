@@ -45,6 +45,9 @@ export const KL8_PRIZES = {
   10: { 10: 5000000, 9: 8000, 8: 800, 7: 80, 6: 5, 5: 3, 0: 2 },
 }
 
+/** 快乐8 站内默认玩法：选六（推荐页、每日推送、复盘共用同一口径） */
+export const KL8_PLAY = 6
+
 export const KL8_PLAY_LABEL = {
   1: '选一',
   2: '选二',
