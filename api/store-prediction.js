@@ -3,6 +3,7 @@
 // body: { drawId, play, mode, picks: number[], dans: number[], tuos: number[], aiPicks: number[] }
 import { getSql, ensureTables } from './_lib/neon.js'
 import { applyCors } from './_lib/http.js'
+import { KL8_PLAY } from '../src/lib/kl8Math.js'
 
 export default async function handler(req, res) {
   if (applyCors(req, res)) return
