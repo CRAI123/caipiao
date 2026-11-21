@@ -550,13 +550,14 @@ export async function buildKl8Ai({ draws, built, sql, llm }) {
               ]
             : []),
           '',
-          `请从上面 20 个候选里终选正好 ${KL8_PLAY} 个（可以放弃排名靠后的号），并给每个号一句话理由。` +
-            `只输出 JSON：{"picks":[号码 x${KL8_PLAY}],"reasons":{"01":"一句话"},"summary":"60 字内"}。`,
+          `请从上面 20 个候选里终选正好 ${KL8_PLAY} 个（可以放弃排名靠后的号）。` +
+            `只输出 JSON：{"picks":[号码 x${KL8_PLAY}],"summary":"60 字内"}。不要逐号解释，不要代码块。`,
         ].join('\n'),
       },
     ]
+    // 1200 tokens：逐号理由会让 JSON 超长被截断（截断后无法解析，整轮终审作废）
     const raw = await withTimeout(
-      callAi(llm, messages, { maxTokens: 700, temperature: 0.3 }),
+      callAi(llm, messages, { maxTokens: 1200, temperature: 0.3 }),
       AI_TIMEOUT_MS,
     )
     const obj = extractJson(raw)
