@@ -61,6 +61,11 @@ export default async function handler(req, res) {
     ])
     const drawMap = { kl8: kl8Draws, fc3d: fc3dDraws, pl3: pl3Draws, pl5: pl5Draws, ssq: ssqDraws }
 
+    // 快乐8 当期复盘提前并发（不依赖学习结果），否则串在末尾容易把整轮拖过 60s 上限
+    const reviewTask = kl8Draws[0]
+      ? reviewKl8(sql, kl8Draws[0]).catch((e) => ({ skipped: true, error: String(e?.message || e) }))
+      : Promise.resolve({ skipped: true, reason: 'no_data' })
+
     // 学习前快照（报告里对比权重用）
     const beforeOf = {}
     for (const g of GAMES) {
@@ -122,16 +127,17 @@ export default async function handler(req, res) {
           })
         }
         // 经验笔记有门槛（每周最多一条），报告里的改善建议则每晚单独生成一份，不写入长期笔记
-        if (!note) adviceText = await generateAdvice(llm, sql, learning)
+        if (!note) adviceText = await withTimeout(generateAdvice(llm, sql, learning), 15000, '')
       } catch (e) {
         console.error('[daily-review] 经验笔记/改善建议生成失败：', e?.message || e)
       }
     }
-    const prewarm = await prewarmTask
-
-    // 4. 快乐8 当期复盘记录
-    const review = kl8Draws[0] ? await reviewKl8(sql, kl8Draws[0]) : { skipped: true, reason: 'no_data' }
-
+    // 报告必须赶在 60s 函数上限前发出：给尾部任务留预算，超时就先用已有内容发
+    const tailBudget = Math.max(3000, 46000 - (Date.now() - started))
+    const [prewarm, review] = await Promise.all([
+      withTimeout(prewarmTask, tailBudget),
+      withTimeout(reviewTask, tailBudget),
+    ])
     // 5. 飞书夜间学习报告（含 AI 改善建议）
     const card = buildLearningCard({
       dateText: beijingDateText(),
@@ -152,6 +158,22 @@ export default async function handler(req, res) {
         if (!feishu.ok) console.error('[daily-review] 飞书报告发送失败：', feishu.error)
       } catch (e) {
         feishu = { ok: false, error: String(e?.message || e) }
+      }
+      // 落库上一次运行结果，便于排查“报告没收到”这类静默问题
+      try {
+        await writeConfig(
+          sql,
+          'daily_review_last',
+          JSON.stringify({
+            at: new Date().toISOString(),
+            ok: feishu.ok,
+            error: feishu.error || '',
+            elapsedMs: Date.now() - started,
+            scored: scoredGames,
+          }),
+        )
+      } catch {
+        /* 诊断记录失败不影响主流程 */
       }
     }
 
@@ -176,6 +198,17 @@ export default async function handler(req, res) {
     console.error('daily-review error:', e)
     return res.status(500).json({ error: e.message })
   }
+}
+
+/** 限时等待：超时返回 fallback（不中断已发出的请求，只是不再等它） */
+function withTimeout(promise, ms, fallback = null) {
+  let timer = null
+  const timeout = new Promise((resolve) => {
+    timer = setTimeout(() => resolve(fallback), Math.max(0, ms))
+  })
+  return Promise.race([Promise.resolve(promise).catch(() => fallback), timeout]).finally(() => {
+    if (timer) clearTimeout(timer)
+  })
 }
 
 /** 北京时间 MM-DD */
