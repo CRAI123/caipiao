@@ -108,3 +108,16 @@ export async function getReviews(limit = 30) {
 export async function getLearning(game) {
   return apiFetch(`/api/get-reviews?learning=1&game=${encodeURIComponent(game)}`)
 }
+
+/** 双色球避挤：本期网友投票人气 + 官方销售/中奖注数校准（只影响奖金分摊，不影响中奖概率） */
+export async function getSsqCrowding(issue) {
+  return apiFetch(`/api/ssq-crowding${issue ? `?issue=${encodeURIComponent(issue)}` : ''}`)
+}
+
+/** 回补官方历史销售/中奖注数并重拟合偏好（幂等，首次初始化用） */
+export async function syncSsqOfficial() {
+  return apiFetch('/api/ssq-crowding', {
+    method: 'POST',
+    body: JSON.stringify({ action: 'backfill' }),
+  })
+}

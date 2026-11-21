@@ -124,6 +124,20 @@ export async function ensureTables(sql) {
       value text NOT NULL,
       updated_at timestamptz NOT NULL DEFAULT now()
     )`
+  // 双色球官方开奖+销售数据：一等奖/二等奖注数是唯一公开的真实“购买集中度”信号
+  await sql`
+    CREATE TABLE IF NOT EXISTS ssq_draw_stats (
+      draw_id integer PRIMARY KEY,
+      issue5 text NOT NULL,
+      date date,
+      red jsonb NOT NULL,
+      blue integer NOT NULL,
+      sales bigint,
+      first_prize integer,
+      second_prize integer,
+      pool bigint,
+      updated_at timestamptz NOT NULL DEFAULT now()
+    )`
 }
 
 /** 读取 admin_config 表的共享配置 */

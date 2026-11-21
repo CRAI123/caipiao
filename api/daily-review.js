@@ -22,6 +22,7 @@ import {
 } from './_lib/learning.js'
 import { loadFeishuTarget, sendFeishuCard } from './_lib/feishu.js'
 import { buildKl8, buildKl8Ai, buildDigitAi, KL8_SCHEMA } from './daily-push.js'
+import { syncOfficialSsq, toIssue5 } from './_lib/ssqOfficial.js'
 import { KL8_PLAY, KL8_PLAY_LABEL } from '../src/lib/kl8Math.js'
 
 export const config = { maxDuration: 60 }
@@ -65,6 +66,14 @@ export default async function handler(req, res) {
     const reviewTask = kl8Draws[0]
       ? reviewKl8(sql, kl8Draws[0]).catch((e) => ({ skipped: true, error: String(e?.message || e) }))
       : Promise.resolve({ skipped: true, reason: 'no_data' })
+
+    // 双色球官方销售/中奖注数同步（避挤模型的数据源；失败不影响夜间学习）
+    const officialTask = ssqDraws[0]
+      ? syncOfficialSsq(sql, {
+          start: toIssue5(ssqDraws[0].id),
+          end: toIssue5(ssqDraws[0].id),
+        }).catch(() => null)
+      : Promise.resolve(null)
 
     // 学习前快照（报告里对比权重用）
     const beforeOf = {}
@@ -138,6 +147,8 @@ export default async function handler(req, res) {
       withTimeout(prewarmTask, tailBudget),
       withTimeout(reviewTask, tailBudget),
     ])
+    // 官方数据同步不参与报告内容，超时就先放弃（接口端可手动回补）
+    await withTimeout(officialTask, 8000)
     // 5. 飞书夜间学习报告（含 AI 改善建议）
     const card = buildLearningCard({
       dateText: beijingDateText(),

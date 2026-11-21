@@ -1,3 +1,99 @@
+/* ---------- 公开数据：本期人气榜 / 官方校准（crowd3- 前缀） ---------- */
+.crowd3-heat-head {
+  display: flex;
+  align-items: baseline;
+  flex-wrap: wrap;
+  gap: 6px 14px;
+  margin: 14px 0 8px;
+  font-size: 13px;
+  font-weight: 700;
+  color: var(--ink-80);
+}
+.crowd3-heat-mini {
+  font-family: var(--font-mono);
+  font-size: 11.5px;
+  font-weight: 400;
+  color: var(--ink-60);
+}
+.crowd3-cold { color: #24558f; }
+
+.crowd3-grid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 3px 18px;
+}
+.crowd3-grid-blue { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+
+.crowd3-row {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  font-size: 12px;
+  line-height: 1.7;
+}
+.crowd3-num {
+  width: 20px;
+  flex: none;
+  font-family: var(--font-mono);
+  color: var(--ink-60);
+}
+.crowd3-bar {
+  flex: 1;
+  height: 6px;
+  border-radius: 3px;
+  background: var(--ink-08);
+  overflow: hidden;
+}
+.crowd3-bar > span {
+  display: block;
+  height: 100%;
+  border-radius: 3px;
+  background: var(--ink-40);
+}
+.crowd3-row.hot .crowd3-bar > span { background: #c23a2b; }
+.crowd3-row.cold .crowd3-bar > span { background: #24558f; }
+.crowd3-row.hot .crowd3-pct { color: var(--red-deep); }
+.crowd3-row.cold .crowd3-pct { color: #24558f; }
+.crowd3-pct {
+  width: 46px;
+  flex: none;
+  text-align: right;
+  font-family: var(--font-mono);
+  font-size: 11px;
+  color: var(--ink-60);
+}
+
+.crowd3-chips {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+}
+.crowd3-chip {
+  padding: 2px 6px;
+  border: 1px solid var(--ink-20);
+  border-radius: 4px;
+  font-family: var(--font-mono);
+  font-size: 11px;
+  color: var(--ink-70);
+  background: var(--paper);
+}
+.crowd3-chip b { font-weight: 700; color: var(--ink); }
+.crowd3-chip.hot { border-color: rgba(194, 58, 43, 0.4); background: rgba(194, 58, 43, 0.06); }
+.crowd3-chip.cold { border-color: rgba(36, 85, 143, 0.4); background: rgba(36, 85, 143, 0.06); }
+.crowd3-chip.on { outline: 2px solid var(--ink); outline-offset: -1px; }
+
+.crowd3-pickline {
+  margin: 12px 0 4px;
+  font-size: 13px;
+  color: var(--ink-80);
+}
+.crowd3-pickline .muted { margin-left: 6px; }
+
+@media (max-width: 620px) {
+  .crowd3-grid,
+  .crowd3-grid-blue { grid-template-columns: minmax(0, 1fr); }
+}
+
 /* ---------- 组合热度与分摊风险（crowd2- 前缀，独立于既有 crowd- 样式） ---------- */
 
 .crowd2-metrics {
