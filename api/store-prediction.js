@@ -10,7 +10,7 @@ export default async function handler(req, res) {
     return res.status(405).json({ error: 'Method not allowed' })
   }
   try {
-    const { drawId, play = 10, mode = 'mix', picks = [], dans = [], tuos = [], aiPicks = [] } = req.body || {}
+    const { drawId, play = KL8_PLAY, mode = 'mix', picks = [], dans = [], tuos = [], aiPicks = [] } = req.body || {}
     if (!Number.isInteger(drawId)) {
       return res.status(400).json({ error: '缺少 drawId' })
     }

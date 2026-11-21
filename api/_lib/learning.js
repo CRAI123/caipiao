@@ -335,7 +335,7 @@ export async function scoreAndLearn(sql, game, draws) {
         if (!Array.isArray(picks) || !picks.length) continue
         const actualSet = new Set(actual.nums)
         const hits = picks.filter((n) => actualSet.has(n)).length
-        const loss = hitLoss(hits, 10, 0.25)
+        const loss = hitLoss(hits, picks.length || KL8_PLAY, 0.25)
         rowLoss[source] = loss
         hitsOut[source] = hits
         await markScored(source, { actual: actual.nums, hits, logLoss: +loss.toFixed(4) })
@@ -354,7 +354,7 @@ export async function scoreAndLearn(sql, game, draws) {
         for (const r of round1) {
           if (!r || !Array.isArray(r.picks) || !r.picks.length) continue
           const hits = r.picks.filter((n) => actualSet.has(n)).length
-          const loss = hitLoss(hits, 10, 0.25)
+          const loss = hitLoss(hits, r.picks.length || KL8_PLAY, 0.25)
           // 温度等数值键在 JSON 里 1.0 会序列化成 1，按数值匹配回 keys 表
           const resolveKey = (keys, val) => {
             const s = String(val ?? '')
@@ -374,8 +374,8 @@ export async function scoreAndLearn(sql, game, draws) {
             const arr = map.get(k)
             return arr && arr.length ? arr.reduce((a, b) => a + b, 0) / arr.length : null
           })
-        // 无该模型/温度预测时按随机期望命中（10×0.25）兜底，不奖不罚
-        const neutral = hitLoss(10 * 0.25, 10, 0.25)
+        // 无该模型/温度预测时按随机期望命中兜底，不奖不罚
+        const neutral = hitLoss(KL8_PLAY * 0.25, KL8_PLAY, 0.25)
         const mLosses = avgLosses(perModel, modelFam.keys)
         const tLosses = avgLosses(perTemp, tempFam.keys)
         await saveFamily('model', hedgeUpdate(modelFam, mLosses.map((l) => (l == null ? neutral : l))), modelFam)

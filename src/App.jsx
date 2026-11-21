@@ -493,7 +493,7 @@ export default function App() {
             {lottery === 'kl8' ? (
               <>
                 <div>80 选 20 · 每期开出 20 个号码</div>
-                <div>选十中十概率 1 / 8,911,711</div>
+                <div>选六中六概率 1 / 7,753</div>
                 <div className={usingSample ? 'meta-sample' : 'meta-real'}>
                   数据源：{usingSample ? '内置演示数据' : '真实开奖数据'}
                 </div>

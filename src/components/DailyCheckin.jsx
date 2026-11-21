@@ -4,6 +4,7 @@
 import React, { useMemo, useState } from 'react'
 import { Card, Note, Ball, DrawBalls, yuan } from './common.jsx'
 import { scoreBalls, pickBalanced, BALL_MAX } from '../lib/stats.js'
+import { KL8_PLAY } from '../lib/kl8Math.js'
 import {
   loadJournal,
   persistJournal,
@@ -20,13 +21,13 @@ import { syncRecordToNeon, analyzeRecord, resolveLlmSettings } from '../lib/sync
 
 const NO_BUY_REASONS = ['今天没开', '忘了买', '理性停购', '出差/忙', '其他']
 
-/** 推荐页同款「票1」：冷热兼顾 + 结构约束的选十单式（仅作带入 convenience） */
+/** 推荐页同款「票1」：冷热兼顾 + 结构约束的选六单式（仅作带入 convenience） */
 function suggestTicket(draws) {
   const { scores } = scoreBalls(draws, { periods: 100, halfLife: 20, hotMode: 'mix' })
   const ranked = Array.from({ length: BALL_MAX }, (_, i) => i + 1)
     .map((n) => ({ n, score: scores[n] }))
     .sort((a, b) => b.score - a.score)
-  return pickBalanced(ranked, 10).map((x) => x.n).sort((a, b) => a - b)
+  return pickBalanced(ranked, KL8_PLAY).map((x) => x.n).sort((a, b) => a - b)
 }
 
 export default function DailyCheckin({ draws, draw, onChanged }) {
@@ -121,7 +122,7 @@ export default function DailyCheckin({ draws, draw, onChanged }) {
     setTicketText(formatTickets([suggestTicket(draws)]))
     setBought(true)
     setSpend(2)
-    setStatus('info', '已带入「下期推荐 · 冷热兼顾」票1（选十单式，2 元），可自行修改')
+    setStatus('info', '已带入「下期推荐 · 冷热兼顾」票1（选六单式，2 元），可自行修改')
   }
 
   // ---------- 已保存的汇总视图 ----------
@@ -222,10 +223,10 @@ export default function DailyCheckin({ draws, draw, onChanged }) {
               rows={3}
               value={ticketText}
               onChange={(e) => setTicketText(e.target.value)}
-              placeholder={'01 05 12 23 34 45 56 67 78 80\n02 08 15 21 33 44 55 66 77 79'}
+              placeholder={'01 05 12 23 34 45\n02 08 15 21 33 44'}
             />
             <div className="row-actions">
-              <button className="tab-btn" onClick={fillSuggestion}>带入今日推荐票（选十）</button>
+              <button className="tab-btn" onClick={fillSuggestion}>带入今日推荐票（选六）</button>
               <button className="tab-btn" onClick={() => setTicketText('')}>清空号码</button>
               {tickets.length > 0 && (
                 <span className="muted small">

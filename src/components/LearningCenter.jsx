@@ -6,6 +6,7 @@
 import React, { useCallback, useEffect, useMemo, useState } from 'react'
 import { Card, Note } from './common.jsx'
 import { readLearning, normEntropy } from '../lib/learning.js'
+import { KL8_PLAY } from '../lib/kl8Math.js'
 
 const GAME_LABEL = { kl8: '快乐8', fc3d: '福彩3D', pl3: '排列三', pl5: '排列五', ssq: '双色球' }
 
@@ -122,10 +123,11 @@ function buildHitChart(runs, game) {
     color: SOURCE_COLOR[src] || EXPERT_PALETTE[idx % EXPERT_PALETTE.length],
     values: ids.map((id) => m.get(id) ?? null),
   }))
-  const expected = game === 'kl8' ? 2.5 : game === 'ssq' ? 1.08 : 0.3
+  const kl8Expected = +(KL8_PLAY * 0.25).toFixed(2)
+  const expected = game === 'kl8' ? kl8Expected : game === 'ssq' ? 1.08 : 0.3
   const expectedLabel =
     game === 'kl8'
-      ? '随机期望 2.5 个'
+      ? `随机期望 ${kl8Expected} 个`
       : game === 'ssq'
         ? '随机期望 1.08 红'
         : '随机期望 0.3 中/注'
@@ -202,7 +204,7 @@ const BATTLE_SKIP = ['hedge:experts', 'models:kl8', 'mix:kl8', 'signals:ssq']
 
 /** 近 60 期对战榜：各来源 期数 / 近10、近30期平均命中 / 跑赢随机期望比例 / 累计 logLoss */
 function buildBattleBoard(runs, game) {
-  const expected = game === 'kl8' ? 2.5 : game === 'ssq' ? 1.08 : 0.3
+  const expected = game === 'kl8' ? +(KL8_PLAY * 0.25).toFixed(2) : game === 'ssq' ? 1.08 : 0.3
   const bySource = new Map()
   for (const r of runs) {
     if (BATTLE_SKIP.includes(r.source)) continue
