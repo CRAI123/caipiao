@@ -750,7 +750,7 @@ function buildKl8Card(kl8, ai, title, warning, hits = null) {
     warning,
     blocks: [
       line(`上期开奖：${grey(kl8.latest.nums.map(pad).join(' '))}`),
-      line(`**概率** 每号每期恒 25%；${KL8_PLAY_LABEL[KL8_PLAY]}中${KL8_PLAY}约 1/${firstPrize.toLocaleString('en-US')}（单注 2 元）`),
+      line(`**概率** 每号每期恒 25%；${KL8_PLAY_LABEL[KL8_PLAY]}中${KL8_PLAY_LABEL[KL8_PLAY].replace('选', '')}约 1/${firstPrize.toLocaleString('en-US')}（单注 2 元）`),
       hits
         ? line(
             `**上期命中**（第 ${hits.drawId} 期）：算法${KL8_PLAY}码 ${hits.algo}/${KL8_PLAY} · AI 终审 ${
