@@ -50,7 +50,7 @@ const KL8_STAGES = [
 ]
 
 // 等待剧场分步文案：desc 均为 api/ai-deep.js 实际流程的事实描述
-const WAIT_STAGES = [
+const WAIT_STAGES = (play) => [
   { label: KL8_STAGES[0], desc: '拉取最新开奖，整理近 100 期统计样本' },
   { label: '样本外回测 · 近 60 期严格前推', desc: '每期只用该期之前的数据建池，对照命中与随机期望' },
   ...KL8_STAGES.slice(1, 10).map((label) => ({
@@ -61,7 +61,7 @@ const WAIT_STAGES = [
     label,
     desc: '对照第一轮共识与回测结果复核，可换号但需说明理由',
   })),
-  { label: '第 13 步 · 20 码候选终审收敛', desc: '12 轮投票与算法分加权出 20 码，AI 从中定最终 10 码' },
+  { label: '第 13 步 · 20 码候选终审收敛', desc: `12 轮投票与算法分加权出 20 码，AI 从中定最终 ${play} 码` },
 ]
 
 const bandOf = (n) => Math.min(3, Math.floor((n - 1) / 20))
@@ -88,7 +88,7 @@ function profile(nums) {
 
 export default function Predict({ draws, onRefreshData }) {
   const [hotMode, setHotMode] = useState('mix')
-  const [play, setPlay] = useState(10)
+  const [play, setPlay] = useState(6)
   const [showV7, setShowV7] = useState(false)
   const [deep, setDeep] = useState(null)
   const [deepBusy, setDeepBusy] = useState(false)
@@ -426,7 +426,7 @@ export default function Predict({ draws, onRefreshData }) {
       </div>
 
       {deepBusy && (
-        <AiWaitTheater stages={WAIT_STAGES} facts={waitFacts} pct={pct} elapsedSec={elapsed} />
+        <AiWaitTheater stages={WAIT_STAGES(play)} facts={waitFacts} pct={pct} elapsedSec={elapsed} />
       )}
 
       <Card title={`第 ${nextId} 期 · ${PLAY_LABEL[play]} 研究推荐`} tag="评分前列 + 结构约束 · 三张单式票">
@@ -510,7 +510,7 @@ export default function Predict({ draws, onRefreshData }) {
           {deep.final10?.length ? (
             <>
               <div className="predict-sub">
-                🎯 终选 10 码 · {deep.final10Source === 'ai' ? '算法候选 20 码 → AI 终审（第 13 步）' : '算法融合（AI 终审未通过，已回退）'}
+                🎯 终选 {deep.play} 码 · {deep.final10Source === 'ai' ? '算法候选 20 码 → AI 终审（第 13 步）' : '算法融合（AI 终审未通过，已回退）'}
               </div>
               <span className="draw-balls predict-balls">
                 {[...deep.final10].sort((a, b) => a - b).map((n) => (
@@ -531,9 +531,9 @@ export default function Predict({ draws, onRefreshData }) {
                 ))}
               </div>
               <Note>
-                只买 10 个球时看这一组，<b>分析完成后自动收敛，不需要再点任何按钮</b>：
-                先用「底层算法评分 × 12 轮 AI 投票」加权出 20 码候选，再交给 AI 终审一次，由它挑出最终 10 码（终审失败自动回退算法结果）。
-                AI 各模型给号多出来或重复时，这一步会统一去重并压到 10 个。<b>它不提高单号命中概率（恒 25%）</b>。
+                只买 {deep.play} 个球时看这一组，<b>分析完成后自动收敛，不需要再点任何按钮</b>：
+                先用「底层算法评分 × 12 轮 AI 投票」加权出 20 码候选，再交给 AI 终审一次，由它挑出最终 {deep.play} 码（终审失败自动回退算法结果）。
+                AI 各模型给号多出来或重复时，这一步会统一去重并压到 {deep.play} 个。<b>它不提高单号命中概率（恒 25%）</b>。
               </Note>
             </>
           ) : null}
