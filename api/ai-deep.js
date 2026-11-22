@@ -578,7 +578,19 @@ ${schemaPrompt(k)}`
     let finalTenNote = ''
     const wideNums = wide.map((x) => x.n)
     try {
-      const judge = await askOnce(llm, MODELS[0].id, messages3, 0.3, 900)
+      // 终审用小模型即可（opus 在“只输出一行 JSON”上反而容易夹带解释，导致解析失败）
+      const judgeModel = llm.llmModel || MODELS[MODELS.length - 1].id
+      let judge = null
+      let judgeRaw = ''
+      for (let attempt = 0; attempt < 2 && !judge; attempt++) {
+        judgeRaw = await callAi({ ...llm, llmModel: judgeModel }, messages3, {
+          maxTokens: 900,
+          temperature: attempt ? 0.1 : 0.3,
+        })
+        const obj = extractJson(judgeRaw)
+        if (obj && Array.isArray(obj.picks)) judge = obj
+      }
+      if (!judge) console.error('[ai-deep] 终审返回无法解析：', String(judgeRaw).slice(0, 300))
       const picked = [...new Set((judge?.picks || []).map(Number))]
         .filter((n) => wideNums.includes(n))
         .slice(0, k)
