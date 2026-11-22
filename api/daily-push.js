@@ -986,10 +986,12 @@ export default async function handler(req, res) {
     const drawsOf = (r) =>
       r.status === 'fulfilled' && r.value ? (Array.isArray(r.value) ? r.value : r.value.draws) : null
     const refetchIfStale = async (r, enabled, fn, maxAgeDays = 1) => {
+      if (!enabled) return r
       const list = drawsOf(r)
-      if (!enabled || !list?.length) return r
-      if (freshness(list[0], maxAgeDays).state !== 'stale') return r
-      await new Promise((ok) => setTimeout(ok, FRESH_RETRY_MS))
+      // 抓取直接失败（rejected/空）也要补抓一次：这是快乐8 卡片整张缺失的主因
+      const failed = !list?.length
+      if (!failed && freshness(list[0], maxAgeDays).state !== 'stale') return r
+      await new Promise((ok) => setTimeout(ok, failed ? 1200 : FRESH_RETRY_MS))
       const [again] = await Promise.allSettled([fn(100)])
       const retried = drawsOf(again)
       // 补抓没变新就保留原结果，至少还能发出去
@@ -1363,6 +1365,16 @@ export default async function handler(req, res) {
       test: isTest,
       sent,
       pushed: { kl8: !!kl8, fc3d: !!fc3d, pl3: !!pl3, pl5: !!pl5, ssq: !!ssq },
+      // 抓取失败原因（重试后仍失败才算），用于排查某彩种卡片整张缺失
+      fetchErrors: Object.entries({
+        kl8: kl8Res,
+        fc3d: fc3dRes,
+        pl3: pl3Res,
+        pl5: pl5Res,
+        ssq: ssqRes,
+      })
+        .filter(([, r]) => r.status === 'rejected')
+        .map(([g, r]) => `${g}: ${String(r.reason?.message || r.reason).slice(0, 120)}`),
       ai: { kl8: !!kl8Ai, fc3d: !!fc3dAi, pl3: !!pl3Ai, pl5: !!pl5Ai },
       hits,
       fresh,
