@@ -388,7 +388,13 @@ export default function FC3DAudit({
       {/* 核心指标 */}
       <div className="stat-grid stat-grid-4">
         <StatCard label="平均命中个数" value={audit.avgHits} unit="个" tone="red" note={`${audit.periods} 期`} />
-        <StatCard label="机选理论平均" value={audit.baseline} unit="个" tone="blue" note={`6 码中 ${digitCount} 的期望`} />
+        <StatCard
+          label="机选理论平均"
+          value={audit.baseline}
+          unit="个"
+          tone="blue"
+          note={digitCount === 7 ? '6 前区码 + 3 后区码的期望' : `6 码中 ${digitCount} 的期望`}
+        />
         <StatCard label="超出基准" value={(diff >= 0 ? '+' : '') + diff} unit="个" tone={Math.abs(diff) <= 0.3 ? 'amber' : 'red'} note="±0.3 以内即无差异" />
         <StatCard label="平均综合评分" value={avgScore} unit="分" tone="amber" note="满分 100" />
       </div>
@@ -417,6 +423,7 @@ export default function FC3DAudit({
               {audit.dist.map(({ k, count }) => {
                 // 机选期望：从 10 个里选 6 个，命中 k 个的概率
                 // P(k) = C(digitCount,k)*C(10-digitCount,6-k)/C(10,6)
+                // 七星彩为 7 位（含后区），不适用该组合公式，只展示实际次数
                 const c = (n, r) => {
                   if (r < 0 || r > n) return 0
                   let v = 1
@@ -424,14 +431,22 @@ export default function FC3DAudit({
                   return v
                 }
                 const p = (c(digitCount, k) * c(10 - digitCount, 6 - k)) / c(10, 6)
-                const expect = +(p * audit.periods).toFixed(1)
+                const expect = digitCount === 7 ? null : +(p * audit.periods).toFixed(1)
                 return (
                   <tr key={k}>
                     <td className="mono">中 {k} 个</td>
                     <td className="mono">{count}</td>
-                    <td className="mono muted">{expect}</td>
-                    <td className="mono" style={{ color: count - expect >= 0 ? 'var(--blue)' : 'var(--red)' }}>
-                      {(count - expect >= 0 ? '+' : '') + (count - expect).toFixed(1)}
+                    <td className="mono muted">{expect == null ? '—' : expect}</td>
+                    <td
+                      className="mono"
+                      style={{
+                        color:
+                          expect == null ? 'var(--ink-40)' : count - expect >= 0 ? 'var(--blue)' : 'var(--red)',
+                      }}
+                    >
+                      {expect == null
+                        ? '—'
+                        : (count - expect >= 0 ? '+' : '') + (count - expect).toFixed(1)}
                     </td>
                   </tr>
                 )

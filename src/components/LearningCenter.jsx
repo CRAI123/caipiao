@@ -8,7 +8,14 @@ import { Card, Note } from './common.jsx'
 import { readLearning, normEntropy } from '../lib/learning.js'
 import { KL8_PLAY } from '../lib/kl8Math.js'
 
-const GAME_LABEL = { kl8: '快乐8', fc3d: '福彩3D', pl3: '排列三', pl5: '排列五', dlt: '大乐透' }
+const GAME_LABEL = {
+  kl8: '快乐8',
+  fc3d: '福彩3D',
+  pl3: '排列三',
+  pl5: '排列五',
+  qxc: '七星彩',
+  dlt: '大乐透',
+}
 
 const SOURCE_LABEL = {
   'algo:v7': '算法 v7',
@@ -25,6 +32,7 @@ const HIT_SOURCES = {
   fc3d: ['ai:final', 'ai:site'],
   pl3: ['ai:final', 'ai:site'],
   pl5: ['ai:final', 'ai:site'],
+  qxc: ['ai:final', 'ai:site'],
   dlt: ['algo:dlt', 'ai:final', 'ai:site'],
 }
 
@@ -124,13 +132,15 @@ function buildHitChart(runs, game) {
     values: ids.map((id) => m.get(id) ?? null),
   }))
   const kl8Expected = +(KL8_PLAY * 0.25).toFixed(2)
-  const expected = game === 'kl8' ? kl8Expected : game === 'dlt' ? 0.71 : 0.3
+  const expected = game === 'kl8' ? kl8Expected : game === 'dlt' ? 0.71 : game === 'qxc' ? 0.67 : 0.3
   const expectedLabel =
     game === 'kl8'
       ? `随机期望 ${kl8Expected} 个`
       : game === 'dlt'
         ? '随机期望 0.71 前区'
-        : '随机期望 0.3 中/注'
+        : game === 'qxc'
+          ? '随机期望 0.67 位/注'
+          : '随机期望 0.3 中/注'
   return { columns: ids, series, expected, expectedLabel }
 }
 
@@ -204,7 +214,8 @@ const BATTLE_SKIP = ['hedge:experts', 'models:kl8', 'mix:kl8', 'signals:dlt']
 
 /** 近 60 期对战榜：各来源 期数 / 近10、近30期平均命中 / 跑赢随机期望比例 / 累计 logLoss */
 function buildBattleBoard(runs, game) {
-  const expected = game === 'kl8' ? +(KL8_PLAY * 0.25).toFixed(2) : game === 'dlt' ? 0.71 : 0.3
+  const expected =
+    game === 'kl8' ? +(KL8_PLAY * 0.25).toFixed(2) : game === 'dlt' ? 0.71 : game === 'qxc' ? 0.67 : 0.3
   const bySource = new Map()
   for (const r of runs) {
     if (BATTLE_SKIP.includes(r.source)) continue
@@ -610,7 +621,7 @@ function LearningCenterInner({ game }) {
   const historyCharts = useMemo(() => buildHistoryCharts(history), [history])
   const battle = useMemo(() => buildBattleBoard(runs, game), [runs, game])
   const digestNote = useMemo(() => (data?.notes || []).find((n) => n.meta?.kind === 'digest') || null, [data])
-  const isDigit = game === 'fc3d' || game === 'pl3' || game === 'pl5'
+  const isDigit = game === 'fc3d' || game === 'pl3' || game === 'pl5' || game === 'qxc'
 
   return (
     <div className="page">

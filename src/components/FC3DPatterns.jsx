@@ -39,6 +39,7 @@ export default function FC3DPatterns({ draws, stats = defaultStats }) {
   const primeDist = primeDistribution(draws, windowN)
 
   const recent = takeLatest(draws, 20)
+  const isQxc = draws?.[0]?.num?.length === 7
 
   return (
     <div className="page">
@@ -93,7 +94,7 @@ export default function FC3DPatterns({ draws, stats = defaultStats }) {
               <div className="fc3d-size-val">{sizeDist.midPct}%</div>
             </div>
             <div className="fc3d-size-item">
-              <div className="fc3d-size-name">大号 7-9</div>
+              <div className="fc3d-size-name">大号 {isQxc ? '7-14' : '7-9'}</div>
               <div className="fc3d-size-bar"><div style={{ width: `${sizeDist.bigPct}%`, background: '#1d6f3e' }} /></div>
               <div className="fc3d-size-val">{sizeDist.bigPct}%</div>
             </div>
@@ -102,12 +103,12 @@ export default function FC3DPatterns({ draws, stats = defaultStats }) {
         <Card title="质合分布" tag={`近 ${windowN} 期`}>
           <div className="fc3d-size-dist">
             <div className="fc3d-size-item">
-              <div className="fc3d-size-name">质数 1,2,3,5,7</div>
+              <div className="fc3d-size-name">质数 {isQxc ? '2,3,5,7,11,13' : '1,2,3,5,7'}</div>
               <div className="fc3d-size-bar"><div style={{ width: `${primeDist.primePct}%` }} /></div>
               <div className="fc3d-size-val">{primeDist.primePct}%</div>
             </div>
             <div className="fc3d-size-item">
-              <div className="fc3d-size-name">合数 0,4,6,8,9</div>
+              <div className="fc3d-size-name">合数 {isQxc ? '0,1,4,6,8,9,10,12,14' : '0,4,6,8,9'}</div>
               <div className="fc3d-size-bar"><div style={{ width: `${primeDist.compositePct}%`, background: '#2171d4' }} /></div>
               <div className="fc3d-size-val">{primeDist.compositePct}%</div>
             </div>
@@ -122,7 +123,7 @@ export default function FC3DPatterns({ draws, stats = defaultStats }) {
             return (
               <div key={d.id} className="fc3d-pattern-row">
                 <span className="mono muted">{String(d.id).slice(-4)}</span>
-                <span className="fc3d-pattern-num mono">{d.num.join('')}</span>
+                <span className="fc3d-pattern-num mono">{d.num.join(isQxc ? ' ' : '')}</span>
                 <span className="fc3d-tag">跨{a.span}</span>
                 <span className="fc3d-tag">和{a.sum}</span>
                 <span className="fc3d-tag">{a.oddPattern}</span>

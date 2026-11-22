@@ -544,10 +544,226 @@ export function buildPL5Messages(summary, label = '排列五', review = '') {
   ]
 }
 
-/** 调用大模型：settings = { llmBaseUrl, llmKey, llmModel } */
+// ============================================================
+// 七星彩（7 位：前 6 位 0–9 + 后区 0–14）专用
+// 单注中奖概率恒为 1/15,000,000，算法先按位置打分，AI 只在候选池内终选。
+// ============================================================
+
+const QXC_POS_NAMES = ['一位', '二位', '三位', '四位', '五位', '六位', '后区']
+const QXC_VALUES = [0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14]
+const qxcValuesOf = (pos) => (pos === 6 ? QXC_VALUES : QXC_VALUES.slice(0, 10))
+
+/** 七星彩近 n 期统计摘要（后区单独按 0–14 统计） */
+export function summarizeQxc(draws, n = 100) {
+  const picked = draws
+    .slice(0, Math.min(n, draws.length))
+    .filter(
+      (d) =>
+        Array.isArray(d.num) &&
+        d.num.length === 7 &&
+        d.num.slice(0, 6).every((v) => v >= 0 && v <= 9) &&
+        d.num[6] >= 0 &&
+        d.num[6] <= 14,
+    )
+  const total = picked.length
+  if (!total) return null
+  const chrono = [...picked].reverse()
+  const latest = picked[0]
+
+  const freq = Array.from({ length: 7 }, (_, p) => Array(qxcValuesOf(p).length).fill(0))
+  const freq30 = Array.from({ length: 7 }, (_, p) => Array(qxcValuesOf(p).length).fill(0))
+  const last = Array.from({ length: 7 }, (_, p) => Array(qxcValuesOf(p).length).fill(-1))
+  const trans = Array.from({ length: 7 }, (_, p) =>
+    Array.from({ length: qxcValuesOf(p).length }, () => Array(qxcValuesOf(p).length).fill(0)),
+  )
+
+  const sums = []
+  const spans = []
+  const oddDist = Array(8).fill(0)
+  const bigDist = Array(8).fill(0)
+  const formDist = {}
+  let repeated = 0
+
+  chrono.forEach((d, i) => {
+    d.num.forEach((v, p) => {
+      if (v >= freq[p].length) return
+      freq[p][v]++
+      last[p][v] = i
+      if (i >= total - 30) freq30[p][v]++
+      if (i > 0) trans[p][chrono[i - 1].num[p]][v]++
+    })
+    sums.push(d.num.reduce((a, b) => a + b, 0))
+    spans.push(Math.max(...d.num) - Math.min(...d.num))
+    oddDist[d.num.filter((v) => v % 2 === 1).length]++
+    bigDist[d.num.filter((v) => v >= 5).length]++
+    const uniq = new Set(d.num).size
+    const key = uniq === 1 ? '全同' : uniq === 7 ? '全不同' : `${uniq}种数字`
+    formDist[key] = (formDist[key] || 0) + 1
+    if (uniq < 7) repeated++
+  })
+
+  const omit = Array.from({ length: 7 }, (_, p) =>
+    Array.from({ length: qxcValuesOf(p).length }, (_, d) => total - 1 - last[p][d]),
+  )
+  const maxOmit = Array.from({ length: 7 }, (_, p) => Math.max(1, ...omit[p]))
+  const lastNum = latest.num
+
+  // 位置权重：近 100 期 35% + 近 30 期 30% + 遗漏 15% + 上期同位转移 20%
+  const score = Array.from({ length: 7 }, (_, p) =>
+    Array.from({ length: qxcValuesOf(p).length }, (_, d) => {
+      const from = lastNum[p]
+      const transTotal = trans[p][from].reduce((a, b) => a + b, 0) || 1
+      const base = qxcValuesOf(p).length
+      return (
+        0.35 * (freq[p][d] / total) * base +
+        0.3 * (freq30[p][d] / Math.min(30, total)) * base +
+        0.15 * (omit[p][d] / maxOmit[p]) +
+        0.2 * (trans[p][from][d] / transTotal) * base
+      )
+    }),
+  )
+  const topDigits = score.map((arr, p) =>
+    arr
+      .map((v, d) => ({ d, v }))
+      .sort((a, b) => b.v - a.v)
+      .slice(0, p === 6 ? 4 : 3)
+      .map((x) => x.d),
+  )
+
+  // 候选：前 6 位各取前 3 + 后区前 4，共 3⁶ × 4 = 2916 注，按分数排序
+  const straight = []
+  const walk = (pos, acc, v) => {
+    if (pos === 7) {
+      straight.push({ num: [...acc], v })
+      return
+    }
+    for (const d of topDigits[pos]) walk(pos + 1, [...acc, d], v + score[pos][d])
+  }
+  walk(0, [], 0)
+  straight.sort((a, b) => b.v - a.v)
+
+  const frontScore = Array.from({ length: 10 }, (_, d) =>
+    score.slice(0, 6).reduce((s, arr) => s + arr[d], 0) / 6,
+  )
+  const backScore = score[6]
+
+  const sortedSums = [...sums].sort((a, b) => a - b)
+  const q = (r) => sortedSums[Math.min(total - 1, Math.floor(total * r))]
+  const sortedSpans = [...spans].sort((a, b) => a - b)
+  const qs = (r) => sortedSpans[Math.min(total - 1, Math.floor(total * r))]
+  const avg = (arr) => arr.reduce((a, b) => a + b, 0) / arr.length
+
+  return {
+    qxc: true,
+    total,
+    latest,
+    freq,
+    freq30,
+    omit,
+    topDigits,
+    sum: { min: Math.min(...sums), max: Math.max(...sums), avg: +avg(sums).toFixed(1), p30: q(0.3), p70: q(0.7) },
+    span: { avg: +avg(spans).toFixed(1), p30: qs(0.3), p70: qs(0.7) },
+    oddDist,
+    bigDist,
+    formDist,
+    repeatRate: Math.round((repeated / total) * 100),
+    candidates: {
+      straight: straight.slice(0, 24).map((x) => x.num.join(' ')),
+      back: topDigits[6],
+    },
+    straightAll: straight,
+    posScore: score,
+    frontScore,
+    backScore,
+  }
+}
+
+/** 七星彩候选排序（只枚举每位 Top 候选，避免 10^7 全量） */
+export function rankQXCCandidates(summary) {
+  if (!summary?.posScore) return null
+  const straight = summary.straightAll || []
+  return { straight }
+}
+
+/** 七星彩候选池：默认前 24 注，供 AI 终选 5 注 */
+export function qxcCandidatePool(summary, limits = { straight: 24 }) {
+  const rank = rankQXCCandidates(summary)
+  if (!rank) return { straight: [] }
+  return { straight: rank.straight.slice(0, limits.straight).map((x) => x.num.join(' ')) }
+}
+
+const QXC_SYSTEM_PROMPT = `你是「研彩室」的彩票数据分析助手，服务对象是研究者本人。你只做两件事：解读最近 100 期的历史统计，以及结合底层算法的评分复核号码并说明依据。
+
+【铁律】
+1. 只能使用用户消息里给出的统计数据，不得编造统计数字，不得引入外部资料。
+2. 七星彩每期从 15,000,000 个等可能结果中产生（前 6 位 0–9、后区 0–14），单注中奖概率恒为 1/15,000,000，与你选什么号无关。开奖相互独立，不存在可利用的「规律」「趋势」「必出胆码」。
+3. 你不得声称任何组合更容易中奖，不得承诺命中，不得鼓励加大投入或追号。
+4. 选号流程固定为「算法先选、AI 终选」：程序已按 7 个位置的频率/遗漏/同位转移打分，并给出算法候选池（24 注）。你必须只在这个候选池内终选，不得自创池外号码。
+5. 必须明确说明：以下是历史分布下的参考组合，不改变中奖概率，彩票期望回报为负。一、二等奖为浮动奖金。
+
+【输出结构】（简体中文，纯文本，不要 Markdown 表格）
+1. 结构概览：近 100 期和值/跨度区间、奇偶与大小分布、不同数字个数形态与重号比例
+2. 位置观察：前 6 位与后区的高频、遗漏情况，一句话即可，不做预测
+3. 组合参考：给出 5 注直选（7 位，后区写 0–14），逐注写明「算法排名 + 结构依据」
+4. 风险提示：预算上限与理性购彩提醒`
+
+/** 组装七星彩 messages（纯函数，便于离线校验）；review = 上期复盘结论，可选 */
+export function buildQXCMessages(summary, label = '七星彩', review = '') {
+  if (!summary) return null
+  const s = summary
+  const fmtPos = (name, p) =>
+    `- ${name}：近100期 ${s.freq[p].map((c, d) => `${d}:${c}`).join(' ')}；近30期 ${s.freq30[p]
+      .map((c, d) => `${d}:${c}`)
+      .join(' ')}；当前遗漏 ${s.omit[p].map((c, d) => `${d}:${c}`).join(' ')}；倾向数字 ${s.topDigits[p].join(
+      '、',
+    )}`
+  const rank = rankQXCCandidates(s)
+  const fmtAlgo = (arr, n) =>
+    (arr || [])
+      .slice(0, n)
+      .map((x) => `${x.num.join(' ')}(${x.v.toFixed(2)})`)
+      .join('；')
+  const lines = [
+    `${label} 近 ${s.total} 期统计（程序计算，真实数据）：`,
+    `- 最新一期：第 ${s.latest.id} 期，开奖 ${s.latest.num.join(' ')}`,
+    `- 和值：均值 ${s.sum.avg}，30%–70% 分位 ${s.sum.p30}–${s.sum.p70}，区间 ${s.sum.min}–${s.sum.max}`,
+    `- 跨度：均值 ${s.span.avg}，30%–70% 分位 ${s.span.p30}–${s.span.p70}`,
+    `- 奇数个数分布（0–7 个）：${s.oddDist.join(' / ')} 期`,
+    `- 大数(5–14)个数分布（0–7 个）：${s.bigDist.join(' / ')} 期`,
+    `- 形态：${Object.entries(s.formDist)
+      .map(([f, c]) => `${f} ${c} 期`)
+      .join('、')}；含重号 ${s.repeatRate}%`,
+    '位置分布：',
+    ...QXC_POS_NAMES.map((name, p) => fmtPos(name, p)),
+    '',
+    '底层算法评分（频率35% + 近30期30% + 遗漏15% + 同位转移20%），候选池 24 注：',
+    `- 直选候选池：${fmtAlgo(rank?.straight, 24)}`,
+    '',
+    ...(review
+      ? [
+          '【上期复盘（程序对照上一期实际开奖计算）】',
+          String(review).slice(0, 800),
+          '请结合上面的偏差修正本期选号：在候选池内优先结构与修正方向一致的组合；不得因此声称提高中奖概率，也不得承诺命中。',
+          '',
+        ]
+      : []),
+    '请按系统提示词的结构输出：从上面的候选池里终选 5 注直选，不得自创池外号码。',
+  ]
+  return [
+    { role: 'system', content: QXC_SYSTEM_PROMPT },
+    { role: 'user', content: lines.join('\n') },
+  ]
+}
+
+
 export async function analyzeDigit(settings, { summary, label, digitCount = 3 }) {
   if (!settings?.llmKey) throw new Error('尚未配置大模型 API Key，请先到「设置」页填写')
-  const messages = digitCount === 5 ? buildPL5Messages(summary, label) : buildDigitMessages(summary, label)
+  const messages =
+    digitCount === 7
+      ? buildQXCMessages(summary, label)
+      : digitCount === 5
+        ? buildPL5Messages(summary, label)
+        : buildDigitMessages(summary, label)
   if (!messages) throw new Error('历史数据不足，至少需要 10 期')
   const base = String(settings.llmBaseUrl || 'https://api.deepseek.com').replace(/\/+$/, '')
   const res = await fetch(`${base}/chat/completions`, {

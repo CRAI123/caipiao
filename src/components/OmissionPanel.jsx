@@ -1,7 +1,7 @@
 // 定位号码 K 线：按「单个号码」看走势（红柱=当期开出，绿柱=未开出，柱高=遗漏）
 // 指标口径与行情软件一致：布林通道、KDJ(9,3,3)、MACD(12,26,9)
 // 3D / 排列三：按 百 / 十 / 个 位切换 0–9；快乐8：1–80 任选；大乐透：前区 1–35 / 后区 1–12
-import React, { useMemo, useState } from 'react'
+import React, { useEffect, useMemo, useState } from 'react'
 import { Card, Note } from './common.jsx'
 import OmissionChart from './OmissionChart.jsx'
 import { omissionReading, omissionSeries, DEFAULT_PRESET } from '../lib/kline.js'
@@ -38,7 +38,7 @@ export default function OmissionPanel({
   preset = DEFAULT_PRESET,
   positions = POS_LABEL,
 }) {
-  const isDigit = lottery === 'fc3d' || lottery === 'pl3' || lottery === 'pl5'
+  const isDigit = lottery === 'fc3d' || lottery === 'pl3' || lottery === 'pl5' || lottery === 'qxc'
   const isDlt = lottery === 'dlt'
   const [pos, setPos] = useState(0)
   const [digit, setDigit] = useState(0)
@@ -46,6 +46,11 @@ export default function OmissionPanel({
   const [num, setNum] = useState(1)
   const [sortKey, setSortKey] = useState('default')
   const [filterKey, setFilterKey] = useState('all')
+  const digitMax = lottery === 'qxc' && pos === 6 ? 14 : 9
+  // 切换彩种后位置数可能变少（七星彩 7 位 → 排列五 5 位），把越界的位置拉回 0
+  useEffect(() => {
+    if (pos >= positions.length) setPos(0)
+  }, [pos, positions.length])
 
   const maxNum = isDlt ? (kind === 'front' ? 35 : 12) : 80
   const selNum = Math.min(num, maxNum)
@@ -63,11 +68,11 @@ export default function OmissionPanel({
   // 3D / 排列三：该位置 0–9 的读数总表（与讲义附录的表 2 同口径）
   const tableRows = useMemo(() => {
     if (!isDigit) return []
-    return Array.from({ length: 10 }, (_, d) => {
+    return Array.from({ length: digitMax + 1 }, (_, d) => {
       const r = omissionReading(omissionSeries(draws, (x) => x.num[pos] === d, windowN), preset)
       return { digit: d, ...(r || {}) }
     })
-  }, [isDigit, draws, pos, windowN, preset])
+  }, [isDigit, draws, pos, windowN, preset, digitMax])
 
   // 排序 + 筛选只作用于展示，不改动任何数值
   const viewRows = useMemo(() => {
@@ -112,7 +117,14 @@ export default function OmissionPanel({
       <div className="toolbar" style={{ marginBottom: 10 }}>
         {isDigit &&
           positions.map((label, i) => (
-            <button key={label} className={`tab-btn ${pos === i ? 'active' : ''}`} onClick={() => setPos(i)}>
+            <button
+              key={label}
+              className={`tab-btn ${pos === i ? 'active' : ''}`}
+              onClick={() => {
+                setPos(i)
+                if (lottery !== 'qxc' || i !== 6) setDigit((d) => Math.min(d, 9))
+              }}
+            >
               {label}
             </button>
           ))}
@@ -128,7 +140,7 @@ export default function OmissionPanel({
         )}
         <span className="toolbar-sep" />
         {isDigit ? (
-          Array.from({ length: 10 }, (_, d) => (
+          Array.from({ length: digitMax + 1 }, (_, d) => (
             <button key={d} className={`tab-btn ${digit === d ? 'active' : ''}`} onClick={() => setDigit(d)}>
               {d}
             </button>

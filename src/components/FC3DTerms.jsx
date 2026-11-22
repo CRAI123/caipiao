@@ -124,8 +124,68 @@ const PL5_TERMS = [
   },
 ]
 
-export default function FC3DTerms({ label = '福彩3D', digitCount = 3 }) {
-  const groups = digitCount === 5 ? PL5_TERMS : TERMS
+const QXC_TERMS = [
+  {
+    title: '号码结构',
+    items: [
+      { name: '前区', desc: '第 1–6 位，每位取值 0–9', example: '例：7 2 4 7 6 3' },
+      { name: '后区', desc: '第 7 位，取值 0–14', example: '例：14' },
+      { name: '号码总数', desc: '前 6 位 10⁶ 种 × 后区 15 种', example: '共 15,000,000 种' },
+      { name: '全不同', desc: '7 个位置上的数字互不相同', example: '例：1 2 3 4 5 6 7' },
+    ],
+  },
+  {
+    title: '数值类',
+    items: [
+      { name: '跨度', desc: '7 个数字里最大数 − 最小数', example: '范围 0 – 14' },
+      { name: '和值', desc: '7 个数字相加的总和（后区按实际数值计入）', example: '范围 0 – 68，理论均值 34' },
+      { name: '合值', desc: '和值取个位', example: '例：7 2 4 7 6 3 14，和值 43，合值 3' },
+    ],
+  },
+  {
+    title: '奇偶与大小',
+    items: [
+      { name: '奇偶形态', desc: '7 个位置区分奇偶，共 2⁷ = 128 种组合形态', example: '奇奇偶偶奇偶奇……' },
+      { name: '小号', desc: '0、1、2', example: '' },
+      { name: '中号', desc: '3、4、5、6', example: '' },
+      { name: '大号', desc: '7–14（后区 10–14 归入大号）', example: '' },
+    ],
+  },
+  {
+    title: '质数、合数（彩民常用划分）',
+    items: [
+      { name: '质数', desc: '2、3、5、7、11、13（后区同样适用）', example: '' },
+      { name: '合数', desc: '0、1、4、6、8、9、10、12、14', example: '' },
+    ],
+  },
+  {
+    title: '玩法与奖级',
+    items: [
+      { name: '直选', desc: '7 位号码与开奖逐位完全相同，单注 2 元', example: '唯一玩法' },
+      { name: '复式', desc: '前 6 位与后区分别多选号码，注数为各位置选择数连乘', example: '2×2×2×2×2×2×2 = 128 注' },
+      { name: '一等奖', desc: '7 位全部相同', example: '浮动奖，按 500 万估算' },
+      { name: '二等奖', desc: '前 6 位全部相同（后区不同）', example: '浮动奖，按 4 万估算' },
+      { name: '三等奖', desc: '前 6 位任意 5 位相同 + 后区相同', example: '3,000 元' },
+      { name: '四等奖', desc: '前 6 位任意 5 位相同（后区不同）或前 6 位任意 4 位相同 + 后区相同', example: '500 元' },
+      { name: '五等奖', desc: '前 6 位任意 4 位相同（后区不同）或前 6 位任意 3 位相同 + 后区相同', example: '30 元' },
+      { name: '六等奖', desc: '前 6 位任意 3 位相同（后区不同）或前 2 位相同 + 后区相同等', example: '5 元' },
+      { name: '中奖概率', desc: '15,000,000 种等概率结果，总中奖率 8.146%', example: '一等奖 1 / 15,000,000' },
+    ],
+  },
+  {
+    title: '其他常用概念',
+    items: [
+      { name: '遗漏', desc: '某个号码或者某种形态，距离上次开出间隔的期数', example: '' },
+      { name: '冷热号', desc: '热号 = 近期频繁开出的号码；冷号 = 很久没有开出的号码', example: '' },
+      { name: '重号', desc: '本期与上期开奖中重复出现的数字个数', example: '' },
+      { name: '邻号', desc: '与上期某个数字相差 1 的号码', example: '上期有 5，则 4、6 为邻号' },
+    ],
+  },
+]
+
+export default function FC3DTerms({ label = '福彩3D', digitCount = 3, game = 'fc3d' }) {
+  const groups =
+    game === 'qxc' || digitCount === 7 ? QXC_TERMS : digitCount === 5 ? PL5_TERMS : TERMS
   return (
     <div className="page">
       <Card title="术语大全" tag={`${label} 常用术语参考`}>

@@ -300,7 +300,14 @@ export default function Journal({ draws }) {
       <Card title="账本工具" tag="云数据库 / 飞书多维表格">
         <div className="toolbar">
           <span className="toolbar-label">彩种筛选</span>
-          {[['all', '全部'], ['kl8', LOTTERY_LABEL.kl8], ['fc3d', LOTTERY_LABEL.fc3d], ['pl3', LOTTERY_LABEL.pl3]].map(([k, label]) => (
+          {[
+            ['all', '全部'],
+            ['kl8', LOTTERY_LABEL.kl8],
+            ['fc3d', LOTTERY_LABEL.fc3d],
+            ['pl3', LOTTERY_LABEL.pl3],
+            ['pl5', LOTTERY_LABEL.pl5],
+            ['qxc', LOTTERY_LABEL.qxc],
+          ].map(([k, label]) => (
             <button
               key={k}
               className={`mode-btn ${lotFilter === k ? 'active' : ''}`}

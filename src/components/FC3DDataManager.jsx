@@ -4,27 +4,27 @@ import { Card, Note } from './common.jsx'
 import { FC3D_DRAWS } from '../data/fc3d.js'
 import { fetchFc3dDraws } from '../lib/fc3d.js'
 
-/** 解析用户粘贴的福彩3D / 排列五历史文本：每行一期，期号 日期 各位数字 */
-function parseFc3dText(text, digitCount = 3) {
+/** 解析用户粘贴的福彩3D / 排列五 / 七星彩历史文本：每行一期，期号 日期 各位数字 */
+function parseFc3dText(text, digitCount = 3, maxValues = null) {
   const lines = text.split(/\r?\n/).map((l) => l.trim()).filter(Boolean)
   const draws = []
   const errors = []
+  const maxFor = (i) => (maxValues && maxValues[i] != null ? maxValues[i] : 9)
   lines.forEach((line, idx) => {
     // 支持：期号,日期,1,2,3  或  期号 日期 1 2 3  或  期号 123  或  123
     const parts = line.split(/[\s,，]+/).filter(Boolean)
     if (parts.length < 1) return
-    // 尝试找期号（纯数字且长度>=4）
+    // 尝试找期号（纯数字且长度>=4；七星彩的 8 位连写号码不当作期号）
     let id = null
     let date = null
-    let digits = null
     const numIdx = []
     for (let i = 0; i < parts.length; i++) {
       const p = parts[i]
-      if (/^\d{4,}$/.test(p) && id === null) {
+      if (id === null && /^\d{4,}$/.test(p) && !(digitCount === 7 && p.length === 8)) {
         id = Number(p)
       } else if (/^\d{4}-\d{1,2}-\d{1,2}$/.test(p)) {
         date = p
-      } else if (/^\d{1,5}$/.test(p)) {
+      } else if (/^\d+$/.test(p)) {
         numIdx.push(p)
       }
     }
@@ -33,18 +33,25 @@ function parseFc3dText(text, digitCount = 3) {
       errors.push(`第 ${idx + 1} 行缺少期号：${line}`)
       return
     }
-    // 解析号码：可能是 "123" 连续，或 "1 2 3" 分开
+    // 解析号码：可能是 "123" / "72476314" 连续，或 "1 2 3" 分开
+    let digits = null
     if (numIdx.length === 1 && numIdx[0].length === digitCount) {
       digits = numIdx[0].split('').map(Number)
+    } else if (numIdx.length === 1 && digitCount === 7 && numIdx[0].length === 8) {
+      const arr = numIdx[0].split('').map(Number)
+      digits = [arr[0], arr[1], arr[2], arr[3], arr[4], arr[5], arr[6] * 10 + arr[7]]
     } else if (numIdx.length === digitCount) {
       digits = numIdx.map(Number)
     } else {
       errors.push(`第 ${idx + 1} 行号码格式错误（应为 ${digitCount} 个数字）：${line}`)
       return
     }
-    if (digits.some((d) => !Number.isInteger(d) || d < 0 || d > 9)) {
-      errors.push(`第 ${idx + 1} 行号码超出 0-9：${line}`)
-      return
+    for (let i = 0; i < digits.length; i++) {
+      const max = maxFor(i)
+      if (!Number.isInteger(digits[i]) || digits[i] < 0 || digits[i] > max) {
+        errors.push(`第 ${idx + 1} 行第 ${i + 1} 位超出 0-${max}：${line}`)
+        return
+      }
     }
     draws.push({ id, date: date || null, num: digits })
   })
@@ -63,6 +70,7 @@ export default function FC3DDataManager({
   sourceName = '中国福彩官网开奖公告',
   digitCount = 3,
   positions = ['百', '十', '个'],
+  maxValues = null,
 }) {
   const [text, setText] = useState('')
   const [errors, setErrors] = useState([])
@@ -87,7 +95,7 @@ export default function FC3DDataManager({
   }
 
   function doImport() {
-    const { draws: parsed, errors: errs } = parseFc3dText(text, digitCount)
+    const { draws: parsed, errors: errs } = parseFc3dText(text, digitCount, maxValues)
     setErrors(errs)
     if (parsed.length) {
       setDraws(parsed)
@@ -145,7 +153,9 @@ export default function FC3DDataManager({
             placeholder={
               digitCount === 3
                 ? '2024300,2024-11-05,3,7,2\n2024301 2024-11-06 8 1 5\n2024302 049'
-                : '26306,2026-11-15,0,3,2,4,3\n26307 2026-11-16 7 1 4 9 6\n26308 03183'
+                : digitCount === 5
+                  ? '26306,2026-11-15,0,3,2,4,3\n26307 2026-11-16 7 1 4 9 6\n26308 03183'
+                  : '26134,2026-11-15,7,2,4,7,6,3,14\n26135 2026-11-16 1 9 3 5 2 8 12\n26136 72476314'
             }
             value={text}
             onChange={(e) => setText(e.target.value)}

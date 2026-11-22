@@ -65,13 +65,14 @@ function buildSeries(lottery, chrono) {
     ]
   }
 
-  // 福彩3D / 排列三 / 排列五
+  // 福彩3D / 排列三 / 排列五 / 七星彩
   const isPl5 = lottery === 'pl5'
+  const isQxc = lottery === 'qxc'
   return [
     {
       key: 'sum',
       title: '和值 K 线',
-      tag: isPl5 ? '0 – 45' : '0 – 27',
+      tag: isQxc ? '0 – 68' : isPl5 ? '0 – 45' : '0 – 27',
       unit: '',
       wick: 0.5,
       points: chrono.map((d) => ({
@@ -80,14 +81,16 @@ function buildSeries(lottery, chrono) {
         value: sumOf(d.num),
         span: spanOf(d.num),
       })),
-      hint: isPl5
-        ? '和值理论均值 22.5。开=上期和值、收=本期和值，影线取本期跨度的 0.5 倍，颜色红涨绿跌。'
-        : '和值理论均值 13.5。开=上期和值、收=本期和值，影线取本期跨度的 0.5 倍，颜色红涨绿跌。',
+      hint: isQxc
+        ? '七星彩和值把后区 0–14 也计入，理论均值 34、范围 0–68。开=上期和值、收=本期和值，影线取本期跨度的 0.5 倍。'
+        : isPl5
+          ? '和值理论均值 22.5。开=上期和值、收=本期和值，影线取本期跨度的 0.5 倍，颜色红涨绿跌。'
+          : '和值理论均值 13.5。开=上期和值、收=本期和值，影线取本期跨度的 0.5 倍，颜色红涨绿跌。',
     },
     {
       key: 'span',
       title: '跨度 K 线',
-      tag: '0 – 9',
+      tag: isQxc ? '0 – 14' : '0 – 9',
       unit: '',
       wick: 0,
       points: chrono.map((d) => ({
@@ -96,9 +99,11 @@ function buildSeries(lottery, chrono) {
         value: spanOf(d.num),
         span: 0,
       })),
-      hint: isPl5
-        ? '跨度 = 最大号 − 最小号，取值 0 – 9。跨度序列本身波动大，均线只用于看区间漂移。'
-        : '跨度 = 最大号 − 最小号，理论均值约 6.3。跨度序列本身波动大，均线只用于看区间漂移。',
+      hint: isQxc
+        ? '跨度 = 最大号 − 最小号，后区参与计算，取值 0 – 14。均线只用于看区间漂移。'
+        : isPl5
+          ? '跨度 = 最大号 − 最小号，取值 0 – 9。跨度序列本身波动大，均线只用于看区间漂移。'
+          : '跨度 = 最大号 − 最小号，理论均值约 6.3。跨度序列本身波动大，均线只用于看区间漂移。',
     },
   ]
 }
@@ -191,7 +196,8 @@ export default function KlinePage({ lottery, draws, positions = POS_LABEL }) {
     [draws, trendN],
   )
 
-  const isDigit = lottery === 'fc3d' || lottery === 'pl3' || lottery === 'pl5'
+  const isDigit = lottery === 'fc3d' || lottery === 'pl3' || lottery === 'pl5' || lottery === 'qxc'
+  const posCur = Math.min(pos, positions.length - 1)
 
   const digitPoints = useMemo(
     () =>
@@ -200,10 +206,10 @@ export default function KlinePage({ lottery, draws, positions = POS_LABEL }) {
             id: d.id ?? d.drawId,
             date: d.date,
             label: d.id ?? d.drawId,
-            hits: [d.num[pos]],
+            hits: [d.num[posCur]],
           }))
         : [],
-    [trendPoints, pos, isDigit],
+    [trendPoints, posCur, isDigit],
   )
 
   const kl8Points = useMemo(
@@ -318,14 +324,16 @@ export default function KlinePage({ lottery, draws, positions = POS_LABEL }) {
         <Card title={`号码走势连线（${positions.join(' / ')}）`} tag={`近 ${trendN} 期`}>
           <div className="toolbar" style={{ marginBottom: 10 }}>
             {positions.map((label, i) => (
-              <button key={label} className={`tab-btn ${pos === i ? 'active' : ''}`} onClick={() => setPos(i)}>
+              <button key={label} className={`tab-btn ${posCur === i ? 'active' : ''}`} onClick={() => setPos(i)}>
                 {label}
               </button>
             ))}
-            <span className="toolbar-note">换位置只需切换按钮，行 = 数字 0–9，列 = 期次</span>
+            <span className="toolbar-note">
+              换位置只需切换按钮，行 = 数字 0–9{lottery === 'qxc' ? '（后区为 0–14）' : ''}，列 = 期次
+            </span>
           </div>
           <NumberTrend
-            rows={Array.from({ length: 10 }, (_, i) => i)}
+            rows={Array.from({ length: lottery === 'qxc' && posCur === 6 ? 15 : 10 }, (_, i) => i)}
             points={digitPoints}
             colorFor={() => RANGE_COLOR.red}
           />

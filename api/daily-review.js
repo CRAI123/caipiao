@@ -10,6 +10,7 @@ import { fetchKl8Draws } from './_lib/kl8.js'
 import { fetchFc3dDraws } from './_lib/fc3d.js'
 import { fetchPl3Draws } from './_lib/pl3.js'
 import { fetchPl5Draws } from './_lib/pl5.js'
+import { fetchQxcDraws } from './_lib/qxc.js'
 import { fetchDltDraws } from './_lib/dlt.js'
 import { resolveLlmSettings, callAi } from './_lib/ai.js'
 import { prizeFor } from '../src/lib/stats.js'
@@ -28,8 +29,15 @@ import { KL8_PLAY, KL8_PLAY_LABEL } from '../src/lib/kl8Math.js'
 export const config = { maxDuration: 60 }
 
 const PLAY = KL8_PLAY // 快乐8 默认玩法：选六（与每日推送同口径）
-const GAMES = ['kl8', 'fc3d', 'pl3', 'pl5', 'dlt']
-const GAME_LABEL = { kl8: '快乐8', fc3d: '福彩3D', pl3: '排列三', pl5: '排列五', dlt: '大乐透' }
+const GAMES = ['kl8', 'fc3d', 'pl3', 'pl5', 'qxc', 'dlt']
+const GAME_LABEL = {
+  kl8: '快乐8',
+  fc3d: '福彩3D',
+  pl3: '排列三',
+  pl5: '排列五',
+  qxc: '七星彩',
+  dlt: '大乐透',
+}
 
 export default async function handler(req, res) {
   if (applyCors(req, res)) return
@@ -53,14 +61,22 @@ export default async function handler(req, res) {
       fn(100)
         .then((r) => (Array.isArray(r) ? r : Array.isArray(r?.draws) ? r.draws : []))
         .catch(() => [])
-    const [kl8Draws, fc3dDraws, pl3Draws, pl5Draws, dltDraws] = await Promise.all([
+    const [kl8Draws, fc3dDraws, pl3Draws, pl5Draws, qxcDraws, dltDraws] = await Promise.all([
       safeFetch(fetchKl8Draws),
       safeFetch(fetchFc3dDraws),
       safeFetch(fetchPl3Draws),
       safeFetch(fetchPl5Draws),
+      safeFetch(fetchQxcDraws),
       safeFetch(fetchDltDraws),
     ])
-    const drawMap = { kl8: kl8Draws, fc3d: fc3dDraws, pl3: pl3Draws, pl5: pl5Draws, dlt: dltDraws }
+    const drawMap = {
+      kl8: kl8Draws,
+      fc3d: fc3dDraws,
+      pl3: pl3Draws,
+      pl5: pl5Draws,
+      qxc: qxcDraws,
+      dlt: dltDraws,
+    }
 
     // 快乐8 当期复盘提前并发（不依赖学习结果），否则串在末尾容易把整轮拖过 60s 上限
     const reviewTask = kl8Draws[0]
@@ -361,7 +377,7 @@ async function generateAdvice(llm, sql, learning) {
 
 /** 预生成次日 AI 终选（14:00 推送直接读缓存）；任何失败都静默降级，不影响学习主流程 */
 async function prewarmNext(llm, sql, drawMap, afterOf) {
-  const out = { kl8: null, fc3d: null, pl3: null, pl5: null }
+  const out = { kl8: null, fc3d: null, pl3: null, pl5: null, qxc: null }
   const failed = {}
   const tasks = []
 
@@ -400,6 +416,7 @@ async function prewarmNext(llm, sql, drawMap, afterOf) {
     ['fc3d', '福彩3D'],
     ['pl3', '排列三'],
     ['pl5', '排列五'],
+    ['qxc', '七星彩'],
   ]) {
     const d = drawMap[g]
     if (!Array.isArray(d) || d.length < 2) continue

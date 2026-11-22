@@ -57,7 +57,10 @@ export default function FC3DRepeats({ draws, stats = defaultStats, digitCount = 
               <span className="mono muted">{String(curr.id).slice(-4)}</span>
               <span className="fc3d-repeat-num mono">
                 {curr.num.map((d, i) => (
-                  <span key={i} className={common.includes(d) ? 'fc3d-repeat-hit' : ''}>{d}</span>
+                  <span key={i}>
+                    {i > 0 ? ' ' : ''}
+                    <span className={common.includes(d) ? 'fc3d-repeat-hit' : ''}>{d}</span>
+                  </span>
                 ))}
               </span>
               <span className="muted">重号 {common.length} 个</span>

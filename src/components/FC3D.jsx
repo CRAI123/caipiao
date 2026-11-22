@@ -145,7 +145,7 @@ export default function FC3D({
     if (!learning || learning.source === 'none' || learning.coldStart) return null
     const experts = engine.FC3D_EXPERTS || engine.PRO_EXPERTS
     if (!experts) return null
-    const npos = game === 'pl5' ? 5 : 3
+    const npos = game === 'qxc' ? 7 : game === 'pl5' ? 5 : 3
     const fams = []
     let n = Infinity
     for (let pos = 0; pos < npos; pos++) {
@@ -170,7 +170,8 @@ export default function FC3D({
     !!learnW &&
     ((game === 'fc3d' && fn.predict === 'predictFC3Dv2') ||
       (game === 'pl3' && fn.predict === 'predictPL3Pro') ||
-      (game === 'pl5' && fn.predict === 'predictPL5'))
+      (game === 'pl5' && fn.predict === 'predictPL5') ||
+      (game === 'qxc' && fn.predict === 'predictQXC'))
 
   const pred = useMemo(
     () =>
@@ -436,6 +437,38 @@ export default function FC3D({
           ))}
         </div>
       </div>
+
+      {/* 七星彩后区（0–14） */}
+      {pred.backTop && (
+        <div className="odd-card">
+          <div className="odd-card-head">
+            <h3>后区推荐（0 – 14）</h3>
+            <span className="muted small">后区独立建模 · 与前 6 位概率结构不同</span>
+          </div>
+          <div className="predict-row">
+            <div className="predict-label">后区 Top3</div>
+            <div className="predict-value">
+              {pred.backTop.map((d) => (
+                <DigitBall key={`back-${d}`} d={d} omit={pred.omitBack?.[d] ?? 0} />
+              ))}
+            </div>
+          </div>
+          <div className="predict-row">
+            <div className="predict-label">后区排名</div>
+            <div className="predict-value">
+              {pred.backRanked.slice(0, 8).map((r) => (
+                <span key={`backrank-${r.digit}`} className="digit-ball small" title={`遗漏 ${r.omit} 期`}>
+                  {r.digit}
+                  <em>{r.omit}</em>
+                </span>
+              ))}
+            </div>
+          </div>
+          <div className="muted small" style={{ marginTop: 8 }}>
+            后区只有 15 个取值，单号随机概率 1/15 ≈ 6.67%；推荐只表示模型在候选集内的相对排序。
+          </div>
+        </div>
+      )}
 
       {/* 覆盖档位：6/7/8 码，命中与成本一目了然 */}
       {showTiers && pred.tiers && (
@@ -953,7 +986,9 @@ export default function FC3D({
 
       {/* 全部数字评分 */}
       <div className="digit-scores">
-        <div className="predict-label">0-9 综合评分（含遗漏期数）</div>
+        <div className="predict-label">
+          {game === 'qxc' ? '前区 0-9 综合评分' : '0-9 综合评分'}（含遗漏期数）
+        </div>
         <div className="digit-score-row">
           {pred.ranked.map((r) => (
             <div key={r.digit} className={`digit-score ${pred.hot.includes(r.digit) ? 'hot' : ''} ${pred.cold.includes(r.digit) ? 'cold' : ''}`}>

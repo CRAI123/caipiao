@@ -238,3 +238,55 @@ export const PL5_PRIZES = [
     shapeShare: null,
   },
 ]
+
+// ---------------------------------------------------------------
+// 七星彩：前 6 位 0–9 + 后区 0–14，共 10⁶ × 15 = 15,000,000 个等可能号码
+// ---------------------------------------------------------------
+//
+// 六奖级互斥，按一→六顺序判定。组合数核对：
+//   一等奖 1
+//   二等奖 14
+//   三等奖 C(6,5)×9 = 54
+//   四等奖 C(6,5)×9×14 + C(6,4)×9² = 756 + 1215 = 1971
+//   五等奖 C(6,4)×9²×14 + C(6,3)×9³ = 17010 + 14580 = 31590
+//   六等奖 C(6,3)×9³×14 + C(6,2)×9⁴ + C(6,1)×9⁵ + 9⁶
+//          = 204120 + 98415 + 354294 + 531441 = 1188270
+//   合计 1,221,900 / 15,000,000 = 8.146%
+
+export const QXC_TOTAL = 15000000
+
+function qxcRow(level, condition, combos, prize, floating = false, prizeNote = '') {
+  const prob = combos / QXC_TOTAL
+  return {
+    level,
+    name: level,
+    condition,
+    combos,
+    prob,
+    oneIn: 1 / prob,
+    prize,
+    floating,
+    prizeNote: floating ? prizeNote || '浮动奖，以官方开奖公告为准' : '',
+  }
+}
+
+export const QXC_PRIZES = [
+  qxcRow('一等奖', '7 位号码全部相同', 1, 5000000, true, '浮动奖，按 500 万估算，以官方公告为准'),
+  qxcRow('二等奖', '前 6 位全部相同（后区不同）', 14, 40000, true, '浮动奖，按 4 万估算，以官方公告为准'),
+  qxcRow('三等奖', '前 6 位任意 5 位相同 + 后区相同', 54, 3000),
+  qxcRow('四等奖', '前 6 位任意 5 位相同（后区不同）/ 前 6 位任意 4 位相同 + 后区相同', 1971, 500),
+  qxcRow('五等奖', '前 6 位任意 4 位相同（后区不同）/ 前 6 位任意 3 位相同 + 后区相同', 31590, 30),
+  qxcRow(
+    '六等奖',
+    '前 6 位任意 3 位相同（后区不同）/ 前 2 位相同 + 后区相同 / 前 1 位相同 + 后区相同 / 仅后区相同',
+    1188270,
+    5,
+  ),
+]
+
+/** 判定函数按奖级顺序取用；只含固定奖金部分的返奖率由页面按需计算 */
+export const QXC_LEVELS = QXC_PRIZES
+
+/** 七星彩总中奖组合数 1,221,900，总中奖率 8.146% */
+export const QXC_WIN_COMBOS = QXC_PRIZES.reduce((s, p) => s + p.combos, 0)
+export const QXC_WIN_PROB = QXC_WIN_COMBOS / QXC_TOTAL

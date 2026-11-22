@@ -14,15 +14,18 @@ import { notesForPrompt, persistPredictions } from './_lib/learning.js'
 
 export const config = { maxDuration: 60 }
 
-const GAMES = { fc3d: '福彩3D', pl3: '排列三', pl5: '排列五', dlt: '大乐透' }
-// 每位彩种的号码位数：排列三 3 位（直选/组选），排列五 5 位（只有直选）
-const POS_LEN = { fc3d: 3, pl3: 3, pl5: 5 }
+const GAMES = { fc3d: '福彩3D', pl3: '排列三', pl5: '排列五', qxc: '七星彩', dlt: '大乐透' }
+// 每位彩种的号码位数：排列三 3 位（直选/组选），排列五 5 位，七星彩 7 位（前 6 位 0-9 + 后区 0-14）
+const POS_LEN = { fc3d: 3, pl3: 3, pl5: 5, qxc: 7 }
 const maskId = (id) => (id ? `尾号${String(id).slice(-4)}` : '匿名设备')
 // 结果结构版本：v8 起双色球位改为大乐透（前区 5 + 后区 2），命中旧版会重算
 const SCHEMA = 8
 
 /** 某个位数对应的 JSON 输出格式说明（供模型与重试用） */
 function jsonHint(len) {
+  if (len === 7) {
+    return '{"straight":["7 2 4 7 6 3 14","1 9 3 5 2 8 12"],"reasons":{"7 2 4 7 6 3 14":"一句话理由"},"summary":"80 字内","risk":"一句风险提示"}'
+  }
   return len === 5
     ? '{"straight":["01234","56789"],"reasons":{"01234":"一句话理由"},"summary":"80 字内","risk":"一句风险提示"}'
     : '{"straight":["123","456","789"],"group":["135","246"],"group3":["112"],"reasons":{"123":"一句话理由"},"summary":"80 字内","risk":"一句风险提示"}'
@@ -87,11 +90,13 @@ function roundsDlt() {
 // 四轮真实分析：结构解读 → 反向质询 → 算法候选终选 → 终审校验（每轮单独调用一次大模型）
 function roundsFor(len) {
   const is5 = len === 5
+  const is7 = len === 7
   return [
     {
       name: '结构解读',
-      prompt:
-        '第一轮：只依据前面给出的统计数据，解读本期号码结构（位置频率、遗漏、和值/跨度区间、形态倾向）。不要编造数据，不要承诺中奖。控制在 300 字内。',
+      prompt: is7
+        ? '第一轮：只依据前面给出的统计数据，解读本期七星彩结构（前 6 位与后区的位置频率、遗漏、和值/跨度区间、不同数字个数形态）。不要编造数据，不要承诺中奖。控制在 300 字内。'
+        : '第一轮：只依据前面给出的统计数据，解读本期号码结构（位置频率、遗漏、和值/跨度区间、形态倾向）。不要编造数据，不要承诺中奖。控制在 300 字内。',
       temperature: 0.5,
     },
     {
@@ -102,26 +107,35 @@ function roundsFor(len) {
     },
     {
       name: '算法候选终选',
-      prompt: is5
+      prompt: is7
         ? '第三轮：只能从上面给出的算法候选池里终选本期号码——直选 5 注，不得自创池外号码。' +
           '只输出一个 JSON 对象，不要解释文字、不要代码块围栏。格式：' +
-          jsonHint(5) +
-          '。straight 必须正好 5 个，且都来自候选池；reasons 的键必须是上面出现过的号码。'
-        : '第三轮：只能从上面给出的算法候选池里终选本期号码——直选 3 注、组六 2 注、组三 1 注，不得自创池外号码。' +
-          '只输出一个 JSON 对象，不要解释文字、不要代码块围栏。格式：' +
-          jsonHint(3) +
-          '。straight 必须正好 3 个、group 必须正好 2 个、group3 必须正好 1 个，且都来自候选池；reasons 的键必须是上面出现过的号码。',
+          jsonHint(7) +
+          '。straight 必须正好 5 个，每个号码 7 位（前 6 位 0-9，后区 0-14，用空格分隔），且都来自候选池；reasons 的键必须是上面出现过的号码。'
+        : is5
+          ? '第三轮：只能从上面给出的算法候选池里终选本期号码——直选 5 注，不得自创池外号码。' +
+            '只输出一个 JSON 对象，不要解释文字、不要代码块围栏。格式：' +
+            jsonHint(5) +
+            '。straight 必须正好 5 个，且都来自候选池；reasons 的键必须是上面出现过的号码。'
+          : '第三轮：只能从上面给出的算法候选池里终选本期号码——直选 3 注、组六 2 注、组三 1 注，不得自创池外号码。' +
+            '只输出一个 JSON 对象，不要解释文字、不要代码块围栏。格式：' +
+            jsonHint(3) +
+            '。straight 必须正好 3 个、group 必须正好 2 个、group3 必须正好 1 个，且都来自候选池；reasons 的键必须是上面出现过的号码。',
       temperature: 0.3,
     },
     {
       name: '终审校验',
-      prompt: is5
-        ? '第四轮：终审校验上一轮结果——逐个检查：直选是否正好 5 注、是否都在算法候选池内、是否都是 5 位数字。' +
+      prompt: is7
+        ? '第四轮：终审校验上一轮结果——逐个检查：直选是否正好 5 注、是否都在算法候选池内、是否都是 7 位（前 6 位 0-9，后区 0-14）。' +
           '有不合规的立即替换为候选池里的次优号。只输出最终 JSON（格式同上一轮），不要解释文字、不要代码块围栏。' +
-          'risk 必须写明「每注直选 1/100000 不变」。'
-        : '第四轮：终审校验上一轮结果——逐个检查：直选是否正好 3 注、组六 2 注、组三 1 注；是否都在算法候选池内；是否都是 3 位数字，组六三位互不相同，组三两同一异。' +
-          '有不合规的立即替换为候选池里的次优号。只输出最终 JSON（格式同上一轮），不要解释文字、不要代码块围栏。' +
-          'risk 必须写明「每注直选 1/1000、组六约 1/167、组三约 1/333 不变」。',
+          'risk 必须写明「每注直选 1/15000000 不变，一、二等奖为浮动奖金」。'
+        : is5
+          ? '第四轮：终审校验上一轮结果——逐个检查：直选是否正好 5 注、是否都在算法候选池内、是否都是 5 位数字。' +
+            '有不合规的立即替换为候选池里的次优号。只输出最终 JSON（格式同上一轮），不要解释文字、不要代码块围栏。' +
+            'risk 必须写明「每注直选 1/100000 不变」。'
+          : '第四轮：终审校验上一轮结果——逐个检查：直选是否正好 3 注、组六 2 注、组三 1 注；是否都在算法候选池内；是否都是 3 位数字，组六三位互不相同，组三两同一异。' +
+            '有不合规的立即替换为候选池里的次优号。只输出最终 JSON（格式同上一轮），不要解释文字、不要代码块围栏。' +
+            'risk 必须写明「每注直选 1/1000、组六约 1/167、组三约 1/333 不变」。',
       temperature: 0.2,
     },
   ]
@@ -149,9 +163,57 @@ function extractJson(text) {
   }
 }
 
+/** 七星彩号码解析：数组 / "7 2 4 7 6 3 14" / "72476314" → 7 位数组 */
+function parseQxcNum(x) {
+  let arr = null
+  if (Array.isArray(x)) arr = x.map(Number)
+  else {
+    const s = String(x || '').trim()
+    const parts = s.split(/[\s,，]+/).filter(Boolean)
+    if (parts.length === 7 && parts.every((p) => /^\d+$/.test(p))) arr = parts.map(Number)
+    else if (/^\d{8}$/.test(s)) {
+      const d = s.split('').map(Number)
+      arr = [d[0], d[1], d[2], d[3], d[4], d[5], d[6] * 10 + d[7]]
+    }
+  }
+  if (!arr || arr.length !== 7) return null
+  const ok =
+    arr.slice(0, 6).every((n) => Number.isInteger(n) && n >= 0 && n <= 9) &&
+    Number.isInteger(arr[6]) &&
+    arr[6] >= 0 &&
+    arr[6] <= 14
+  return ok ? arr : null
+}
+
 /** 规整模型给出的号码：只保留 digitCount 位数字，限制条数 */
 function normalizePicks(raw, digitCount = 3) {
   if (!raw || typeof raw !== 'object') return null
+  if (digitCount === 7) {
+    const straight = []
+    for (const x of Array.isArray(raw.straight) ? raw.straight : []) {
+      const arr = parseQxcNum(x)
+      if (!arr) continue
+      const s = arr.join(' ')
+      if (!straight.includes(s)) straight.push(s)
+      if (straight.length >= 8) break
+    }
+    if (!straight.length) return null
+    const reasons = {}
+    if (raw.reasons && typeof raw.reasons === 'object') {
+      for (const [k, v] of Object.entries(raw.reasons)) {
+        const arr = parseQxcNum(k)
+        if (arr) reasons[arr.join(' ')] = String(v).slice(0, 120)
+      }
+    }
+    return {
+      straight,
+      group: [],
+      group3: [],
+      reasons,
+      summary: String(raw.summary || '').slice(0, 400),
+      risk: String(raw.risk || '').slice(0, 200),
+    }
+  }
   const nums = (v, max) =>
     (Array.isArray(v) ? v : [])
       .map((x) => String(x).replace(/\D/g, ''))
@@ -239,6 +301,18 @@ function sanitizeAlgo(raw, digitCount = 3) {
     const back = ints(raw.back, 1, 12, 8)
     if (front.length < 5 || back.length < 2) return null
     return { kind: 'dlt', front, back }
+  }
+  if (digitCount === 7) {
+    const straight = []
+    for (const x of Array.isArray(raw.straight) ? raw.straight : []) {
+      const arr = parseQxcNum(x)
+      if (!arr) continue
+      const s = arr.join(' ')
+      if (!straight.includes(s)) straight.push(s)
+      if (straight.length >= 40) break
+    }
+    if (straight.length < 5) return null
+    return { straight, group: [], group3: [] }
   }
   const take = (arr, max) =>
     (Array.isArray(arr) ? arr : [])
@@ -435,7 +509,9 @@ export default async function handler(req, res) {
                   '。' +
                   (digitCount === 3
                     ? 'straight 3 注直选、group 2 注组六（三个数字互不相同）、group3 1 注组三（两同一异）；'
-                    : 'straight 必须正好 5 注直选（每注 5 位数字）；') +
+                    : digitCount === 7
+                      ? 'straight 必须正好 5 注直选（每注 7 位：前 6 位 0-9，后区 0-14，用空格分隔）；'
+                      : 'straight 必须正好 5 注直选（每注 5 位数字）；') +
                   '只能从上面给出的算法候选池里选，不得自创池外号码。',
             },
           ],
@@ -476,9 +552,11 @@ export default async function handler(req, res) {
               reasons: {},
               summary: '',
               risk:
-                digitCount === 5
-                  ? '每注直选 1/100000 不变。'
-                  : '每注直选 1/1000、组六约 1/167、组三约 1/333 不变。',
+                digitCount === 7
+                  ? '每注直选 1/15000000 不变，一、二等奖为浮动奖金。'
+                  : digitCount === 5
+                    ? '每注直选 1/100000 不变。'
+                    : '每注直选 1/1000、组六约 1/167、组三约 1/333 不变。',
             }
         finalSource = 'algo'
         finalNote = 'AI 终选解析失败，已回退到算法候选'

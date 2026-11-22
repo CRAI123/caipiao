@@ -15,6 +15,7 @@
 import { scoreBalls } from '../../src/lib/stats.js'
 import { PRO_EXPERTS as PL3_EXPERTS } from '../../src/lib/pl3Predict.js'
 import { PRO_EXPERTS as PL5_EXPERTS } from '../../src/lib/pl5Predict.js'
+import { PRO_EXPERTS as QXC_EXPERTS } from '../../src/lib/qxcPredict.js'
 import { FC3D_EXPERTS } from '../../src/lib/fc3dPredict.js'
 import { WINDOWS as KL8_WINDOWS } from '../../src/lib/kl8V7.js'
 import { KL8_PLAY } from '../../src/lib/kl8Math.js'
@@ -64,6 +65,13 @@ export const LEARN_DEFAULTS = {
       keys: PL5_EXPERTS.map((e) => e.key),
       weights: norm(PL5_EXPERTS.map(() => 1)),
       positions: 5,
+    },
+  },
+  qxc: {
+    experts: {
+      keys: QXC_EXPERTS.map((e) => e.key),
+      weights: norm(QXC_EXPERTS.map(() => 1)),
+      positions: 7,
     },
   },
   dlt: {
@@ -169,10 +177,12 @@ async function upsertState(sql, game, paramKey, value) {
 /** 数字彩专家表（按 game 选择引擎导出的专家数组） */
 function digitExperts(game) {
   if (game === 'fc3d') return FC3D_EXPERTS
+  if (game === 'qxc') return QXC_EXPERTS
   if (game === 'pl5') return PL5_EXPERTS
   return PL3_EXPERTS
 }
 function digitPositions(game) {
+  if (game === 'qxc') return 7
   return game === 'pl5' ? 5 : 3
 }
 
@@ -413,7 +423,7 @@ export async function scoreAndLearn(sql, game, draws) {
         return hitLoss(hits, 30, 0.25)
       })
       await saveFamily('windows', hedgeUpdate(winFam, winLosses), winFam)
-    } else if (game === 'fc3d' || game === 'pl3' || game === 'pl5') {
+    } else if (game === 'fc3d' || game === 'pl3' || game === 'pl5' || game === 'qxc') {
       const npos = digitPositions(game)
       const experts = digitExperts(game)
       // ── 算法池 / AI 终选 / 站内 AI：按注回填命中 ──
@@ -421,7 +431,18 @@ export async function scoreAndLearn(sql, game, draws) {
         const picks = bySource.get(source)
         if (!picks || typeof picks !== 'object') continue
         const straight = Array.isArray(picks.straight) ? picks.straight : []
-        const straightHits = straight.filter((x, i) => i < npos && x === actual.num[i]).length
+        let straightHits = 0
+        if (game === 'qxc') {
+          // 七星彩推荐是 "7 2 4 7 6 3 14" 字符串，按最大逐位命中数计分
+          for (const s of straight) {
+            const arr = Array.isArray(s) ? s.map(Number) : String(s).trim().split(/[\s,，]+/).map(Number)
+            if (arr.length !== 7 || arr.some((x) => !Number.isInteger(x))) continue
+            const h = arr.filter((x, i) => x === actual.num[i]).length
+            straightHits = Math.max(straightHits, h)
+          }
+        } else {
+          straightHits = straight.filter((x, i) => i < npos && x === actual.num[i]).length
+        }
         const group = Array.isArray(picks.group) ? picks.group : []
         const groupSet = new Set(group)
         const groupHits = actual.num.filter((x) => groupSet.has(x)).length
@@ -433,7 +454,7 @@ export async function scoreAndLearn(sql, game, draws) {
             group3Hits = Math.max(group3Hits, h)
           }
         }
-        const loss = hitLoss(straightHits, npos, 0.1)
+        const loss = hitLoss(straightHits, npos, game === 'qxc' ? 0.09 : 0.1)
         hitsOut[source] = straightHits
         await markScored(source, {
           actual: actual.num,
@@ -480,7 +501,8 @@ export async function scoreAndLearn(sql, game, draws) {
         })
       }
       // ── 信号权重：每信号拆成逐号概率，对开出/未开出号求平均 log-loss ──
-      if (preds.some((r) => r.source === 'signals:dlt')) {
+      // 与数字彩专家一致：信号模型给的是无条件概率分布，无论当期有没有推荐行都按实际开奖推进
+      {
         const sig = dltSignalScores(hist)
         const signalLosses = (raw, keys, poolMax, drawnSet) =>
           keys.map((k) => {

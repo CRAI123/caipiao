@@ -391,6 +391,7 @@ const POS_LABELS = ['第1位', '第2位', '第3位', '第4位', '第5位']
 const POS_LABELS_3 = ['百位', '十位', '个位']
 
 function positionLabel(i, digitCount) {
+  if (digitCount === 7) return ['一', '二', '三', '四', '五', '六', '后'][i] || `第${i + 1}位`
   return digitCount === 3 ? POS_LABELS_3[i] : POS_LABELS[i] || `第${i + 1}位`
 }
 
@@ -529,15 +530,16 @@ function digitTests(draws, game) {
   const nums = draws.map((d) => (Array.isArray(d?.num) ? d.num : null)).filter(Boolean)
   const n = nums.length
   if (n < 20) return out
-  const digitCount = game === 'pl5' ? 5 : nums[0]?.length || 3
+  const digitCount = game === 'qxc' ? 7 : game === 'pl5' ? 5 : nums[0]?.length || 3
 
-  // 每位号码频次：10 个取值，期望频数 n/10，要求 ≥5
+  // 每位号码频次：前区 10 个取值；七星彩后区 15 个取值
   if (n >= 50) {
     for (let pos = 0; pos < digitCount; pos++) {
-      const counts = Array(10).fill(0)
+      const V = digitCount === 7 && pos === 6 ? 15 : 10
+      const counts = Array(V).fill(0)
       for (const arr of nums) {
         const x = arr[pos]
-        if (x >= 0 && x <= 9) counts[x]++
+        if (x >= 0 && x < V) counts[x]++
       }
       if (!counts.some((v) => v > 0)) continue
       const t = chiSquareUniform(counts)
@@ -548,7 +550,7 @@ function digitTests(draws, game) {
           t.stat,
           t.df,
           t.p,
-          '0–9 的出现次数与均匀分布比较；df = 10 − 1',
+          `${digitCount === 7 && pos === 6 ? '0–14' : '0–9'} 的出现次数与均匀分布比较；df = ${V} − 1`,
         ),
       )
     }
@@ -723,7 +725,7 @@ export function runAllTests(draws, { game = 'fc3d', maxNum } = {}) {
   try {
     if (game === 'dlt') return dltTests(list)
     if (game === 'kl8') return kl8Tests(list)
-    if (game === 'fc3d' || game === 'pl3' || game === 'pl5') return digitTests(list, game)
+    if (game === 'fc3d' || game === 'pl3' || game === 'pl5' || game === 'qxc') return digitTests(list, game)
     return []
   } catch (err) {
     // 数据缺字段时不让整页崩掉，只返回已完成的检验

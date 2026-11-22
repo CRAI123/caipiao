@@ -11,7 +11,12 @@ const pad2 = (n) => String(n).padStart(2, '0')
 const rangeText = (arr) => (arr.length ? `${Math.min(...arr)}–${Math.max(...arr)}` : '—')
 
 const digitStat = (s) => {
-  const ds = [...String(s)].map(Number)
+  let ds
+  if (Array.isArray(s)) ds = s.map(Number)
+  else {
+    const t = String(s).trim()
+    ds = /[\s,，]/.test(t) ? t.split(/[\s,，]+/).map(Number) : [...t].map(Number)
+  }
   return {
     sum: ds.reduce((a, b) => a + b, 0),
     span: Math.max(...ds) - Math.min(...ds),
@@ -42,9 +47,9 @@ export function buildDigitReview(runs, draws, digitCount = 3) {
   const all = [...straight, ...group, ...group3]
   if (!all.length) return null
 
-  const actual = digits.join('')
-  const key = [...actual].sort().join('')
-  const uniq = new Set(actual).size
+  const actual = digitCount === 7 ? digits.join(' ') : digits.join('')
+  const key = [...digits].sort((a, b) => a - b).join('')
+  const uniq = new Set(digits).size
   const straightHit = straight.includes(actual)
   const groupHit = digitCount === 3 && uniq === 3 && group.some((x) => [...x].sort().join('') === key)
   const group3Hit = digitCount === 3 && uniq === 2 && group3.some((x) => [...x].sort().join('') === key)

@@ -3,6 +3,7 @@ import React, { useState, useMemo } from 'react'
 import { Card, Note } from './common.jsx'
 import WheelPanel from './WheelPanel.jsx'
 import { DIGITS } from '../lib/fc3dStats.js'
+import { QXC_POS, QXC_VALUES } from '../lib/qxcPredict.js'
 
 const PLAY_TYPES = [
   { id: 'group6', name: '组六', desc: '三不同号，6种排列', combos: 6 },
@@ -28,6 +29,7 @@ function combinations(arr, k) {
 export default function FC3DDanTuo({ label = '福彩3D', digitCount = 3 }) {
   const [dan, setDan] = useState([])
   const [tuo, setTuo] = useState([])
+  const [posSel, setPosSel] = useState(() => Array.from({ length: 7 }, () => []))
   const [playType, setPlayType] = useState(digitCount === 5 ? 'direct' : 'group6')
   const playTypes = digitCount === 5 ? PLAY_TYPES.filter((p) => p.id === 'direct') : PLAY_TYPES
 
@@ -76,6 +78,70 @@ export default function FC3DDanTuo({ label = '福彩3D', digitCount = 3 }) {
   }, [dan, tuo, playType, allSelected.length, digitCount])
 
   function clear() { setDan([]); setTuo([]) }
+
+  // 七星彩没有胆拖：前 6 位 + 后区逐位复式，注数 = 各位置选中个数连乘
+  if (digitCount === 7) {
+    const counts = posSel.map((arr) => arr.length)
+    const count = counts.every((n) => n > 0) ? counts.reduce((a, b) => a * b, 1) : 0
+    const togglePos = (pos, d) => {
+      setPosSel((prev) =>
+        prev.map((arr, i) =>
+          i === pos ? (arr.includes(d) ? arr.filter((x) => x !== d) : [...arr, d]) : arr,
+        ),
+      )
+    }
+    const selectAll = () => setPosSel(QXC_VALUES.map((vals) => [...vals]))
+    const clearPos = () => setPosSel(Array.from({ length: 7 }, () => []))
+    const randomOne = () =>
+      setPosSel(QXC_VALUES.map((vals) => [vals[Math.floor(Math.random() * vals.length)]]))
+
+    return (
+      <div className="page">
+        <Card title="复式选号" tag={label}>
+          <Note>
+            七星彩只有直选：前 6 位各选 0–9，后区选 0–14。注数 = 各位置选中个数连乘，
+            每注 2 元。复式能覆盖更多组合，但成本按指数上升。
+          </Note>
+          {QXC_POS.map((name, pos) => (
+            <div key={name} className="fc3d-dt-section">
+              <div className="fc3d-dt-label">
+                {name}位 <span className="muted">（已选 {posSel[pos].length} 个）</span>
+              </div>
+              <div className="fc3d-dt-digits">
+                {QXC_VALUES[pos].map((d) => (
+                  <button
+                    key={d}
+                    className={`dt-ball ${posSel[pos].includes(d) ? 'tuo' : ''}`}
+                    onClick={() => togglePos(pos, d)}
+                  >
+                    {d}
+                  </button>
+                ))}
+              </div>
+            </div>
+          ))}
+
+          <div className="fc3d-dt-result">
+            {count > 0 ? (
+              <>
+                <span>共 <b>{count.toLocaleString('zh-CN')}</b> 注</span>
+                <span>金额 <b>¥{cost.toLocaleString('zh-CN')}</b></span>
+              </>
+            ) : (
+              <span className="muted">每个位置至少选择 1 个号码</span>
+            )}
+            <button className="tab-btn" onClick={selectAll}>全选</button>
+            <button className="tab-btn" onClick={randomOne}>每位随机 1 个</button>
+            <button className="tab-btn" onClick={clearPos}>清空</button>
+          </div>
+          <Note tone="warn">
+            七星彩单注中奖概率恒为 1 / 15,000,000，复式只是把更多组合买下来，不会改变任何一注的概率。
+            全选会得到 10⁶ × 15 = 15,000,000 注、3,000 万元，请务必量力而行。
+          </Note>
+        </Card>
+      </div>
+    )
+  }
 
   return (
     <div className="page">

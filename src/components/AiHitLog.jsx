@@ -72,18 +72,27 @@ export default function AiHitLog({ game, kind = 'digit', draws, digitCount = 3, 
       }
       const d = byId.get(Number(run.drawId) + 1)
       if (!d) continue
-      const actual = (d.num || d.nums || []).join('')
-      if (actual.length !== digitCount) continue
+      const is7 = digitCount === 7
+      const arr = d.num || d.nums || []
+      const actual = is7 ? arr.join(' ') : arr.join('')
+      if (!is7 && actual.length !== digitCount) continue
       const picks = run.picks || {}
       const straight = picks.straight || []
-      const key = [...actual].sort().join('')
-      const uniq = new Set(actual).size
+      const key = [...arr].sort().join('')
+      const uniq = new Set(arr).size
+      const qxcHits = (a, b) => {
+        const A = String(a).trim().split(/[\s,，]+/).map(Number)
+        const B = String(b).trim().split(/[\s,，]+/).map(Number)
+        let n = 0
+        for (let i = 0; i < Math.min(A.length, B.length); i++) if (A[i] === B[i]) n++
+        return n
+      }
       out.push({
         id: Number(run.drawId) + 1,
         date: d.date,
         actual,
         nums: straight,
-        best: straight.reduce((m, x) => Math.max(m, posHits(x, actual)), 0),
+        best: straight.reduce((m, x) => Math.max(m, is7 ? qxcHits(x, actual) : posHits(x, actual)), 0),
         straightHit: straight.includes(actual),
         groupHit: digitCount === 3 && uniq === 3 && (picks.group || []).some((x) => [...x].sort().join('') === key),
         group3Hit: digitCount === 3 && uniq === 2 && (picks.group3 || []).some((x) => [...x].sort().join('') === key),

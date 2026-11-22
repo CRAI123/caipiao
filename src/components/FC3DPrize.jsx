@@ -9,11 +9,14 @@ import {
   DIGIT_PRIZES,
   DIGIT_SHAPE,
   PL5_PRIZES,
+  QXC_PRIZES,
+  QXC_WIN_PROB,
   expectedReturn,
   fmtProb,
   fmtOneIn,
   fmtAmount,
 } from '../lib/odds.js'
+import { judgeQXC } from '../lib/qxcPredict.js'
 import '../odds.css'
 
 const PLAYS = [
@@ -24,6 +27,15 @@ const PLAYS = [
 
 const PL5_PLAYS = [
   { id: 'direct', name: '直选', amount: 100000, desc: '五位号码与开奖完全相同（位置一致），单注 2 元' },
+]
+
+const QXC_PLAYS = [
+  {
+    id: 'direct',
+    name: '直选',
+    amount: 0,
+    desc: '7 位号码与开奖逐位相同，按一至六等奖判定',
+  },
 ]
 
 const UNIT = 2 // 每注 2 元
@@ -41,8 +53,8 @@ function betShape(digits, digitCount = 3) {
   return '组六'
 }
 
-/** 解析用户填写的购买号码：每行一注，支持 "123" / "1 2 3" / "1,2,3" */
-function parseBets(text, digitCount = 3) {
+/** 解析用户填写的购买号码：每行一注，支持 "123" / "1 2 3" / "1,2,3"；七星彩支持 8 位连写 */
+function parseBets(text, digitCount = 3, qxc = false) {
   const rows = []
   const errors = []
   const re = new RegExp(`^\\d{${digitCount}}$`)
@@ -50,7 +62,25 @@ function parseBets(text, digitCount = 3) {
     const s = line.trim()
     if (!s) return
     let digits = null
-    if (re.test(s)) {
+    if (qxc) {
+      const parts = s.split(/[\s,，]+/).filter(Boolean)
+      if (parts.length === 7 && parts.every((p) => /^\d+$/.test(p))) {
+        digits = parts.map(Number)
+      } else if (/^\d{8}$/.test(s)) {
+        const arr = s.split('').map(Number)
+        digits = [arr[0], arr[1], arr[2], arr[3], arr[4], arr[5], arr[6] * 10 + arr[7]]
+      }
+      if (
+        digits &&
+        !(
+          digits.slice(0, 6).every((d) => d >= 0 && d <= 9) &&
+          digits[6] >= 0 &&
+          digits[6] <= 14
+        )
+      ) {
+        digits = null
+      }
+    } else if (re.test(s)) {
       digits = s.split('').map(Number)
     } else {
       const parts = s.split(/[\s,，]+/).filter(Boolean)
@@ -59,7 +89,11 @@ function parseBets(text, digitCount = 3) {
       }
     }
     if (!digits) {
-      errors.push(`第 ${i + 1} 行「${s}」不是有效的 ${digitCount} 位号码`)
+      errors.push(
+        qxc
+          ? `第 ${i + 1} 行「${s}」不是有效的七星彩号码（前 6 位 0–9，后区 0–14）`
+          : `第 ${i + 1} 行「${s}」不是有效的 ${digitCount} 位号码`,
+      )
       return
     }
     rows.push({ raw: s, digits })
@@ -94,40 +128,54 @@ export default function FC3DPrize({
   lottery = 'fc3d',
   label = '福彩3D',
   digitCount = 3,
-  plays = digitCount === 5 ? PL5_PLAYS : PLAYS,
+  qxc = false,
+  plays = qxc ? QXC_PLAYS : digitCount === 5 ? PL5_PLAYS : PLAYS,
 }) {
   const [drawIdx, setDrawIdx] = useState(0)
   const [text, setText] = useState('')
-  const [play, setPlay] = useState(digitCount === 5 ? 'direct' : '')
+  const [play, setPlay] = useState(qxc || digitCount === 5 ? 'direct' : '')
   const [saving, setSaving] = useState(false)
   const [savedTick, setSavedTick] = useState(0)
   const [ledgerMsg, setLedgerMsg] = useState(null)
 
   const draw = draws[Math.min(drawIdx, draws.length - 1)] || draws[0]
   const drawLabel = draw ? (draw.drawId ?? draw.id) : '—'
-  const { rows, errors } = useMemo(() => parseBets(text, digitCount), [text, digitCount])
+  const { rows, errors } = useMemo(() => parseBets(text, digitCount, qxc), [text, digitCount, qxc])
 
   const playDef = plays.find((p) => p.id === play)
   const results = useMemo(() => {
     if (!play || !draw) return []
     return rows.map((r) => {
+      if (qxc) {
+        const j = judgeQXC(r.digits, draw.num)
+        return {
+          ...r,
+          status: j.level > 0 ? 'win' : 'lose',
+          hitDigits: j.frontHits + (j.backHit ? 1 : 0),
+          levelName: j.name,
+          floating: j.floating,
+          prize: j.prize,
+          prizeNote: j.prizeNote,
+        }
+      }
       const j = judgeBet(r.digits, play, draw.num, digitCount)
       return { ...r, ...j, prize: j.status === 'win' ? playDef.amount : 0 }
     })
-  }, [rows, play, draw, playDef, digitCount])
+  }, [rows, play, draw, playDef, digitCount, qxc])
 
   const valid = results.filter((r) => r.status !== 'invalid')
   const wins = results.filter((r) => r.status === 'win')
   const invalid = results.filter((r) => r.status === 'invalid')
   const cost = valid.length * UNIT
-  const prize = wins.length * (playDef?.amount || 0)
+  const prize = wins.reduce((s, r) => s + (r.prize || 0), 0)
+  const floatingWins = wins.filter((r) => r.floating)
   const net = prize - cost
 
   const askPlay = rows.length > 0 && !play
 
-  // 精确概率表：按当前彩种切换（3D / 排三 三位、排五 五位）
-  const oddsRows = digitCount === 5 ? PL5_PRIZES : DIGIT_PRIZES
-  const perPlay = oddsRows.map((r) => expectedReturn([r], UNIT))
+  // 精确概率表：按当前彩种切换（3D / 排三 三位、排五 五位、七星彩六奖级）
+  const oddsRows = qxc ? QXC_PRIZES : digitCount === 5 ? PL5_PRIZES : DIGIT_PRIZES
+  const perPlay = qxc ? [expectedReturn(QXC_PRIZES, UNIT)] : oddsRows.map((r) => expectedReturn([r], UNIT))
   const avgRate = perPlay.reduce((s, x) => s + x.returnRate, 0) / perPlay.length
   const avgLoss = perPlay.reduce((s, x) => s + x.lossPerTicket, 0) / perPlay.length
 
@@ -180,8 +228,10 @@ export default function FC3DPrize({
   return (
     <div className="page">
       <Note tone="warn">
-        本工具只按固定奖金规则计算<b>已知开奖结果</b>的命中与奖金，不预测、不改变中奖概率。
-        单注 2 元，奖金为{label}固定奖：{plays.map((p) => `${p.name} ${p.amount} 元`).join(' / ')}。
+        本工具只按奖金规则计算<b>已知开奖结果</b>的命中与奖金，不预测、不改变中奖概率。
+        {qxc
+          ? ' 单注 2 元，按一至六等奖判定；一、二等奖为浮动奖，表中金额为估算值，以官方公告为准。'
+          : ` 单注 2 元，奖金为${label}固定奖：${plays.map((p) => `${p.name} ${p.amount} 元`).join(' / ')}。`}
       </Note>
 
       <Card title="中奖计算" tag="填号码 → 选玩法 → 自动算奖金">
@@ -215,17 +265,25 @@ export default function FC3DPrize({
           <div className="prize-step-head">
             <span className="prize-step-no">2</span> 填写本期购买号码
             <span className="muted small">
-              （每行一注，如 {Array.from({ length: digitCount }, (_, i) => i + 1).join('')} 或{' '}
-              {Array.from({ length: digitCount }, (_, i) => i + 1).join(' ')}）
+              （每行一注，
+              {qxc
+                ? '如 7 2 4 7 6 3 14（前 6 位 0–9，后区 0–14）'
+                : `如 ${Array.from({ length: digitCount }, (_, i) => i + 1).join('')} 或 ${Array.from(
+                    { length: digitCount },
+                    (_, i) => i + 1,
+                  ).join(' ')}`}
+              ）
             </span>
           </div>
           <textarea
             className="import-area mono"
             rows={6}
             placeholder={
-              digitCount === 3
-                ? '例如：\n123\n1 2 3\n456'
-                : '例如：\n03243\n0 3 2 4 3\n71829'
+              qxc
+                ? '例如：\n7 2 4 7 6 3 14\n1 9 3 5 2 8 12\n72476314'
+                : digitCount === 3
+                  ? '例如：\n123\n1 2 3\n456'
+                  : '例如：\n03243\n0 3 2 4 3\n71829'
             }
             value={text}
             onChange={(e) => setText(e.target.value)}
@@ -252,7 +310,7 @@ export default function FC3DPrize({
                 {plays.map((p) => (
                   <button key={p.id} className="prize-play-btn" onClick={() => setPlay(p.id)}>
                     <span className="prize-play-name">{p.name}</span>
-                    <span className="prize-play-amt">{p.amount} 元/注</span>
+                    <span className="prize-play-amt">{qxc ? '按奖级' : `${p.amount} 元/注`}</span>
                     <span className="prize-play-desc">{p.desc}</span>
                   </button>
                 ))}
@@ -280,10 +338,33 @@ export default function FC3DPrize({
       {play && rows.length > 0 && (
         <>
           <div className="stat-grid">
-            <StatCard label="有效投注" value={valid.length} unit="注" note={`${playDef.name} · 每注 ${UNIT} 元`} />
-            <StatCard label="中奖注数" value={wins.length} unit="注" tone="red" note={`单注 ${playDef.amount} 元`} />
+            <StatCard
+              label="有效投注"
+              value={valid.length}
+              unit="注"
+              note={`${playDef.name} · 每注 ${UNIT} 元`}
+            />
+            <StatCard
+              label="中奖注数"
+              value={wins.length}
+              unit="注"
+              tone="red"
+              note={qxc ? '按一至六等奖判定' : `单注 ${playDef.amount} 元`}
+            />
             <StatCard label="总投入" value={cost} unit="元" note={`${valid.length} 注 × ${UNIT} 元`} />
-            <StatCard label="总奖金" value={prize} unit="元" tone="blue" note={wins.length ? `命中 ${wins.length} 注` : '未中奖'} />
+            <StatCard
+              label="总奖金"
+              value={prize}
+              unit="元"
+              tone="blue"
+              note={
+                floatingWins.length
+                  ? `含 ${floatingWins.length} 注浮动奖，以官方公告为准`
+                  : wins.length
+                    ? `命中 ${wins.length} 注`
+                    : '未中奖'
+              }
+            />
             <StatCard
               label="净盈亏"
               value={`${net >= 0 ? '+' : ''}${net}`}
@@ -321,7 +402,7 @@ export default function FC3DPrize({
                   <tr>
                     <th>序号</th>
                     <th>购买号码</th>
-                    <th>形态</th>
+                    <th>{qxc ? '形态 / 奖级' : '形态'}</th>
                     <th>命中位数</th>
                     <th>结果</th>
                     <th>奖金</th>
@@ -334,14 +415,27 @@ export default function FC3DPrize({
                       <td className="mono">
                         <span className="fc3d-bet-num">{r.digits.join(' ')}</span>
                       </td>
-                      <td className="small muted">{betShape(r.digits, digitCount)}</td>
+                      <td className="small muted">
+                        {qxc && r.status === 'win'
+                          ? r.levelName
+                          : betShape(r.digits, digitCount)}
+                      </td>
                       <td className="mono">{r.hitDigits} 位</td>
                       <td>
                         <span className={`prize-badge prize-badge-${r.status}`}>
-                          {STATUS_LABEL[r.status]}
+                          {qxc && r.status === 'win' ? r.levelName : STATUS_LABEL[r.status]}
                         </span>
                       </td>
-                      <td className="mono">{r.prize ? yuan(r.prize) : '—'}</td>
+                      <td className="mono">
+                        {r.prize ? (
+                          <>
+                            {yuan(r.prize)}
+                            {r.floating && <span className="muted small">（浮动）</span>}
+                          </>
+                        ) : (
+                          '—'
+                        )}
+                      </td>
                     </tr>
                   ))}
                 </tbody>
@@ -352,12 +446,15 @@ export default function FC3DPrize({
       )}
 
       {/* 精确概率表：三位号码 10³=1000 种、五位号码 10⁵=100000 种，全部等可能 */}
-      <Card title="精确概率表" tag={`${label} · 等可能号码计数`}>
+      <Card
+        title="精确概率表"
+        tag={qxc ? `${label} · 15,000,000 种等可能号码` : `${label} · 等可能号码计数`}
+      >
         <div className="table-scroll">
           <table className="ledger-table odds-table">
             <thead>
               <tr>
-                <th>玩法</th>
+                <th>{qxc ? '奖级' : '玩法'}</th>
                 <th>中奖条件</th>
                 <th>单注中奖概率</th>
                 {digitCount === 3 && <th>开奖形态占比</th>}
@@ -383,7 +480,10 @@ export default function FC3DPrize({
                         : '—（不限定形态）'}
                     </td>
                   )}
-                  <td className="mono">{r.prize.toLocaleString('zh-CN')} 元</td>
+                  <td className="mono">
+                    {r.prize.toLocaleString('zh-CN')} 元
+                    {r.floating && <span className="muted small">（浮动估算）</span>}
+                  </td>
                   <td className="mono">{fmtAmount(r.prob * r.prize)} 元</td>
                 </tr>
               ))}
@@ -408,16 +508,26 @@ export default function FC3DPrize({
         <div className="odds-summary">
           <div className="odds-summary-item">
             <span>合计中奖概率（单注）</span>
-            <b>{oddsRows.map((r) => fmtOneIn(r.prob)).join(' / ')}</b>
+            <b>
+              {qxc
+                ? fmtOneIn(QXC_WIN_PROB)
+                : oddsRows.map((r) => fmtOneIn(r.prob)).join(' / ')}
+            </b>
             <i className="odds-sub">
-              {digitCount === 5 ? '直选' : '直选 / 组选3 / 组选6'}
+              {qxc
+                ? '任意奖级 · 六项合计 8.146%'
+                : digitCount === 5
+                  ? '直选'
+                  : '直选 / 组选3 / 组选6'}
             </i>
           </div>
           <div className="odds-summary-item">
             <span>总期望回报率</span>
             <b>{(avgRate * 100).toFixed(2)}%</b>
             <i className="odds-sub">
-              单注期望奖金 {perPlay.map((x) => x.ev.toFixed(3)).join(' / ')} 元 / 投入 2 元
+              {qxc
+                ? '含一、二等奖浮动奖估算，实际以官方公告为准'
+                : `单注期望奖金 ${perPlay.map((x) => x.ev.toFixed(3)).join(' / ')} 元 / 投入 2 元`}
             </i>
           </div>
           <div className="odds-summary-item odds-neutral">
@@ -428,7 +538,14 @@ export default function FC3DPrize({
         </div>
 
         <div className="odds-derive">
-          {digitCount === 5 ? (
+          {qxc ? (
+            <>
+              <div>前 6 位 0–9 + 后区 0–14：10⁶ × 15 = 15,000,000 个等可能开奖号码</div>
+              <div>一等奖 1 种 / 二等奖 14 种 / 三等奖 54 种</div>
+              <div>四等奖 1,971 种 / 五等奖 31,590 种 / 六等奖 1,188,270 种</div>
+              <div>合计 1,221,900 种中奖组合 → 总中奖率 8.146%</div>
+            </>
+          ) : digitCount === 5 ? (
             <>
               <div>00000–99999：10⁵ = 100,000 个等可能开奖号码</div>
               <div>直选只有 1 个号码与投注完全一致 → 1/100,000</div>

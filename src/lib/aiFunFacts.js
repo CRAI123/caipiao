@@ -7,7 +7,7 @@
 
 const pad2 = (n) => String(n).padStart(2, '0')
 
-const isDigitGame = (game) => game === 'fc3d' || game === 'pl3' || game === 'pl5'
+const isDigitGame = (game) => game === 'fc3d' || game === 'pl3' || game === 'pl5' || game === 'qxc'
 const fmtN = (game, n) => (isDigitGame(game) ? String(n) : pad2(n))
 
 function numsOf(game, d) {
@@ -36,7 +36,7 @@ const clampText = (t) => (t.length <= 40 ? t : `${t.slice(0, 39)}…`)
  * @returns {{title:string, text:string}[]} 最多 10 条，不足有多少给多少
  */
 export function buildFunFacts(game, draws) {
-  if (!['kl8', 'fc3d', 'pl3', 'pl5', 'dlt'].includes(game)) return []
+  if (!['kl8', 'fc3d', 'pl3', 'pl5', 'qxc', 'dlt'].includes(game)) return []
   const list = (Array.isArray(draws) ? draws : []).filter((d) => numsOf(game, d))
   if (list.length < 5) return []
   const win = list.slice(0, 100)
