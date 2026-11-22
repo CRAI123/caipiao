@@ -10,7 +10,7 @@ import { fetchKl8Draws } from './_lib/kl8.js'
 import { fetchFc3dDraws } from './_lib/fc3d.js'
 import { fetchPl3Draws } from './_lib/pl3.js'
 import { fetchPl5Draws } from './_lib/pl5.js'
-import { fetchSsqDraws } from './_lib/ssq.js'
+import { fetchDltDraws } from './_lib/dlt.js'
 import { resolveLlmSettings, callAi } from './_lib/ai.js'
 import { prizeFor } from '../src/lib/stats.js'
 import { applyCors } from './_lib/http.js'
@@ -22,14 +22,14 @@ import {
 } from './_lib/learning.js'
 import { loadFeishuTarget, sendFeishuCard } from './_lib/feishu.js'
 import { buildKl8, buildKl8Ai, buildDigitAi, KL8_SCHEMA } from './daily-push.js'
-import { syncOfficialSsq, toIssue5 } from './_lib/ssqOfficial.js'
+import { syncOfficialDlt, toIssue5 } from './_lib/dltOfficial.js'
 import { KL8_PLAY, KL8_PLAY_LABEL } from '../src/lib/kl8Math.js'
 
 export const config = { maxDuration: 60 }
 
 const PLAY = KL8_PLAY // 快乐8 默认玩法：选六（与每日推送同口径）
-const GAMES = ['kl8', 'fc3d', 'pl3', 'pl5', 'ssq']
-const GAME_LABEL = { kl8: '快乐8', fc3d: '福彩3D', pl3: '排列三', pl5: '排列五', ssq: '双色球' }
+const GAMES = ['kl8', 'fc3d', 'pl3', 'pl5', 'dlt']
+const GAME_LABEL = { kl8: '快乐8', fc3d: '福彩3D', pl3: '排列三', pl5: '排列五', dlt: '大乐透' }
 
 export default async function handler(req, res) {
   if (applyCors(req, res)) return
@@ -48,30 +48,30 @@ export default async function handler(req, res) {
     await ensureTables(sql)
 
     // 1. 并发抓最新开奖（取 100 期，给打分学习的专家模型足够历史；单个彩种失败按空数据跳过）
-    //    注意：排列三/排列五/双色球返回 { draws, source }，快乐8/福彩3D 直接返回数组
+    //    注意：排列三/排列五/大乐透返回 { draws, source }，快乐8/福彩3D 直接返回数组
     const safeFetch = (fn) =>
       fn(100)
         .then((r) => (Array.isArray(r) ? r : Array.isArray(r?.draws) ? r.draws : []))
         .catch(() => [])
-    const [kl8Draws, fc3dDraws, pl3Draws, pl5Draws, ssqDraws] = await Promise.all([
+    const [kl8Draws, fc3dDraws, pl3Draws, pl5Draws, dltDraws] = await Promise.all([
       safeFetch(fetchKl8Draws),
       safeFetch(fetchFc3dDraws),
       safeFetch(fetchPl3Draws),
       safeFetch(fetchPl5Draws),
-      safeFetch(fetchSsqDraws),
+      safeFetch(fetchDltDraws),
     ])
-    const drawMap = { kl8: kl8Draws, fc3d: fc3dDraws, pl3: pl3Draws, pl5: pl5Draws, ssq: ssqDraws }
+    const drawMap = { kl8: kl8Draws, fc3d: fc3dDraws, pl3: pl3Draws, pl5: pl5Draws, dlt: dltDraws }
 
     // 快乐8 当期复盘提前并发（不依赖学习结果），否则串在末尾容易把整轮拖过 60s 上限
     const reviewTask = kl8Draws[0]
       ? reviewKl8(sql, kl8Draws[0]).catch((e) => ({ skipped: true, error: String(e?.message || e) }))
       : Promise.resolve({ skipped: true, reason: 'no_data' })
 
-    // 双色球官方销售/中奖注数同步（避挤模型的数据源；失败不影响夜间学习）
-    const officialTask = ssqDraws[0]
-      ? syncOfficialSsq(sql, {
-          start: toIssue5(ssqDraws[0].id),
-          end: toIssue5(ssqDraws[0].id),
+    // 大乐透官方销售/中奖注数同步（避挤模型的数据源；失败不影响夜间学习）
+    const officialTask = dltDraws[0]
+      ? syncOfficialDlt(sql, {
+          start: toIssue5(dltDraws[0].id),
+          end: toIssue5(dltDraws[0].id),
         }).catch(() => null)
       : Promise.resolve(null)
 
@@ -240,8 +240,8 @@ const FAM_LABEL = {
   temp: '温度',
   mix: 'AI/算法配比',
   windows: '窗口',
-  redSignals: '红球信号',
-  blueSignals: '蓝球信号',
+  frontSignals: '前区信号',
+  backSignals: '后区信号',
 }
 
 /** 某彩种当前权重摘要（冷启动返回空） */
@@ -281,7 +281,7 @@ function ruleAdvice(learning, afterOf) {
         }
       }
     } else {
-      for (const k of ['model', 'temp', 'redSignals', 'blueSignals']) {
+      for (const k of ['model', 'temp', 'frontSignals', 'backSignals']) {
         const w = st?.[k]?.weights
         if (!Array.isArray(w) || w.length < 3) continue
         const max = Math.max(...w)

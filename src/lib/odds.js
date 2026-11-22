@@ -1,7 +1,7 @@
 // 彩票概率与期望值 —— 精确组合数学，纯函数模块（不依赖任何第三方数学库）
 //
 // 全部概率都由组合计数直接推导，可逐项验算：
-//   双色球：红球命中数服从超几何分布 C(6,k)·C(27,6−k)/C(33,6)，蓝球独立 1/16
+//   大乐透：前区命中数服从超几何 C(5,k)·C(30,5−k)/C(35,5)，后区独立 C(2,j)·C(10,2−j)/C(12,2)
 //   数字彩：000–999 / 00000–99999 每个号码等可能，概率 = 中奖号码个数 / 号码总数
 //
 // 注意：选号方法只改变“你买了哪几注”，不改变任何单注的中奖概率。
@@ -91,62 +91,68 @@ export function fmtAmount(n, digits = 4) {
 }
 
 // ---------------------------------------------------------------
-// 双色球：6/33 红球 + 1/16 蓝球
+// 大乐透：5/35 前区 + 2/12 后区
 // ---------------------------------------------------------------
 
-/** 红球组合数 C(33,6) = 1,107,568 */
-const SSQ_RED_COMBOS = nCr(33, 6)
+/** 前区组合数 C(35,5) = 324,632 */
+const DLT_FRONT_COMBOS = nCr(35, 5)
 
-/** 全部单注数 = 1,107,568 × 16 = 17,721,088 */
-export const SSQ_TOTAL = SSQ_RED_COMBOS * 16
+/** 全部单注数 = 324,632 × 66 = 21,425,712 */
+export const DLT_TOTAL = DLT_FRONT_COMBOS * nCr(12, 2)
 
-/** 红球恰好命中 k 个的概率（k = 0…6），超几何分布 */
-const redHit = (k) => hypergeometric(k, 6, 6, 33)
+/** 前区恰好命中 k 个的概率（k = 0…5），超几何分布 */
+const frontHit = (k) => hypergeometric(k, 5, 5, 35)
+/** 后区恰好命中 j 个的概率（j = 0…2） */
+const backHit = (j) => hypergeometric(j, 2, 2, 12)
 
-const BLUE_HIT = 1 / 16
-const BLUE_MISS = 15 / 16
-
-/** 统一构造奖级项：补上 oneIn（1/概率）与 combos（中奖组合数），便于表格直接展示 */
-function ssqRow(level, condition, prob, prize, extra = {}) {
+/** 统一构造奖级项：补上 oneIn 与 combos，便于表格直接展示 */
+function dltRow(level, condition, prob, prize, extra = {}) {
   return {
     level,
     name: level,
     condition,
     prob,
     oneIn: 1 / prob,
-    combos: Math.round(prob * SSQ_TOTAL),
+    combos: Math.round(prob * DLT_TOTAL),
     prize,
     ...extra,
   }
 }
 
 /**
- * 双色球六等奖级（单注 2 元）。
- * 红球部分：P(命中 k 红) = C(6,k)·C(27,6−k)/C(33,6)；
- * 蓝球独立，命中 1/16、未中 15/16。
- * 四/五/六等奖是并集，概率相加（各事件互斥，直接相加即可）。
+ * 大乐透九个奖级（单注 2 元）。
+ * 前区 5 中 k、后区 2 中 j 相互独立，各奖级事件互斥，概率直接相加。
  *
- * 已知核对：全部奖级概率之和 = 1,188,988 / 17,721,088 ≈ 0.067095 ≈ 1/14.90。
- * （任务书提到的「≈ 1/15.28 ≈ 0.0654」与逐项求和不符：0.0654 × 17,721,088 ≈ 1,159,757，
- *  比逐项结果少 29,231 注，无法由任何“命中红球 + 蓝球”的组合得到，故以逐项求和为准。）
+ * 已知核对：全部奖级概率之和 = 1,429,197 / 21,425,712 ≈ 0.06670 ≈ 1/15。
  */
-export const SSQ_PRIZES = [
-  // 一等奖：6 红 + 蓝球
-  ssqRow('一等奖', '6 红 + 蓝球', redHit(6) * BLUE_HIT, 5000000, {
-    prizeNote: '浮动奖，按保底 500 万估算',
+export const DLT_PRIZES = [
+  // 一等奖：5 前区 + 2 后区
+  dltRow('一等奖', '5 前区 + 2 后区', frontHit(5) * backHit(2), 8000000, {
+    prizeNote: '浮动奖，按 800 万估算',
   }),
-  // 二等奖：6 红、蓝球未中
-  ssqRow('二等奖', '6 红（蓝球未中）', redHit(6) * BLUE_MISS, 200000, {
-    prizeNote: '浮动奖，按 20 万估算',
+  // 二等奖：5 前区 + 1 后区
+  dltRow('二等奖', '5 前区 + 1 后区', frontHit(5) * backHit(1), 150000, {
+    prizeNote: '浮动奖，按 15 万估算',
   }),
-  // 三等奖：5 红 + 蓝球
-  ssqRow('三等奖', '5 红 + 蓝球', redHit(5) * BLUE_HIT, 3000),
-  // 四等奖：(5 红无蓝) ∪ (4 红有蓝)
-  ssqRow('四等奖', '5 红（蓝球未中）或 4 红 + 蓝球', redHit(5) * BLUE_MISS + redHit(4) * BLUE_HIT, 200),
-  // 五等奖：(4 红无蓝) ∪ (3 红有蓝)
-  ssqRow('五等奖', '4 红（蓝球未中）或 3 红 + 蓝球', redHit(4) * BLUE_MISS + redHit(3) * BLUE_HIT, 10),
-  // 六等奖：蓝球命中且红球命中 0–2 个
-  ssqRow('六等奖', '蓝球命中且红球命中 0–2 个', (redHit(0) + redHit(1) + redHit(2)) * BLUE_HIT, 5),
+  // 三等奖：5 前区
+  dltRow('三等奖', '5 前区（后区未中）', frontHit(5) * backHit(0), 10000),
+  // 四等奖：4 前区 + 2 后区
+  dltRow('四等奖', '4 前区 + 2 后区', frontHit(4) * backHit(2), 3000),
+  // 五等奖：4 前区 + 1 后区
+  dltRow('五等奖', '4 前区 + 1 后区', frontHit(4) * backHit(1), 300),
+  // 六等奖：3 前区 + 2 后区
+  dltRow('六等奖', '3 前区 + 2 后区', frontHit(3) * backHit(2), 200),
+  // 七等奖：4 前区
+  dltRow('七等奖', '4 前区（后区未中）', frontHit(4) * backHit(0), 100),
+  // 八等奖：(3 前区 + 1 后区) ∪ (2 前区 + 2 后区)
+  dltRow('八等奖', '3 前区 + 1 后区 / 2 前区 + 2 后区', frontHit(3) * backHit(1) + frontHit(2) * backHit(2), 15),
+  // 九等奖：(3 前区) ∪ (2 前区 + 1 后区) ∪ (1 前区 + 2 后区) ∪ (2 后区)
+  dltRow(
+    '九等奖',
+    '3 前区 / 2 前区 + 1 后区 / 1 前区 + 2 后区 / 2 后区',
+    frontHit(3) * backHit(0) + frontHit(2) * backHit(1) + frontHit(1) * backHit(2) + frontHit(0) * backHit(2),
+    5,
+  ),
 ]
 
 // ---------------------------------------------------------------

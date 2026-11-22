@@ -231,10 +231,10 @@ function chiSquareBins(observed, probs, total) {
   return { stat, df, p: chiSquarePValue(stat, df), bins }
 }
 
-/** 从一期数据里取出号码数组：双色球用红球，数字彩用 num，快乐8用 nums */
+/** 从一期数据里取出号码数组：大乐透用前区，数字彩用 num，快乐8用 nums */
 function numbersOf(draw) {
   if (!draw) return null
-  if (Array.isArray(draw.red)) return draw.red
+  if (Array.isArray(draw.front)) return draw.front
   if (Array.isArray(draw.num)) return draw.num
   if (Array.isArray(draw.nums)) return draw.nums
   return null
@@ -401,62 +401,60 @@ function medianOf(arr) {
   return sorted.length % 2 ? sorted[mid] : (sorted[mid - 1] + sorted[mid]) / 2
 }
 
-/** 双色球：红球 1–33 按球号频次做卡方，蓝球 1–16 单独检验 */
-function ssqTests(draws) {
+/** 大乐透：前区 1–35 频次 + 后区 1–12 频次 + 和值序列 + 重号 + 间隙 */
+function dltTests(draws) {
   const out = []
-  const reds = draws.map((d) => (Array.isArray(d?.red) ? d.red : null)).filter(Boolean)
-  const blues = draws.map((d) => d?.blue).filter((v) => Number.isInteger(v))
-  const n = reds.length
+  const fronts = draws.map((d) => (Array.isArray(d?.front) ? d.front : null)).filter(Boolean)
+  const n = fronts.length
   if (n < 20) return out
 
-  // 红球频次：每期 6 个不重复号码，期望频数 = n * 6 / 33
-  if (n * 6 >= 33 * 5) {
-    const counts = Array(33).fill(0)
-    for (const r of reds) for (const x of r) if (x >= 1 && x <= 33) counts[x - 1]++
+  // 前区频次：每期 5 个不重复号码，期望频数 = n * 5 / 35
+  if (n >= 35) {
+    const counts = Array(35).fill(0)
+    for (const r of fronts) for (const x of r) if (x >= 1 && x <= 35) counts[x - 1]++
     if (counts.some((v) => v > 0)) {
       const t = chiSquareUniform(counts)
       out.push(
         mk(
-          'ssq-red-freq',
-          '红球号码频次 · 卡方拟合',
+          'dlt-front-freq',
+          '前区号码频次 · 卡方拟合',
           t.stat,
           t.df,
           t.p,
-          '33 个红球各自的出现次数与均匀分布比较；df = 33 − 1',
+          '35 个前区号各自的出现次数与均匀分布比较；df = 35 − 1',
         ),
       )
     }
   }
 
-  // 蓝球频次：期望频数 = n / 16
-  if (n >= 16 * 5) {
-    const counts = Array(16).fill(0)
-    for (const b of blues) if (b >= 1 && b <= 16) counts[b - 1]++
+  // 后区频次：每期开 2 个，期望频数 = n * 2 / 12
+  const backs = draws.map((d) => (Array.isArray(d?.back) ? d.back : null)).filter(Boolean)
+  if (n >= 30 && backs.length) {
+    const counts = Array(12).fill(0)
+    for (const b of backs) for (const x of b) if (x >= 1 && x <= 12) counts[x - 1]++
     if (counts.some((v) => v > 0)) {
       const t = chiSquareUniform(counts)
       out.push(
         mk(
-          'ssq-blue-freq',
-          '蓝球号码频次 · 卡方拟合',
+          'dlt-back-freq',
+          '后区号码频次 · 卡方拟合',
           t.stat,
           t.df,
           t.p,
-          '16 个蓝球各自的出现次数与均匀分布比较；df = 16 − 1',
+          '12 个后区号各自的出现次数与均匀分布比较；df = 12 − 1',
         ),
       )
     }
   }
 
-  const sums = reds.map((r) => r.reduce((s, x) => s + x, 0))
-
-  // 和值游程：以样本中位数分界，检验连续偏高/偏低是否过度成串或过度交替
+  const sums = fronts.map((r) => r.reduce((s, x) => s + x, 0))
   const sumMedian = medianOf(sums)
   const run = runsTest(sums, { binaryFn: (v) => v >= sumMedian })
   if (run) {
     out.push(
       mk(
-        'ssq-red-sum-runs',
-        '红球和值 · 游程检验',
+        'dlt-front-sum-runs',
+        '前区和值 · 游程检验',
         run.stat ?? run.z * run.z,
         1,
         run.p,
@@ -465,44 +463,40 @@ function ssqTests(draws) {
     )
   }
 
-  // 和值滞后 1–5 期自相关
   const lb = ljungBox(sums, 5)
   if (lb) {
-    const r1 = lb.stats[0].acf.toFixed(3)
     out.push(
       mk(
-        'ssq-red-sum-lb',
-        '红球和值 · 自相关（Ljung–Box）',
+        'dlt-front-sum-lb',
+        '前区和值 · 自相关（Ljung–Box）',
         lb.qStat,
         lb.df,
         lb.p,
-        `滞后 1–5 期自相关联合为 0 的检验；滞后 1 期 r = ${r1}，df = 5`,
+        `滞后 1–5 期自相关联合为 0 的检验；滞后 1 期 r = ${lb.stats[0].acf.toFixed(3)}，df = 5`,
       ),
     )
   }
 
-  // 相邻两期红球重合个数（超几何分布）
-  const pair = pairTest(draws, { maxNum: 33, pick: 6, mode: 'set' })
+  const pair = pairTest(draws, { maxNum: 35, pick: 5, mode: 'set' })
   if (pair) {
     out.push(
       mk(
-        'ssq-pair',
-        '相邻两期红球重号个数',
+        'dlt-pair',
+        '相邻两期前区重号个数',
         pair.stat,
         pair.df,
         pair.p,
-        `重合个数分布 vs 超几何分布（33 选 6 × 2 期）；尾部小期望格已合并，df = ${pair.df}`,
+        `重合个数分布 vs 超几何分布（35 选 5 × 2 期）；尾部小期望格已合并，df = ${pair.df}`,
       ),
     )
   }
 
-  // 红球号码出现间隙（每期出现概率 6/33）
-  const gap = gapTest(reds, { maxNum: 33, pAppear: 6 / 33 })
+  const gap = gapTest(fronts, { maxNum: 35, pAppear: 5 / 35 })
   if (gap) {
     out.push(
       mk(
-        'ssq-red-gap',
-        '红球号码出现间隙',
+        'dlt-front-gap',
+        '前区号码出现间隙',
         gap.stat,
         gap.df,
         gap.p,
@@ -511,17 +505,17 @@ function ssqTests(draws) {
     )
   }
 
-  // 蓝球奇偶游程（奇偶各半）
-  const blueRun = runsTest(blues, { binaryFn: (v) => v % 2 === 1 })
-  if (blueRun) {
+  const backSums = backs.map((b) => b.reduce((s, x) => s + x, 0))
+  const backRun = runsTest(backSums, { binaryFn: (v) => v >= medianOf(backSums) })
+  if (backRun) {
     out.push(
       mk(
-        'ssq-blue-parity-runs',
-        '蓝球奇偶 · 游程检验',
-        blueRun.stat ?? blueRun.z * blueRun.z,
+        'dlt-back-sum-runs',
+        '后区和值 · 游程检验',
+        backRun.stat ?? backRun.z * backRun.z,
         1,
-        blueRun.p,
-        `游程数 ${blueRun.runs}，期望 ${blueRun.expected.toFixed(1)}，z = ${blueRun.z.toFixed(2)}`,
+        backRun.p,
+        `后区两号之和的游程数 ${backRun.runs}，期望 ${backRun.expected.toFixed(1)}，z = ${backRun.z.toFixed(2)}`,
       ),
     )
   }
@@ -719,7 +713,7 @@ function kl8Tests(draws) {
  * 因此期数 <60 时结果会偏少，属于「检验效力有限」而非「没有偏离」。
  *
  * @param {object[]} draws 最新在前的开奖列表
- * @param {{game?: 'ssq'|'fc3d'|'pl3'|'pl5'|'kl8', maxNum?: number}} opts
+ * @param {{game?: 'dlt'|'fc3d'|'pl3'|'pl5'|'kl8', maxNum?: number}} opts
  * @returns {{id:string, name:string, stat:number, df:number, p:number,
  *            verdict:'pass'|'warn'|'fail', note:string}[]}
  */
@@ -727,7 +721,7 @@ export function runAllTests(draws, { game = 'fc3d', maxNum } = {}) {
   const list = Array.isArray(draws) ? draws.filter(Boolean) : []
   if (list.length < 20) return []
   try {
-    if (game === 'ssq') return ssqTests(list)
+    if (game === 'dlt') return dltTests(list)
     if (game === 'kl8') return kl8Tests(list)
     if (game === 'fc3d' || game === 'pl3' || game === 'pl5') return digitTests(list, game)
     return []

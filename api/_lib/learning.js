@@ -19,12 +19,12 @@ import { FC3D_EXPERTS } from '../../src/lib/fc3dPredict.js'
 import { WINDOWS as KL8_WINDOWS } from '../../src/lib/kl8V7.js'
 import { KL8_PLAY } from '../../src/lib/kl8Math.js'
 import {
-  SSQ_RED_SIGNALS,
-  SSQ_BLUE_SIGNALS,
-  SSQ_RED_WEIGHTS,
-  SSQ_BLUE_WEIGHTS,
-  ssqSignalScores,
-} from '../../src/lib/ssqPredict.js'
+  DLT_FRONT_SIGNALS,
+  DLT_BACK_SIGNALS,
+  DLT_FRONT_WEIGHTS,
+  DLT_BACK_WEIGHTS,
+  dltSignalScores,
+} from '../../src/lib/dltPredict.js'
 import { callAi } from './ai.js'
 import { readConfig, writeConfig } from './neon.js'
 
@@ -66,9 +66,9 @@ export const LEARN_DEFAULTS = {
       positions: 5,
     },
   },
-  ssq: {
-    redSignals: { keys: SSQ_RED_SIGNALS, weights: norm(SSQ_RED_WEIGHTS) },
-    blueSignals: { keys: SSQ_BLUE_SIGNALS, weights: norm(SSQ_BLUE_WEIGHTS) },
+  dlt: {
+    frontSignals: { keys: DLT_FRONT_SIGNALS, weights: norm(DLT_FRONT_WEIGHTS) },
+    backSignals: { keys: DLT_BACK_SIGNALS, weights: norm(DLT_BACK_WEIGHTS) },
   },
 }
 
@@ -458,29 +458,30 @@ export async function scoreAndLearn(sql, game, draws) {
         }
         await markScored('hedge:experts', { actual: actual.num, perExpertLoss })
       }
-    } else if (game === 'ssq') {
-      // ── 推荐行命中打分：算法 + 站内 AI 终选（红球命中 + 蓝球对）──
-      for (const source of ['algo:ssq', 'ai:site', 'ai:final']) {
+    } else if (game === 'dlt') {
+      // ── 推荐行命中打分：算法 + 站内 AI 终选（前区命中 + 后区命中）──
+      for (const source of ['algo:dlt', 'ai:site', 'ai:final']) {
         const picks = bySource.get(source)
-        if (!picks || !Array.isArray(picks.red) || !picks.red.length) continue
-        const actualRed = new Set(actual.red)
-        const redHits = picks.red.filter((n) => actualRed.has(n)).length
-        const blueHit = picks.blue === actual.blue
-        // AI 行红球可能 6-8 个，按实际选号数计损失（每号期望命中概率 6/33）
-        const loss = hitLoss(redHits, picks.red.length, 6 / 33) + hitLoss(blueHit ? 1 : 0, 1, 1 / 16)
-        // 命中数以 redHits+蓝球 记总分，另记 blueHit 0/1 键供日报补蓝球结果
-        hitsOut[source] = redHits + (blueHit ? 1 : 0)
-        hitsOut[`${source}:blueHit`] = blueHit ? 1 : 0
+        if (!picks || !Array.isArray(picks.front) || !picks.front.length) continue
+        const actualFront = new Set(actual.front)
+        const actualBack = new Set(actual.back)
+        const frontHits = picks.front.filter((n) => actualFront.has(n)).length
+        const backHits = (picks.back || []).filter((n) => actualBack.has(n)).length
+        // AI 行前区可能 5-8 个、后区 2-4 个，按实际选号数计损失（前区单号 5/35，后区单号 2/12）
+        const loss =
+          hitLoss(frontHits, picks.front.length, 5 / 35) + hitLoss(backHits, picks.back?.length || 2, 2 / 12)
+        hitsOut[source] = frontHits + backHits
+        hitsOut[`${source}:backHits`] = backHits
         await markScored(source, {
-          actual: { red: actual.red, blue: actual.blue },
-          redHits,
-          blueHit,
+          actual: { front: actual.front, back: actual.back },
+          frontHits,
+          backHits,
           logLoss: +loss.toFixed(4),
         })
       }
       // ── 信号权重：每信号拆成逐号概率，对开出/未开出号求平均 log-loss ──
-      if (preds.some((r) => r.source === 'signals:ssq')) {
-        const sig = ssqSignalScores(hist)
+      if (preds.some((r) => r.source === 'signals:dlt')) {
+        const sig = dltSignalScores(hist)
         const signalLosses = (raw, keys, poolMax, drawnSet) =>
           keys.map((k) => {
             const arr = raw[k]
@@ -490,16 +491,16 @@ export async function scoreAndLearn(sql, game, draws) {
             for (let i = 0; i < poolMax; i++) acc += drawnSet.has(i + 1) ? -Math.log(p[i]) : -Math.log(1 - p[i])
             return acc / poolMax
           })
-        const redLosses = signalLosses(sig.red, d.redSignals.keys, 33, new Set(actual.red))
-        const blueLosses = signalLosses(sig.blue, d.blueSignals.keys, 16, new Set([actual.blue]))
-        const redFam = getFamily('redSignals', d.redSignals.keys, d.redSignals.weights)
-        const blueFam = getFamily('blueSignals', d.blueSignals.keys, d.blueSignals.weights)
-        await saveFamily('redSignals', hedgeUpdate(redFam, redLosses), redFam)
-        await saveFamily('blueSignals', hedgeUpdate(blueFam, blueLosses), blueFam)
-        await markScored('signals:ssq', {
-          actual: { red: actual.red, blue: actual.blue },
-          redSignalLoss: Object.fromEntries(d.redSignals.keys.map((k, i) => [k, +redLosses[i].toFixed(4)])),
-          blueSignalLoss: Object.fromEntries(d.blueSignals.keys.map((k, i) => [k, +blueLosses[i].toFixed(4)])),
+        const frontLosses = signalLosses(sig.front, d.frontSignals.keys, 35, new Set(actual.front))
+        const backLosses = signalLosses(sig.back, d.backSignals.keys, 12, new Set(actual.back))
+        const frontFam = getFamily('frontSignals', d.frontSignals.keys, d.frontSignals.weights)
+        const backFam = getFamily('backSignals', d.backSignals.keys, d.backSignals.weights)
+        await saveFamily('frontSignals', hedgeUpdate(frontFam, frontLosses), frontFam)
+        await saveFamily('backSignals', hedgeUpdate(backFam, backLosses), backFam)
+        await markScored('signals:dlt', {
+          actual: { front: actual.front, back: actual.back },
+          frontSignalLoss: Object.fromEntries(d.frontSignals.keys.map((k, i) => [k, +frontLosses[i].toFixed(4)])),
+          backSignalLoss: Object.fromEntries(d.backSignals.keys.map((k, i) => [k, +backLosses[i].toFixed(4)])),
         })
       }
     }
@@ -570,7 +571,11 @@ export async function buildRecentSummary(sql, games, learnedOf = {}) {
         const hit =
           m.hits ??
           m.straightHits ??
-          (m.redHits != null ? `红${m.redHits}/蓝${m.blueHit ? '中' : '未中'}` : '-')
+          (m.frontHits != null
+            ? `前区${m.frontHits}/后区${m.backHits ?? 0}`
+            : m.redHits != null
+              ? `红${m.redHits}/蓝${m.blueHit ? '中' : '未中'}`
+              : '-')
         return `${r.draw_id}:${r.source}=${hit}`
       })
       parts.push(`【${g} 近 10 期命中】${brief.join(' ') || '无'}`)
@@ -591,8 +596,8 @@ export async function buildRecentSummary(sql, games, learnedOf = {}) {
             temp: st.temp?.weights,
             mix: st.mix?.weights,
             windows: st.windows?.weights,
-            redSignals: st.redSignals?.weights,
-            blueSignals: st.blueSignals?.weights,
+            frontSignals: st.frontSignals?.weights,
+            backSignals: st.backSignals?.weights,
           }
     }
     if (Object.keys(w).length) parts.push(`【当前权重】${JSON.stringify(w)}`)
@@ -690,7 +695,7 @@ export async function maybeGenerateNotes(sql, llm, { games = [], recentSummary =
 const DIGEST_LABEL = {
   'algo:v7': '算法',
   'algo:pool': '算法池',
-  'algo:ssq': '算法',
+  'algo:dlt': '算法',
   'ai:final': 'AI终选',
   'ai:site': '站内AI',
 }
@@ -701,18 +706,19 @@ const fmtW = (v) => String(Number(Number(v).toFixed(4)))
 /**
  * 拼学习日报纯文本（纯函数，不依赖 DB，≤200 字）：
  * 例 `第2026312期打分：算法命中5、AI终选命中6（AI占优）；今日最大权重变动 windows[24] 0.15→0.17；样本n=23`
- * 无 hits 数据时退化为只报权重变动条数；ssq 补蓝球结果。
+ * 无 hits 数据时退化为只报权重变动条数；dlt 补后区命中。
  */
 export function buildDigestText(game, { drawId, result, sampleN } = {}) {
   const hits = (result && result.hits) || {}
   const changes = Array.isArray(result && result.changes) ? result.changes : []
   const id = drawId ?? (result && result.drawId) ?? '?'
-  // 比较对：kl8 algo:v7 vs AI；数字彩 algo:pool vs AI；双色球 algo:ssq vs AI
-  const algoKey = game === 'kl8' ? 'algo:v7' : game === 'ssq' ? 'algo:ssq' : 'algo:pool'
+  // 比较对：kl8 algo:v7 vs AI；数字彩 algo:pool vs AI；大乐透 algo:dlt vs AI
+  const algoKey = game === 'kl8' ? 'algo:v7' : game === 'dlt' ? 'algo:dlt' : 'algo:pool'
   const aiKeys = game === 'kl8' ? ['ai:final', 'ai:site'] : ['ai:site', 'ai:final']
-  // 双色球总分含蓝球，展示时拆回红球命中并补蓝球结果
-  const redOf = (k) => (typeof hits[k] !== 'number' ? null : game === 'ssq' ? hits[k] - (hits[`${k}:blueHit`] || 0) : hits[k])
-  const blueOf = (k) => (game === 'ssq' ? `，${hits[`${k}:blueHit`] === 1 ? '蓝中' : '蓝未中'}` : '')
+  // 大乐透总分含后区，展示时拆回前区命中并补后区结果
+  const redOf = (k) =>
+    typeof hits[k] !== 'number' ? null : game === 'dlt' ? hits[k] - (hits[`${k}:backHits`] || 0) : hits[k]
+  const blueOf = (k) => (game === 'dlt' ? `，后区命中${hits[`${k}:backHits`] || 0}/2` : '')
   const segs = []
   const algoVal = redOf(algoKey)
   if (algoVal != null) segs.push(`${DIGEST_LABEL[algoKey]}命中${algoVal}${blueOf(algoKey)}`)
@@ -921,16 +927,16 @@ export async function deepReviewWeekly(sql, games) {
             await saveReviewed(paramKey, fam, hedgeUpdate(fam, vec, { eta: 0.8 }))
           }
         }
-      } else if (game === 'ssq') {
-        const rLoss = meanLossByKeys('signals:ssq', 'redSignalLoss', d.redSignals.keys)
-        if (rLoss) {
-          const fam = getFamily('redSignals', d.redSignals.keys, d.redSignals.weights)
-          await saveReviewed('redSignals', fam, hedgeUpdate(fam, rLoss, { eta: 0.8 }))
+      } else if (game === 'dlt') {
+        const fLoss = meanLossByKeys('signals:dlt', 'frontSignalLoss', d.frontSignals.keys)
+        if (fLoss) {
+          const fam = getFamily('frontSignals', d.frontSignals.keys, d.frontSignals.weights)
+          await saveReviewed('frontSignals', fam, hedgeUpdate(fam, fLoss, { eta: 0.8 }))
         }
-        const bLoss = meanLossByKeys('signals:ssq', 'blueSignalLoss', d.blueSignals.keys)
+        const bLoss = meanLossByKeys('signals:dlt', 'backSignalLoss', d.backSignals.keys)
         if (bLoss) {
-          const fam = getFamily('blueSignals', d.blueSignals.keys, d.blueSignals.weights)
-          await saveReviewed('blueSignals', fam, hedgeUpdate(fam, bLoss, { eta: 0.8 }))
+          const fam = getFamily('backSignals', d.backSignals.keys, d.backSignals.weights)
+          await saveReviewed('backSignals', fam, hedgeUpdate(fam, bLoss, { eta: 0.8 }))
         }
       }
       if (adjusted.length) {

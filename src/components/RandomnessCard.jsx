@@ -6,7 +6,7 @@ import { runAllTests } from '../lib/randomness.js'
 import '../randomness.css'
 
 const GAME_LABEL = {
-  ssq: '双色球',
+  dlt: '大乐透',
   fc3d: '福彩3D',
   pl3: '排列三',
   pl5: '排列五',

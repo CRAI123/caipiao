@@ -41,7 +41,7 @@ const LOTTERIES = [
   { name: '福彩3D', en: 'FC3D', note: '三位数 · 定位与形态', mark: '3D' },
   { name: '排列三', en: 'PL3', note: '三位数 · 组合与回测', mark: 'P3' },
   { name: '排列五', en: 'PL5', note: '五位数 · 分位研究', mark: 'P5' },
-  { name: '双色球', en: 'SSQ', note: '红球 + 蓝球 · 结构分析', mark: '双' },
+  { name: '大乐透', en: 'DLT', note: '前区 + 后区 · 结构分析', mark: '透' },
 ]
 
 function Arrow() {

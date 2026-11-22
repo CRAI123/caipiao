@@ -1,5 +1,5 @@
 // AI 终选命中对照 —— 每期 AI 号码与真实开奖逐期对比（方法体检用）
-// kind: 'digit'（3D/排三/排五）| 'kl8' | 'ssq'
+// kind: 'digit'（3D/排三/排五）| 'kl8' | 'dlt'
 import React, { useEffect, useMemo, useState } from 'react'
 import { Card, Note } from './common.jsx'
 import { auditDigitAi, auditKl8Ai } from '../lib/api.js'
@@ -50,21 +50,23 @@ export default function AiHitLog({ game, kind = 'digit', draws, digitCount = 3, 
         out.push({ id: Number(run.drawId), date: d.date, actual: d.nums || d.num, nums: run.final || [], hit, base })
         continue
       }
-      if (kind === 'ssq') {
+      if (kind === 'dlt') {
         const d = byId.get(Number(run.drawId) + 1)
         if (!d) continue
-        const red = new Set(d.red || [])
+        const front = new Set(d.front || [])
+        const back = new Set(d.back || [])
         const picks = run.picks || {}
-        const hit = (picks.red || []).filter((n) => red.has(n)).length
+        const hit = (picks.front || []).filter((n) => front.has(n)).length
+        const backHit = (picks.back || []).filter((n) => back.has(n)).length
         out.push({
           id: Number(run.drawId) + 1,
           date: d.date,
-          actual: d.red || [],
-          blueActual: d.blue,
-          nums: picks.red || [],
-          blue: picks.blue,
+          actual: d.front || [],
+          backActual: d.back || [],
+          nums: picks.front || [],
+          backPicks: picks.back || [],
           hit,
-          blueHit: picks.blue != null && picks.blue === d.blue,
+          backHit,
         })
         continue
       }
@@ -99,10 +101,10 @@ export default function AiHitLog({ game, kind = 'digit', draws, digitCount = 3, 
       const best = Math.max(...rows.map((r) => r.hit))
       return { n, avg, base, best }
     }
-    if (kind === 'ssq') {
+    if (kind === 'dlt') {
       const avg = rows.reduce((s, r) => s + r.hit, 0) / n
-      const blues = rows.filter((r) => r.blueHit).length
-      return { n, avg, blues }
+      const backs = rows.filter((r) => r.backHit === 2).length
+      return { n, avg, backs }
     }
     const avg = rows.reduce((s, r) => s + r.best, 0) / n
     return {
@@ -134,10 +136,10 @@ export default function AiHitLog({ game, kind = 'digit', draws, digitCount = 3, 
               <span className="toolbar-note">算法基准平均 {stat.base.toFixed(2)} / 10</span>
               <span className="toolbar-note">最好一次 {stat.best} / 10</span>
             </>
-          ) : kind === 'ssq' ? (
+          ) : kind === 'dlt' ? (
             <>
-              <span className="toolbar-note">平均命中红球 {stat.avg.toFixed(2)} / 6</span>
-              <span className="toolbar-note">蓝球命中 {stat.blues} 期（{pct(stat.blues, stat.n)}）</span>
+              <span className="toolbar-note">平均命中前区 {stat.avg.toFixed(2)} / 5</span>
+              <span className="toolbar-note">后区两号全中 {stat.backs} 期（{pct(stat.backs, stat.n)}）</span>
             </>
           ) : (
             <>
@@ -171,9 +173,9 @@ export default function AiHitLog({ game, kind = 'digit', draws, digitCount = 3, 
                   <td className="mono">{r.id}</td>
                   <td className="mono">{r.date || '—'}</td>
                   <td className="mono">
-                    {kind === 'ssq' ? (
+                    {kind === 'dlt' ? (
                       <>
-                        {r.actual.join(' ')} <span className="muted">+</span> <b>{r.blueActual}</b>
+                        {r.actual.join(' ')} <span className="muted">+</span> <b>{r.backActual.join(' ')}</b>
                       </>
                     ) : kind === 'kl8' ? (
                       r.actual.join(' ')
@@ -182,9 +184,9 @@ export default function AiHitLog({ game, kind = 'digit', draws, digitCount = 3, 
                     )}
                   </td>
                   <td className="mono">
-                    {kind === 'ssq' ? (
+                    {kind === 'dlt' ? (
                       <>
-                        {r.nums.join(' ')} <span className="muted">+</span> <b>{r.blue == null ? '—' : r.blue}</b>
+                        {r.nums.join(' ')} <span className="muted">+</span> <b>{r.backPicks.join(' ')}</b>
                       </>
                     ) : kind === 'kl8' ? (
                       r.nums.join(' ')
@@ -199,9 +201,9 @@ export default function AiHitLog({ game, kind = 'digit', draws, digitCount = 3, 
                       <span>
                         {r.hit} / 10 <span className="muted">（算法 {r.base}）</span>
                       </span>
-                    ) : kind === 'ssq' ? (
+                    ) : kind === 'dlt' ? (
                       <span>
-                        红 {r.hit} / 6 · 蓝 {r.blueHit ? '✓' : '✗'}
+                        前 {r.hit} / 5 · 后 {r.backHit} / 2
                       </span>
                     ) : r.straightHit || r.groupHit || r.group3Hit ? (
                       <span>

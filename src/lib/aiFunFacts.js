@@ -2,7 +2,7 @@
 // 算不出（样本不足 / 数据缺字段 / 结果为空）就跳过该类，绝不编造统计。
 // draws 约定最新在前：
 //   kl8  { id, date, nums: [20 个 1-80] }
-//   ssq  { id, date, red: [6 个 1-33], blue: 1-16 }
+//   dlt  { id, date, front: [5 个 1-35], back: [2 个 1-12] }
 //   fc3d / pl3 / pl5  { id, date, num: [3 或 5 个 0-9] }
 
 const pad2 = (n) => String(n).padStart(2, '0')
@@ -12,16 +12,18 @@ const fmtN = (game, n) => (isDigitGame(game) ? String(n) : pad2(n))
 
 function numsOf(game, d) {
   if (!d) return null
-  const a = game === 'kl8' ? d.nums : game === 'ssq' ? d.red : d.num
+  const a = game === 'kl8' ? d.nums : game === 'dlt' ? d.front : d.num
   if (!Array.isArray(a) || !a.length) return null
   if (!a.every((n) => Number.isFinite(n))) return null
   return a
 }
 
-function bluesOf(draws) {
-  return (Array.isArray(draws) ? draws : [])
-    .map((d) => d?.blue)
-    .filter((b) => Number.isFinite(b))
+function backsOf(draws) {
+  const out = []
+  for (const d of Array.isArray(draws) ? draws : []) {
+    if (Array.isArray(d?.back)) for (const b of d.back) if (Number.isFinite(b)) out.push(b)
+  }
+  return out
 }
 
 const sum = (a) => a.reduce((s, n) => s + n, 0)
@@ -29,12 +31,12 @@ const clampText = (t) => (t.length <= 40 ? t : `${t.slice(0, 39)}…`)
 
 /**
  * 按彩种从真实数据现算趣闻卡
- * @param {'kl8'|'fc3d'|'pl3'|'pl5'|'ssq'} game
+ * @param {'kl8'|'fc3d'|'pl3'|'pl5'|'dlt'} game
  * @param {Array} draws 最新在前的开奖数组
  * @returns {{title:string, text:string}[]} 最多 10 条，不足有多少给多少
  */
 export function buildFunFacts(game, draws) {
-  if (!['kl8', 'fc3d', 'pl3', 'pl5', 'ssq'].includes(game)) return []
+  if (!['kl8', 'fc3d', 'pl3', 'pl5', 'dlt'].includes(game)) return []
   const list = (Array.isArray(draws) ? draws : []).filter((d) => numsOf(game, d))
   if (list.length < 5) return []
   const win = list.slice(0, 100)
@@ -42,8 +44,8 @@ export function buildFunFacts(game, draws) {
   const pool =
     game === 'kl8'
       ? Array.from({ length: 80 }, (_, i) => i + 1)
-      : game === 'ssq'
-        ? Array.from({ length: 33 }, (_, i) => i + 1)
+      : game === 'dlt'
+        ? Array.from({ length: 35 }, (_, i) => i + 1)
         : Array.from({ length: 10 }, (_, i) => i)
   const facts = []
 
@@ -125,9 +127,9 @@ export function buildFunFacts(game, draws) {
     }
   }
 
-  // 5. 上期大小比 vs 样本最常见（快乐8 以 41-80 为大，数字彩以 5-9 为大）
-  if (game !== 'ssq') {
-    const bigOf = game === 'kl8' ? (n) => n > 40 : (n) => n >= 5
+  // 5. 上期大小比 vs 样本最常见（快乐8 以 41-80 为大，大乐透以 18-35 为大，数字彩以 5-9 为大）
+  {
+    const bigOf = game === 'kl8' ? (n) => n > 40 : game === 'dlt' ? (n) => n >= 18 : (n) => n >= 5
     const ratio = (l) => {
       const b = l.filter(bigOf).length
       return `${b}:${l.length - b}`
@@ -189,31 +191,31 @@ export function buildFunFacts(game, draws) {
     }
   }
 
-  // 9. 双色球专属：上期红球三区分布
-  if (game === 'ssq') {
-    const red = lists[0]
+  // 9. 大乐透专属：上期前区三区分布
+  if (game === 'dlt') {
+    const front = lists[0]
     const z = [0, 0, 0]
-    red.forEach((n) => {
-      z[Math.min(2, Math.floor((n - 1) / 11))]++
+    front.forEach((n) => {
+      z[n <= 12 ? 0 : n <= 24 ? 1 : 2]++
     })
     const maxI = z.indexOf(Math.max(...z))
     facts.push({
-      title: '红球区间',
-      text: clampText(`上期红球三区 ${z.join(':')}，第 ${maxI + 1} 区最厚`),
+      title: '前区区间',
+      text: clampText(`上期前区三区 ${z.join(':')}，第 ${maxI + 1} 区最厚`),
     })
 
-    // 10. 双色球专属：蓝球最大遗漏
-    const blues = bluesOf(win)
-    if (blues.length >= 10) {
+    // 10. 大乐透专属：后区最大遗漏
+    const backs = backsOf(win)
+    if (backs.length >= 10) {
       let best = null
-      for (let b = 1; b <= 16; b++) {
-        const i = blues.indexOf(b)
+      for (let b = 1; b <= 12; b++) {
+        const i = backs.indexOf(b)
         if (i > 0 && (!best || i > best.i)) best = { b, i }
       }
       if (best) {
         facts.push({
-          title: '蓝球遗漏',
-          text: clampText(`蓝球 ${pad2(best.b)} 已 ${best.i} 期未出，16 码中遗漏最大`),
+          title: '后区遗漏',
+          text: clampText(`后区 ${pad2(best.b)} 已 ${best.i} 个开奖号未出，12 码中遗漏最大`),
         })
       }
     }

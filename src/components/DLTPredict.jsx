@@ -1,28 +1,29 @@
-// 双色球 下期推荐 —— 按《吴明揭秘双色球》十步研判流程输出 6 红 + 1 蓝
+// 大乐透 下期推荐 —— 按十步研判流程输出 5 前区 + 2 后区
 import React, { useEffect, useMemo, useRef, useState } from 'react'
-import { Card, StatCard, Note, Ball, SsqDraw } from './common.jsx'
+import { Card, StatCard, Note, Ball, DltDraw } from './common.jsx'
 import {
-  predictSSQ,
-  backtestSSQ,
+  predictDLT,
+  backtestDLT,
   analyzeDraw,
   recent5Pool,
   newOldRatio,
   heatRatio,
   repeatNeighbor,
   patternSummary,
-  ssqCandidatePool,
-  buildSsqMessages,
+  dltCandidatePool,
+  buildDltMessages,
   ZONE3,
   ZONE4,
-  SSQ_RED_SIGNALS,
-  SSQ_BLUE_SIGNALS,
+  DLT_FRONT_SIGNALS,
+  DLT_BACK_SIGNALS,
   wilsonInterval,
-  BLUE_MAX,
-} from '../lib/ssqPredict.js'
+  BACK_MAX,
+  BACK_PICK,
+} from '../lib/dltPredict.js'
 import { readLearning } from '../lib/learning.js'
 import { runDigitAi, peekDigitAi, auditDigitAi } from '../lib/api.js'
 import { getDeviceId } from '../lib/device.js'
-import { buildSsqReview } from '../lib/aiReview.js'
+import { buildDltReview } from '../lib/aiReview.js'
 import { fakeAnalyze, sharedWaitSeconds } from '../lib/aiWait.js'
 import { buildFunFacts } from '../lib/aiFunFacts.js'
 import AiWaitTheater from './AiWaitTheater.jsx'
@@ -31,32 +32,31 @@ const LEVEL_CLASS = { 热: 'hot', 温: 'warm', 冷: 'cold' }
 
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms))
 
-// 与服务端 api/digit-ai.js 的 roundsSsq 一一对应
+// 与服务端 api/digit-ai.js 的 roundsDlt 一一对应
 const AI_ROUNDS = [
   '第 1/6 轮 · 结构解读',
   '第 2/6 轮 · 反向质询',
-  '第 3/6 轮 · 红球专项',
-  '第 4/6 轮 · 蓝球专项',
+  '第 3/6 轮 · 前区专项',
+  '第 4/6 轮 · 后区专项',
   '第 5/6 轮 · 算法候选终选',
   '第 6/6 轮 · 终审校验',
 ]
 
-// 等待剧场分步文案：desc 均为 api/digit-ai.js roundsSsq 六轮实际职责的事实描述
 const WAIT_STAGES = AI_ROUNDS.map((label, i) => ({
   label,
   desc: [
-    '通读区间分布、冷热、遗漏与和值统计，解读红蓝球结构',
+    '通读区间分布、冷热、遗漏与和值统计，解读前后区结构',
     '以质疑者身份审查第一轮结论，标记过度解读与样本不足',
-    '红球专项：分析区间分布、连号重号与冷热遗漏，筛出重点红球',
-    '蓝球专项：分析大小奇偶、遗漏与振幅，筛出重点蓝球',
-    '只在红球 12 + 蓝球 4 候选池内终选 6 红 1 蓝',
-    '校验红球 6 个不重复、蓝球范围与候选池归属，不合规即替换',
+    '前区专项：分析区间分布、连号重号与冷热遗漏，筛出重点前区号',
+    '后区专项：分析大小奇偶、遗漏与振幅，筛出重点后区号',
+    '只在前区 12 + 后区 4 候选池内终选 5 前区 2 后区',
+    '校验前区 5 个不重复、后区 2 个不重复、范围内且属于候选池，不合规即替换',
   ][i],
 }))
 const AI_SCHEMA = 7
 
-// AI 终选：算法候选池 → AI 只在池内终选 6 红 + 1 蓝，结果全站共享、每期一条记录
-function SsqAiCard({ draws, pred }) {
+// AI 终选：算法候选池 → AI 只在池内终选 5 前区 + 2 后区，结果全站共享、每期一条记录
+function DltAiCard({ draws, pred }) {
   const [busy, setBusy] = useState(false)
   const [meta, setMeta] = useState(null)
   const [error, setError] = useState('')
@@ -67,14 +67,13 @@ function SsqAiCard({ draws, pred }) {
   const [audit, setAudit] = useState([])
   const busyRef = useRef(false)
   const latestId = Number(draws?.[0]?.id) || 0
-  const pool = useMemo(() => ssqCandidatePool(pred), [pred])
-  const waitFacts = useMemo(() => buildFunFacts('ssq', draws), [draws])
+  const pool = useMemo(() => dltCandidatePool(pred), [pred])
+  const waitFacts = useMemo(() => buildFunFacts('dlt', draws), [draws])
   const picks = meta?.picks || null
 
-  // 上期复盘：上期 AI 终选 vs 实际开奖，既用于本轮提示，也直接展示
   useEffect(() => {
     let alive = true
-    auditDigitAi({ game: 'ssq' })
+    auditDigitAi({ game: 'dlt' })
       .then((r) => {
         if (alive && r?.ok) setAudit(r.runs || [])
       })
@@ -83,9 +82,8 @@ function SsqAiCard({ draws, pred }) {
       alive = false
     }
   }, [])
-  const review = useMemo(() => buildSsqReview(audit, draws), [audit, draws])
+  const review = useMemo(() => buildDltReview(audit, draws), [audit, draws])
 
-  // 挂载时不自动从共享缓存恢复解析：结果只在用户点击「AI 分析」后展示；来了新一期回到空态
   useEffect(() => {
     setMeta(null)
     setStale(false)
@@ -125,10 +123,9 @@ function SsqAiCard({ draws, pred }) {
     setElapsed(0)
     let waitTimer = null
     try {
-      // 上期复盘：重新读取历史 AI 记录，对照上期实际开奖后作为本轮提示
       let runs = audit
       try {
-        const a = await auditDigitAi({ game: 'ssq' })
+        const a = await auditDigitAi({ game: 'dlt' })
         if (a?.ok) {
           runs = a.runs || []
           setAudit(runs)
@@ -136,10 +133,9 @@ function SsqAiCard({ draws, pred }) {
       } catch {
         /* 读取失败时沿用已加载的记录 */
       }
-      const reviewNow = buildSsqReview(runs, draws)
+      const reviewNow = buildDltReview(runs, draws)
 
-      // 本期已有共享结果：走一遍模拟进度，让后来的人也有分析体验
-      const cached = await peekDigitAi({ game: 'ssq', drawId: latestId }).catch(() => null)
+      const cached = await peekDigitAi({ game: 'dlt', drawId: latestId }).catch(() => null)
       if (cached?.exists && cached.status === 'done' && cached.result?.text) {
         await fakeAnalyze({ seconds: sharedWaitSeconds(), stages: AI_ROUNDS, onTick })
         applyResult(cached.result, cached.owner)
@@ -148,10 +144,10 @@ function SsqAiCard({ draws, pred }) {
       const timer = fakeAnalyze({ seconds: 55, stages: AI_ROUNDS, onTick })
       waitTimer = timer
       const r = await runDigitAi({
-        game: 'ssq',
+        game: 'dlt',
         drawId: latestId,
-        label: '双色球',
-        messages: buildSsqMessages(draws, pred, '双色球', reviewNow?.text || ''),
+        label: '大乐透',
+        messages: buildDltMessages(draws, pred, '大乐透', reviewNow?.text || ''),
         algo: pool,
         deviceId: getDeviceId()?.id || '',
       })
@@ -170,13 +166,12 @@ function SsqAiCard({ draws, pred }) {
       setPhase('分析完成')
     } catch (e) {
       waitTimer?.cancel?.()
-      // 别人正在分析：等待并轮询共享结果
       if (e?.status === 409) {
         setPhase('本期已有用户在分析，等待结果同步…')
         let done = false
         for (let i = 0; i < 12 && !done; i++) {
           await sleep(5000)
-          const p = await peekDigitAi({ game: 'ssq', drawId: latestId }).catch(() => null)
+          const p = await peekDigitAi({ game: 'dlt', drawId: latestId }).catch(() => null)
           if (p?.exists && p.status === 'done' && p.result?.text) {
             applyResult(p.result, p.owner)
             done = true
@@ -199,31 +194,31 @@ function SsqAiCard({ draws, pred }) {
   }
 
   return (
-    <Card title="AI 终选 · 双色球" tag={meta?.cached ? '全站共享' : 'AI'}>
+    <Card title="AI 终选 · 大乐透" tag={meta?.cached ? '全站共享' : 'AI'}>
       <div className="predict-sub" style={{ marginTop: 2, marginBottom: 4 }}>
-        流程与 3D / 排列三 / 快乐8 一致：<b>算法先选 → AI 终选</b>。底层算法对 33 个红球、16 个蓝球打分，
-        给出红球 12 个 + 蓝球 4 个候选池，AI 只在池内终选 6 红 + 1 蓝。
+        流程与数字彩一致：<b>算法先选 → AI 终选</b>。底层算法对 35 个前区号、12 个后区号打分，
+        给出前区 12 个 + 后区 4 个候选池，AI 只在池内终选 5 前区 + 2 后区。
       </div>
       <div className="predict-row">
-        <div className="predict-label">算法候选 · 红球</div>
+        <div className="predict-label">算法候选 · 前区</div>
         <div className="predict-value">
-          {(pool?.red || []).map((n) => (
+          {(pool?.front || []).map((n) => (
             <span key={n} className="draw-num">
               {String(n).padStart(2, '0')}
             </span>
           ))}
-          <span className="muted small">{(pool?.red || []).length} 个</span>
+          <span className="muted small">{(pool?.front || []).length} 个</span>
         </div>
       </div>
       <div className="predict-row">
-        <div className="predict-label">算法候选 · 蓝球</div>
+        <div className="predict-label">算法候选 · 后区</div>
         <div className="predict-value">
-          {(pool?.blue || []).map((n) => (
+          {(pool?.back || []).map((n) => (
             <span key={n} className="draw-num">
               {String(n).padStart(2, '0')}
             </span>
           ))}
-          <span className="muted small">{(pool?.blue || []).length} 个</span>
+          <span className="muted small">{(pool?.back || []).length} 个</span>
         </div>
       </div>
 
@@ -232,7 +227,7 @@ function SsqAiCard({ draws, pred }) {
           {busy ? 'AI 分析中…' : picks ? '重新分析' : '✦ AI 分析'}
         </button>
         <span className="muted small">
-          4 轮 AI 分析（结构解读 → 反向质询 → 算法候选终选 → 终审校验），结果全站共享；每期保留最后一次，可在「方法体检」查看是否命中
+          6 轮 AI 分析（结构解读 → 反向质询 → 前后区专项 → 候选终选 → 终审校验），结果全站共享；每期保留最后一次
         </span>
       </div>
 
@@ -243,9 +238,7 @@ function SsqAiCard({ draws, pred }) {
         </div>
       )}
 
-      {busy && (
-        <AiWaitTheater stages={WAIT_STAGES} facts={waitFacts} pct={pct} elapsedSec={elapsed} />
-      )}
+      {busy && <AiWaitTheater stages={WAIT_STAGES} facts={waitFacts} pct={pct} elapsedSec={elapsed} />}
 
       {error && <div className="note note-warn">{error}</div>}
 
@@ -253,9 +246,7 @@ function SsqAiCard({ draws, pred }) {
         <div className="ai-empty">
           <div className="ai-empty-mark">✦ ✦ ✦</div>
           <div className="ai-empty-title">AI 尚未分析本期</div>
-          <div className="ai-empty-sub">
-            点击上方「✦ AI 分析」，4 轮终选（结构解读 → 反向质询 → 算法候选终选 → 终审校验）完成后揭晓结果
-          </div>
+          <div className="ai-empty-sub">点击上方「✦ AI 分析」查看算法候选池内的大乐透终选结果</div>
         </div>
       )}
 
@@ -269,14 +260,18 @@ function SsqAiCard({ draws, pred }) {
             {meta?.cached ? ' · 本期共享解析' : ' · 本期首位生成'}
           </div>
           <div className="ssq-predict-balls">
-            {(picks.red || []).map((n) => (
+            {(picks.front || []).map((n) => (
               <Ball key={n} n={n} kind="red" size="lg" />
             ))}
             <span className="ssq-divider ssq-divider-lg" aria-hidden="true" />
-            {picks.blue != null ? <Ball n={picks.blue} kind="blue" size="lg" /> : <span className="muted">蓝球缺失</span>}
+            {(picks.back || []).length ? (
+              (picks.back || []).map((n) => <Ball key={`b${n}`} n={n} kind="blue" size="lg" />)
+            ) : (
+              <span className="muted">后区缺失</span>
+            )}
           </div>
           {(() => {
-            const list = (picks.red || []).filter((n) => picks.reasons?.[n])
+            const list = (picks.front || []).filter((n) => picks.reasons?.[n])
             if (!list.length) return null
             return (
               <ul className="small muted" style={{ margin: '8px 0 0 18px', lineHeight: 1.8 }}>
@@ -289,34 +284,33 @@ function SsqAiCard({ draws, pred }) {
             )
           })()}
           <div className="note note-info" style={{ marginTop: 10 }}>
-            <b>纯算法基准</b>（不加 AI，直接取算法主推）：红球 {(pred.red || []).join(' ')} · 蓝球 {pred.blue}
+            <b>纯算法基准</b>（不加 AI，直接取算法主推）：前区 {(pred.front || []).join(' ')} · 后区{' '}
+            {(pred.back || []).join(' ')}
             <br />
-            与 AI 定稿重合：红球 {(picks.red || []).filter((n) => pred.red.includes(n)).length}/6 · 蓝球{' '}
-            {picks.blue === pred.blue ? '一致' : '不同'}
+            与 AI 定稿重合：前区 {(picks.front || []).filter((n) => pred.front.includes(n)).length}/5 · 后区{' '}
+            {(picks.back || []).filter((n) => pred.back.includes(n)).length}/2
           </div>
           {picks.summary && <div className="note note-info" style={{ marginTop: 8 }}>{String(picks.summary)}</div>}
           {picks.risk && <div className="note note-warn" style={{ marginTop: 8 }}>{String(picks.risk)}</div>}
-          {stale && <Note tone="warn">这一版解析来自旧结构，可点「重新终选」生成新的记录。</Note>}
+          {stale && <Note tone="warn">这一版解析来自旧结构，可点「重新分析」生成新的记录。</Note>}
         </div>
       )}
     </Card>
   )
 }
 
-export default function SSQPredict({ draws }) {
-  const [cover, setCover] = useState(6)
-  // 学习中心自适应权重：挂载时读一次；none/coldStart 不传 override，行为与现状一致
+export default function DLTPredict({ draws }) {
+  const [cover, setCover] = useState(5)
   const [learning, setLearning] = useState(null)
   useEffect(() => {
     let alive = true
-    readLearning('ssq')
+    readLearning('dlt')
       .then((r) => alive && setLearning(r))
       .catch(() => {})
     return () => {
       alive = false
     }
   }, [])
-  // learning_state 'redSignals'/'blueSignals' → 按 SSQ_RED_SIGNALS/SSQ_BLUE_SIGNALS 顺序重排的权重数组
   const learnW = useMemo(() => {
     if (!learning || learning.source === 'none' || learning.coldStart) return null
     const map = (paramKey, order) => {
@@ -327,21 +321,21 @@ export default function SSQPredict({ draws }) {
       if (weights.some((x) => !Number.isFinite(x))) return null
       return { weights, n: Number(v.n || 0) }
     }
-    const red = map('redSignals', SSQ_RED_SIGNALS)
-    const blue = map('blueSignals', SSQ_BLUE_SIGNALS)
-    if (!red && !blue) return null
-    return { red, blue, n: Math.min(red?.n ?? Infinity, blue?.n ?? Infinity) }
+    const front = map('frontSignals', DLT_FRONT_SIGNALS)
+    const back = map('backSignals', DLT_BACK_SIGNALS)
+    if (!front && !back) return null
+    return { front, back, n: Math.min(front?.n ?? Infinity, back?.n ?? Infinity) }
   }, [learning])
   const pred = useMemo(
     () =>
-      predictSSQ(draws, {
+      predictDLT(draws, {
         cover,
-        redWeightsOverride: learnW?.red?.weights ?? null,
-        blueWeightsOverride: learnW?.blue?.weights ?? null,
+        frontWeightsOverride: learnW?.front?.weights ?? null,
+        backWeightsOverride: learnW?.back?.weights ?? null,
       }),
     [draws, cover, learnW],
   )
-  const bt = useMemo(() => backtestSSQ(draws, { periods: 50, minTrain: 30 }), [draws])
+  const bt = useMemo(() => backtestDLT(draws, { periods: 50, minTrain: 30 }), [draws])
 
   const steps = useMemo(() => {
     if (!draws.length) return []
@@ -357,32 +351,32 @@ export default function SSQPredict({ draws }) {
       {
         no: 1,
         title: '大势总览',
-        text: `近 10 期和值均值 ${p10.sumAvg}（理论 102），跨度均值 ${p10.spanAvg}，振幅正常，按常规节奏研判。`,
+        text: `近 10 期和值均值 ${p10.sumAvg}（理论 90），跨度均值 ${p10.spanAvg}，振幅正常，按常规节奏研判。`,
       },
       {
         no: 2,
         title: '5 期重号池',
-        text: `最近 5 期共出 ${pool.count} 个红球，${pool.strong ? '≥20，重号偏强，可多留旧码' : '<20，重号偏弱，优先考虑新码'}。`,
+        text: `最近 5 期共出 ${pool.count} 个前区号，${pool.strong ? '≥17，重号偏强，可多留旧码' : '<17，重号偏弱，优先考虑新码'}。`,
         tone: pool.strong ? 'info' : 'warn',
       },
       {
         no: 3,
         title: '新旧码配比',
         text: no
-          ? `上期 6 红中旧码 ${no.old} 个、新码 ${no.new} 个（5 期旧码池 ${no.poolSize} 个）。常见配比为 2:4 或 3:3。`
+          ? `上期 5 个前区中旧码 ${no.old} 个、新码 ${no.new} 个（5 期旧码池 ${no.poolSize} 个）。常见配比为 2:3 或 1:4。`
           : '数据不足。',
       },
       {
         no: 4,
         title: '热温冷配比',
         text: heat
-          ? `上期结构为 热 ${heat.hot} / 温 ${heat.warm} / 冷 ${heat.cold}，推荐沿用 3:2:1 或 2:2:2 的均衡配比。`
+          ? `上期结构为 热 ${heat.hot} / 温 ${heat.warm} / 冷 ${heat.cold}，推荐沿用 2:2:1 或 3:1:1 的均衡配比。`
           : '数据不足。',
       },
       {
         no: 5,
         title: '三区结构',
-        text: `近 10 期三区平均出号 ${z3Avg.join(' / ')}，断区率 ${p10.zone3.breakRate}%；推荐 ${pred ? pred.structure.zone3.join(':') : '2:2:2'}。`,
+        text: `近 10 期三区平均出号 ${z3Avg.join(' / ')}，断区率 ${p10.zone3.breakRate}%；推荐 ${pred ? pred.structure.zone3.join(':') : '2:2:1'}。`,
       },
       {
         no: 6,
@@ -392,9 +386,7 @@ export default function SSQPredict({ draws }) {
       {
         no: 7,
         title: '余数结构',
-        text: pred
-          ? `推荐 012 路 ${pred.structure.road012.join(':')}，三路尽量都有覆盖，避免单路扎堆。`
-          : '—',
+        text: pred ? `推荐 012 路 ${pred.structure.road012.join(':')}，三路尽量都有覆盖，避免单路扎堆。` : '—',
       },
       {
         no: 8,
@@ -407,7 +399,7 @@ export default function SSQPredict({ draws }) {
         no: 9,
         title: '重邻孤',
         text: rn
-          ? `上期开出 重号 ${rn.repeat.length} 个、邻号 ${rn.neighbor.length} 个、孤号 ${rn.orphan.length} 个；下期可保留 0–2 个重号。`
+          ? `上期开出 重号 ${rn.repeat.length} 个、邻号 ${rn.neighbor.length} 个、孤号 ${rn.orphan.length} 个；下期可保留 0–1 个重号。`
           : '—',
       },
       {
@@ -431,16 +423,14 @@ export default function SSQPredict({ draws }) {
   const latest = draws[0]
   const lastA = analyzeDraw(latest)
   const tier = pred.tiers.find((t) => t.cover === cover) || pred.tiers[0]
-  const hitSet = new Set(pred.red)
-  const hitBlue = pred.blue === latest.blue
+  const hitSet = new Set(pred.front)
+  const backSet = new Set(pred.back)
 
-  // 蓝球命中率的统计解读：点估计必须配置信区间，否则 6% 看着像算法失效，
-  // 实际上单注 1/16 = 6.25%，几十期的波动本就该在这个量级。
-  const blueHits = bt.rows.filter((r) => r.blueHit).length
-  const blueN = bt.rows.length
-  const blueCi = wilsonInterval(blueHits, blueN)
-  const blueBaseline = 1 / BLUE_MAX
-  const ciCoversBaseline = blueCi.low <= blueBaseline && blueBaseline <= blueCi.high
+  const backHits = bt.rows.filter((r) => r.backHits === BACK_PICK).length
+  const backN = bt.rows.length
+  const backCi = wilsonInterval(backHits, backN)
+  const backBaseline = 1 / 66
+  const ciCoversBaseline = backCi.low <= backBaseline && backBaseline <= backCi.high
 
   return (
     <div className="page">
@@ -452,17 +442,19 @@ export default function SSQPredict({ draws }) {
         )}
         <div className="ssq-predict-hero">
           <div className="ssq-predict-balls">
-            {pred.red.map((n) => (
+            {pred.front.map((n) => (
               <Ball key={n} n={n} kind="red" size="lg" />
             ))}
             <span className="ssq-divider ssq-divider-lg" aria-hidden="true" />
-            <Ball n={pred.blue} kind="blue" size="lg" />
+            {pred.back.map((n) => (
+              <Ball key={`b${n}`} n={n} kind="blue" size="lg" />
+            ))}
           </div>
           <div className="ssq-predict-meta">
             <div>
-              <span className="muted small">蓝球备选</span>
+              <span className="muted small">后区备选</span>
               <span className="ssq-blue-backup">
-                {pred.blueBackups.map((b) => (
+                {pred.backBackups.map((b) => (
                   <Ball key={b} n={b} kind="blue" size="xs" />
                 ))}
               </span>
@@ -481,33 +473,34 @@ export default function SSQPredict({ draws }) {
         <div className="predict-row" style={{ marginTop: 8 }}>
           <div className="predict-label">上期开奖</div>
           <div className="predict-value">
-            <SsqDraw draw={latest} size="sm" hitSet={hitSet} hitBlue={hitBlue} />
+            <DltDraw draw={latest} size="sm" hitSet={hitSet} hitBack={backSet} />
             <span className="muted small">
-              和 {lastA.sum} · 跨 {lastA.span} · 三区 {lastA.zone3.join(':')} · 重号命中 {latest.red.filter((n) => pred.red.includes(n)).length}
+              和 {lastA.sum} · 跨 {lastA.span} · 三区 {lastA.zone3.join(':')} · 重号命中{' '}
+              {latest.front.filter((n) => pred.front.includes(n)).length}
             </span>
           </div>
         </div>
       </Card>
 
-      <SsqAiCard draws={draws} pred={pred} />
+      <DltAiCard draws={draws} pred={pred} />
 
       <div className="stat-grid">
         <StatCard
-          label="近 50 期红球平均命中"
-          value={bt.avgRedHits}
-          note={`纯随机基准 ${bt.baselineRed}`}
+          label="近 50 期前区平均命中"
+          value={bt.avgFrontHits}
+          note={`纯随机基准 ${bt.baselineFront}`}
         />
         <StatCard
-          label="近 50 期蓝球命中率"
-          value={`${bt.blueRate}%`}
+          label="近 50 期后区全中率"
+          value={`${bt.backRate}%`}
           tone="blue"
-          note={`纯随机基准 ${bt.baselineBlue}%`}
+          note={`纯随机基准 ${bt.baselineBack}%`}
         />
         <StatCard label="候选池" value={pred.candidates.length} tone="amber" note="参与组合枚举的号码" />
         <StatCard label="杀号" value={pred.kill.length} tone="green" note="评分最低，仅供参照" />
       </div>
 
-      <Card title="蓝球命中率解读" tag="小样本别误读">
+      <Card title="后区命中率解读" tag="小样本别误读">
         <div className="table-scroll">
           <table className="ledger-table">
             <thead>
@@ -519,75 +512,74 @@ export default function SSQPredict({ draws }) {
             </thead>
             <tbody>
               <tr>
-                <td>近 {blueN} 期命中</td>
-                <td className="mono">{blueHits} 次</td>
-                <td className="muted small">单蓝命中即算一次</td>
+                <td>近 {backN} 期两号全中</td>
+                <td className="mono">{backHits} 次</td>
+                <td className="muted small">后区 2 个号都对才计数</td>
               </tr>
               <tr>
                 <td>观测命中率</td>
-                <td className="mono">{(blueCi.p * 100).toFixed(1)}%</td>
+                <td className="mono">{(backCi.p * 100).toFixed(1)}%</td>
                 <td className="muted small">点估计，受样本量影响大</td>
               </tr>
               <tr>
                 <td>95% 置信区间</td>
                 <td className="mono">
-                  {(blueCi.low * 100).toFixed(1)}% ~ {(blueCi.high * 100).toFixed(1)}%
+                  {(backCi.low * 100).toFixed(1)}% ~ {(backCi.high * 100).toFixed(1)}%
                 </td>
                 <td className="muted small">威尔逊区间</td>
               </tr>
               <tr>
                 <td>纯随机基准</td>
-                <td className="mono text-blue">{(blueBaseline * 100).toFixed(2)}%</td>
-                <td className="muted small">1 / 16，单注理论值</td>
+                <td className="mono text-blue">{(backBaseline * 100).toFixed(2)}%</td>
+                <td className="muted small">1 / C(12,2) = 1/66</td>
               </tr>
               <tr>
                 <td>结论</td>
                 <td className="mono">{ciCoversBaseline ? '与随机无显著差异' : '偏离基准'}</td>
                 <td className="muted small">
-                  {ciCoversBaseline
-                    ? '区间包含基准值，说明波动属于噪声'
-                    : '区间不包含基准值，需扩大样本再判断'}
+                  {ciCoversBaseline ? '区间包含基准值，说明波动属于噪声' : '区间不包含基准值，需扩大样本再判断'}
                 </td>
               </tr>
             </tbody>
           </table>
         </div>
         <Note tone="info">
-          蓝球只有 16 个号，无论用什么方法，单注命中率上限就是 6.25%。几十期的观测值在 4%~10% 之间波动都属正常，
-          不能据此判断算法好坏；样本越小越容易被偶然结果误导。
+          后区 12 选 2，两号全中的理论概率固定为 1.5%。几十期的观测值在 0%~5% 之间波动都属正常，
+          不能据此判断算法好坏。
         </Note>
       </Card>
 
-      <Card title="蓝球覆盖与成本" tag="唯一能提高命中率的办法">
+      <Card title="后区覆盖与成本" tag="多选后区 = 用钱买命中率">
         <div className="table-scroll">
           <table className="ledger-table">
             <thead>
               <tr>
-                <th>蓝球个数</th>
-                <th>单注命中率</th>
+                <th>后区个数</th>
+                <th>两号全中率</th>
+                <th>组合注数</th>
                 <th>每期投入</th>
-                <th>六等奖期望</th>
-                <th>回报率</th>
+                <th>九等奖概率</th>
               </tr>
             </thead>
             <tbody>
-              {[1, 2, 3, 4, 5, 8, 16].map((n) => (
-                <tr key={n} className={n === 1 ? 'ssq-row-active' : ''}>
-                  <td className="mono">{n} 个</td>
-                  <td className="mono">{((n / BLUE_MAX) * 100).toFixed(1)}%</td>
-                  <td className="mono">{n * 2} 元</td>
-                  <td className="mono">{((n / BLUE_MAX) * 5).toFixed(2)} 元</td>
-                  <td className="mono text-red">
-                    {((((n / BLUE_MAX) * 5) / (n * 2)) * 100).toFixed(1)}%
-                  </td>
-                </tr>
-              ))}
+              {[2, 3, 4, 5, 6, 8, 12].map((n) => {
+                const combos = (n * (n - 1)) / 2
+                return (
+                  <tr key={n} className={n === 2 ? 'ssq-row-active' : ''}>
+                    <td className="mono">{n} 个</td>
+                    <td className="mono">{((combos / 66) * 100).toFixed(1)}%</td>
+                    <td className="mono">{combos}</td>
+                    <td className="mono">{combos * 2} 元</td>
+                    <td className="mono">{((combos / 66) * 100).toFixed(1)}%</td>
+                  </tr>
+                )
+              })}
             </tbody>
           </table>
         </div>
         <Note tone="warn">
-          命中率随蓝球个数线性上升，但回报率恒为 15.6%——概率完全是用钱买来的，单位金额的期望一分没变。
-          全包 16 个蓝球必中奖，但每期要投入 32 元，最差只中 5 元六等奖。
+          命中率随后区个数线性上升，但单位金额的期望回报几乎不变——概率完全是用钱买来的。
+          全包 12 个后区（66 注）虽能覆盖后区，但每期要投入 132 元，且前区仍可能一个不中。
         </Note>
       </Card>
 
@@ -605,9 +597,9 @@ export default function SSQPredict({ draws }) {
         </ol>
       </Card>
 
-      <Card title="覆盖档位" tag="多选几个红球的命中期望与成本">
+      <Card title="覆盖档位" tag="多选几个前区号的命中期望与成本">
         <div className="toolbar">
-          <span className="toolbar-label">覆盖红球</span>
+          <span className="toolbar-label">覆盖前区</span>
           {pred.tiers.map((t) => (
             <button
               key={t.cover}
@@ -620,7 +612,7 @@ export default function SSQPredict({ draws }) {
         </div>
         <div className="ssq-ball-row" style={{ marginTop: 12 }}>
           {tier.codes.map((n) => (
-            <Ball key={n} n={n} kind="red" size="sm" className={pred.red.includes(n) ? 'ball-dan' : ''} />
+            <Ball key={n} n={n} kind="red" size="sm" className={pred.front.includes(n) ? 'ball-dan' : ''} />
           ))}
         </div>
         <div className="table-scroll" style={{ marginTop: 12 }}>
@@ -629,8 +621,8 @@ export default function SSQPredict({ draws }) {
               <tr>
                 <th>档位</th>
                 <th>平均命中</th>
-                <th>6 红全覆盖概率</th>
-                <th>单蓝注数</th>
+                <th>5 前区全覆盖概率</th>
+                <th>单后区组合注数</th>
                 <th>成本</th>
               </tr>
             </thead>
@@ -648,12 +640,12 @@ export default function SSQPredict({ draws }) {
           </table>
         </div>
         <Note>
-          覆盖 k 个红球的平均命中 = k × 6/33。档位升高只增加覆盖与花费，
-          “6 个红球全覆盖概率”仍是 C(k,6)/C(33,6)，不存在更划算的档位。
+          覆盖 k 个前区号的单号平均命中 = k × 5/35。档位升高只增加覆盖与花费，
+          “5 个前区全覆盖概率”仍是 C(k,5)/C(35,5)，不存在更划算的档位。
         </Note>
       </Card>
 
-      <Card title="红球候选评分" tag="前 16 名 · 分数越高越贴合历史节奏">
+      <Card title="前区候选评分" tag="前 16 名 · 分数越高越贴合历史节奏">
         <div className="table-scroll">
           <table className="ledger-table">
             <thead>
@@ -677,7 +669,7 @@ export default function SSQPredict({ draws }) {
                   </td>
                   <td className="mono">{c.curOmit}</td>
                   <td>
-                    {pred.red.includes(c.n) ? (
+                    {pred.front.includes(c.n) ? (
                       <span className="prize-badge prize-badge-win">主推</span>
                     ) : (
                       <span className="muted small">—</span>
@@ -697,14 +689,14 @@ export default function SSQPredict({ draws }) {
               <Ball key={n} n={n} kind="red" size="sm" dim />
             ))}
           </div>
-          <Note>杀号只是评分排名的结果，任何号码下期被抽中的机会都相同（6/33）。</Note>
+          <Note>杀号只是评分排名的结果，任何号码下期被抽中的机会都相同（5/35）。</Note>
         </Card>
-        <Card title="蓝球候选" tag="前 8 名">
+        <Card title="后区候选" tag="前 8 名">
           <div className="table-scroll">
             <table className="ledger-table">
               <thead>
                 <tr>
-                  <th>蓝球</th>
+                  <th>后区</th>
                   <th>评分</th>
                   <th>冷热</th>
                   <th>遗漏</th>
@@ -712,8 +704,8 @@ export default function SSQPredict({ draws }) {
                 </tr>
               </thead>
               <tbody>
-                {pred.blues.map((b) => (
-                  <tr key={b.n} className={b.n === pred.blue ? 'ssq-row-active' : ''}>
+                {pred.backs.map((b) => (
+                  <tr key={b.n} className={pred.back.includes(b.n) ? 'ssq-row-active' : ''}>
                     <td>
                       <Ball n={b.n} kind="blue" size="xs" />
                     </td>
@@ -739,14 +731,18 @@ export default function SSQPredict({ draws }) {
 
       <Card title="三区 / 四区定义" tag="结构校验口径">
         <div className="ssq-base-grid mono">
-          <div>三区：{ZONE3.map(([a, b]) => `${String(a).padStart(2, '0')}-${String(b).padStart(2, '0')}`).join(' / ')}</div>
-          <div>四区：{ZONE4.map(([a, b]) => `${String(a).padStart(2, '0')}-${String(b).padStart(2, '0')}`).join(' / ')}</div>
+          <div>
+            三区：{ZONE3.map(([a, b]) => `${String(a).padStart(2, '0')}-${String(b).padStart(2, '0')}`).join(' / ')}
+          </div>
+          <div>
+            四区：{ZONE4.map(([a, b]) => `${String(a).padStart(2, '0')}-${String(b).padStart(2, '0')}`).join(' / ')}
+          </div>
         </div>
       </Card>
 
       <Note tone="warn">
-        以上推荐是按书中十章方法做的结构化筛选，本质是“从 33 个号里挑一组看起来最像历史开奖的号码”。
-        每一注的中奖概率始终是 1/17,721,088，任何方法都无法改变。请勿据此加大投入。
+        以上推荐是按十章方法做的结构化筛选，本质是“从 35 个前区号里挑一组看起来最像历史开奖的号码”。
+        每一注的中奖概率始终是 1/21,425,712，任何方法都无法改变。请勿据此加大投入。
       </Note>
     </div>
   )

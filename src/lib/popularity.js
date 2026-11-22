@@ -1,8 +1,8 @@
 // ============================================================
-// 组合热度与分摊风险模型（双色球）
+// 组合热度与分摊风险模型（大乐透前区）
 //
 // 为什么做这个：
-// 双色球头奖是浮动奖（奖池制），多人同时中奖要分摊。
+// 大乐透头奖是浮动奖（奖池制），多人同时中奖要分摊。
 // 选号无法改变中奖概率，但避开别人扎堆买的组合，能提高「中奖时的期望奖金」。
 // 这是唯一数学上站得住的优化方向，依据是 Cook & Clotfelter (1993)
 // 对彩票号码选择行为的实证：投注者对小号码（≤31，尤其 ≤12）严重超配，
@@ -29,12 +29,12 @@ function makeLcg(seed) {
   }
 }
 
-/** 从 1..maxNum 中抽 6 个不重复号码（可带 lock 胆码，胆码必定包含） */
-function drawCombo(rnd, maxNum, lock = []) {
+/** 从 1..maxNum 中抽 pick 个不重复号码（可带 lock 胆码，胆码必定包含） */
+function drawCombo(rnd, maxNum, lock = [], pick = 6) {
   const used = new Set(lock)
   const pool = []
   for (let n = 1; n <= maxNum; n++) if (!used.has(n)) pool.push(n)
-  const need = 6 - lock.length
+  const need = pick - lock.length
   for (let i = 0; i < need; i++) {
     const j = i + Math.floor(rnd() * (pool.length - i))
     const t = pool[i]
@@ -75,16 +75,16 @@ function hasArithmeticRun(nums) {
 
 /**
  * 组合热度 = Σ 单号倾向 × 结构惩罚系数。
- * @param {number[]} nums 6 个红球
- * @param {{maxNum?: number, prevNums?: number[]}} opts
- *        prevNums = 上期开奖红球（用于「照抄上期」加成）
+ * @param {number[]} nums 前区号码（默认 5 个）
+ * @param {{maxNum?: number, prevNums?: number[], pick?: number}} opts
+ *        prevNums = 上期开奖前区（用于「照抄上期」加成）
  * @returns {{score: number, base: number, factors: {name: string, mult: number}[]}}
  */
-export function comboPopularity(nums, { maxNum = 33, prevNums = [] } = {}) {
+export function comboPopularity(nums, { maxNum = 35, prevNums = [], pick = 5 } = {}) {
   const arr = [...nums].sort((a, b) => a - b)
   if (
-    arr.length !== 6 ||
-    new Set(arr).size !== 6 ||
+    arr.length !== pick ||
+    new Set(arr).size !== pick ||
     arr.some((n) => !Number.isInteger(n) || n < 1 || n > maxNum)
   ) {
     return { score: 0, base: 0, factors: [] }
@@ -95,10 +95,10 @@ export function comboPopularity(nums, { maxNum = 33, prevNums = [] } = {}) {
 
   const factors = []
 
-  // 1. 全为连续号（如 01,02,03,04,05,06）——手选票的招牌形态
+  // 1. 全为连续号 —— 手选票的招牌形态
   const allConsecutive = arr.every((n, i) => i === 0 || n === arr[i - 1] + 1)
   if (allConsecutive) {
-    factors.push({ name: '全为连续号（如 01–06）', mult: 1.9 })
+    factors.push({ name: '全为连续号', mult: 1.9 })
   } else if (hasArithmeticRun(arr)) {
     // 2. 含等差数列（公差相同且长度 ≥3）
     factors.push({ name: '含等差数列（公差相同且长度 ≥3）', mult: 1.5 })
@@ -109,36 +109,37 @@ export function comboPopularity(nums, { maxNum = 33, prevNums = [] } = {}) {
     factors.push({ name: '全部号码 ≤31（生日偏好）', mult: 1.25 })
   }
 
-  // 4. 与上期重合 ≥3 个：不少人直接照抄上期
+  // 4. 与上期重合 ≥2 个：不少人直接照抄上期
   const prevSet = new Set(prevNums)
   const overlap = arr.filter((n) => prevSet.has(n)).length
-  if (overlap >= 3) {
+  if (overlap >= 2) {
     factors.push({ name: `与上期重合 ${overlap} 个（照抄上期）`, mult: 1.35 })
   }
 
-  // 5. 和值 100–140：大众偏好「看起来均衡」的组合
+  // 5. 和值靠近理论均值：大众偏好「看起来均衡」的组合
   const sum = arr.reduce((s, n) => s + n, 0)
-  if (sum >= 100 && sum <= 140) {
-    factors.push({ name: `和值 ${sum} 落在 100–140（大众偏爱均衡）`, mult: 1.15 })
+  const mean = (pick * (maxNum + 1)) / 2
+  if (sum >= mean - 20 && sum <= mean + 20) {
+    factors.push({ name: `和值 ${sum} 贴近均值 ${mean}（大众偏爱均衡）`, mult: 1.15 })
   }
 
   const score = base * factors.reduce((s, f) => s * f.mult, 1)
   return { score: +score.toFixed(3), base: +base.toFixed(3), factors }
 }
 
-// 百分位抽样表按「号码上限 + 样本数 + 上期开奖」缓存，避免每个组合都重抽样
+// 百分位抽样表按「号码上限 + 样本数 + 上期开奖 + 选取个数」缓存
 const pctCache = new Map()
 
-function percentileTable(maxNum, samples, prevNums) {
+function percentileTable(maxNum, samples, prevNums, pick) {
   const prevKey = prevNums.length ? [...prevNums].sort((a, b) => a - b).join(',') : '-'
-  const key = `${maxNum}|${samples}|${prevKey}`
+  const key = `${maxNum}|${samples}|${prevKey}|${pick}`
   const hit = pctCache.get(key)
   if (hit) return hit
 
   const rnd = makeLcg(LCG_SEED)
   const scores = new Array(samples)
   for (let i = 0; i < samples; i++) {
-    scores[i] = comboPopularity(drawCombo(rnd, maxNum), { maxNum, prevNums }).score
+    scores[i] = comboPopularity(drawCombo(rnd, maxNum, [], pick), { maxNum, prevNums, pick }).score
   }
   scores.sort((a, b) => a - b)
   pctCache.set(key, scores)
@@ -147,14 +148,12 @@ function percentileTable(maxNum, samples, prevNums) {
 
 /**
  * 用蒙特卡洛抽样估算某个热度分数的百分位（0–100）。
- * 固定种子 LCG，同一分数多次调用结果完全一致。
  * @param {number} score comboPopularity 的分数
- * @param {{maxNum?: number, samples?: number, prevNums?: number[]}} opts
+ * @param {{maxNum?: number, samples?: number, prevNums?: number[], pick?: number}} opts
  */
-export function popularityPercentile(score, { maxNum = 33, samples = 3000, prevNums = [] } = {}) {
-  const table = percentileTable(maxNum, samples, prevNums)
+export function popularityPercentile(score, { maxNum = 35, samples = 3000, prevNums = [], pick = 5 } = {}) {
+  const table = percentileTable(maxNum, samples, prevNums, pick)
   if (!table.length) return 0
-  // 二分：统计「分数 ≤ 目标」的样本占比
   let lo = 0
   let hi = table.length
   while (lo < hi) {
@@ -183,26 +182,27 @@ export function splitIndex(percentile) {
  */
 export function recommendColdCombos({
   lock = [],
-  maxNum = 33,
+  maxNum = 35,
   samples = 8000,
   prevNums = [],
   top = 5,
+  pick = 5,
 } = {}) {
   const locks = [...new Set(lock)]
     .filter((n) => Number.isInteger(n) && n >= 1 && n <= maxNum)
     .sort((a, b) => a - b)
     .slice(0, 3)
-  if (locks.length >= 6) return []
+  if (locks.length >= pick) return []
 
   const rnd = makeLcg(LCG_SEED)
   const seen = new Set()
   const rows = []
   for (let i = 0; i < samples; i++) {
-    const nums = drawCombo(rnd, maxNum, locks)
+    const nums = drawCombo(rnd, maxNum, locks, pick)
     const key = nums.join('-')
     if (seen.has(key)) continue
     seen.add(key)
-    const { score, factors } = comboPopularity(nums, { maxNum, prevNums })
+    const { score, factors } = comboPopularity(nums, { maxNum, prevNums, pick })
     rows.push({ nums, score, factors })
   }
   rows.sort((a, b) => a.score - b.score)

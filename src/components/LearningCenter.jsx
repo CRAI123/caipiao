@@ -8,12 +8,12 @@ import { Card, Note } from './common.jsx'
 import { readLearning, normEntropy } from '../lib/learning.js'
 import { KL8_PLAY } from '../lib/kl8Math.js'
 
-const GAME_LABEL = { kl8: '快乐8', fc3d: '福彩3D', pl3: '排列三', pl5: '排列五', ssq: '双色球' }
+const GAME_LABEL = { kl8: '快乐8', fc3d: '福彩3D', pl3: '排列三', pl5: '排列五', dlt: '大乐透' }
 
 const SOURCE_LABEL = {
   'algo:v7': '算法 v7',
   'algo:pool': '算法候选池',
-  'algo:ssq': '算法预测',
+  'algo:dlt': '算法预测',
   'ai:final': 'AI 终选',
   'ai:site': 'AI 站内',
   'mix:kl8': '混合推荐',
@@ -25,13 +25,13 @@ const HIT_SOURCES = {
   fc3d: ['ai:final', 'ai:site'],
   pl3: ['ai:final', 'ai:site'],
   pl5: ['ai:final', 'ai:site'],
-  ssq: ['algo:ssq', 'ai:final', 'ai:site'],
+  dlt: ['algo:dlt', 'ai:final', 'ai:site'],
 }
 
 const SOURCE_COLOR = {
   'algo:v7': '#24558f',
   'algo:pool': '#24558f',
-  'algo:ssq': '#24558f',
+  'algo:dlt': '#24558f',
   'ai:final': '#c23a2b',
   'ai:site': '#b7791f',
   'mix:kl8': '#1d6f3e',
@@ -71,8 +71,8 @@ function paramLabel(key) {
   if (key === 'temp') return '温度权重'
   if (key === 'mix') return 'AI / 算法配比'
   if (key === 'windows') return 'v7 窗口权重'
-  if (key === 'redSignals') return '红球信号权重'
-  if (key === 'blueSignals') return '蓝球信号权重'
+  if (key === 'frontSignals') return '前区信号权重'
+  if (key === 'backSignals') return '后区信号权重'
   const m = /^experts:p(\d+)$/.exec(key)
   if (m) return `第 ${Number(m[1]) + 1} 位专家权重`
   return key
@@ -82,7 +82,7 @@ function paramLabel(key) {
 function hitValue(meta, game) {
   if (!meta) return null
   if (game === 'kl8') return numOrNull(meta.hits)
-  if (game === 'ssq') return numOrNull(meta.redHits)
+  if (game === 'dlt') return numOrNull(meta.frontHits)
   // 数字彩：straight 命中注数（可能是逐注数组，取均值）
   const s = meta.straight
   if (Array.isArray(s)) {
@@ -124,12 +124,12 @@ function buildHitChart(runs, game) {
     values: ids.map((id) => m.get(id) ?? null),
   }))
   const kl8Expected = +(KL8_PLAY * 0.25).toFixed(2)
-  const expected = game === 'kl8' ? kl8Expected : game === 'ssq' ? 1.08 : 0.3
+  const expected = game === 'kl8' ? kl8Expected : game === 'dlt' ? 0.71 : 0.3
   const expectedLabel =
     game === 'kl8'
       ? `随机期望 ${kl8Expected} 个`
-      : game === 'ssq'
-        ? '随机期望 1.08 红'
+      : game === 'dlt'
+        ? '随机期望 0.71 前区'
         : '随机期望 0.3 中/注'
   return { columns: ids, series, expected, expectedLabel }
 }
@@ -200,11 +200,11 @@ function buildHistoryCharts(history) {
 }
 
 // 对战榜不统计的过程行（无独立命中口径）
-const BATTLE_SKIP = ['hedge:experts', 'models:kl8', 'mix:kl8', 'signals:ssq']
+const BATTLE_SKIP = ['hedge:experts', 'models:kl8', 'mix:kl8', 'signals:dlt']
 
 /** 近 60 期对战榜：各来源 期数 / 近10、近30期平均命中 / 跑赢随机期望比例 / 累计 logLoss */
 function buildBattleBoard(runs, game) {
-  const expected = game === 'kl8' ? +(KL8_PLAY * 0.25).toFixed(2) : game === 'ssq' ? 1.08 : 0.3
+  const expected = game === 'kl8' ? +(KL8_PLAY * 0.25).toFixed(2) : game === 'dlt' ? 0.71 : 0.3
   const bySource = new Map()
   for (const r of runs) {
     if (BATTLE_SKIP.includes(r.source)) continue

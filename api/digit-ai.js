@@ -14,12 +14,12 @@ import { notesForPrompt, persistPredictions } from './_lib/learning.js'
 
 export const config = { maxDuration: 60 }
 
-const GAMES = { fc3d: '福彩3D', pl3: '排列三', pl5: '排列五', ssq: '双色球' }
+const GAMES = { fc3d: '福彩3D', pl3: '排列三', pl5: '排列五', dlt: '大乐透' }
 // 每位彩种的号码位数：排列三 3 位（直选/组选），排列五 5 位（只有直选）
 const POS_LEN = { fc3d: 3, pl3: 3, pl5: 5 }
 const maskId = (id) => (id ? `尾号${String(id).slice(-4)}` : '匿名设备')
-// 结果结构版本：v7 起双色球扩为六轮（新增红球/蓝球专项），命中旧版会重算
-const SCHEMA = 7
+// 结果结构版本：v8 起双色球位改为大乐透（前区 5 + 后区 2），命中旧版会重算
+const SCHEMA = 8
 
 /** 某个位数对应的 JSON 输出格式说明（供模型与重试用） */
 function jsonHint(len) {
@@ -28,18 +28,18 @@ function jsonHint(len) {
     : '{"straight":["123","456","789"],"group":["135","246"],"group3":["112"],"reasons":{"123":"一句话理由"},"summary":"80 字内","risk":"一句风险提示"}'
 }
 
-/** 双色球的 JSON 输出格式说明 */
-function jsonHintSsq() {
-  return '{"red":[1,7,12,18,25,30],"blue":7,"reasons":{"1":"一句话理由"},"summary":"80 字内","risk":"一句风险提示"}'
+/** 大乐透的 JSON 输出格式说明 */
+function jsonHintDlt() {
+  return '{"front":[3,11,17,24,31],"back":[4,9],"reasons":{"3":"一句话理由"},"summary":"80 字内","risk":"一句风险提示"}'
 }
 
-/** 双色球六轮：结构解读 → 反向质询 → 红球专项 → 蓝球专项 → 算法候选终选 → 终审校验 */
-function roundsSsq() {
+/** 大乐透六轮：结构解读 → 反向质询 → 前区专项 → 后区专项 → 算法候选终选 → 终审校验 */
+function roundsDlt() {
   return [
     {
       name: '结构解读',
       prompt:
-        '第一轮：只依据前面给出的统计数据，解读本期红球/蓝球结构（区间分布、冷热、遗漏、和值、奇偶、连号与重号倾向）。不要编造数据，不要承诺中奖。控制在 300 字内。',
+        '第一轮：只依据前面给出的统计数据，解读本期前区/后区结构（区间分布、冷热、遗漏、和值、奇偶、连号与重号倾向）。不要编造数据，不要承诺中奖。控制在 300 字内。',
       temperature: 0.5,
     },
     {
@@ -49,17 +49,17 @@ function roundsSsq() {
       temperature: 0.3,
     },
     {
-      name: '红球专项',
+      name: '前区专项',
       prompt:
-        '第三轮：只做红球专项——结合上面的统计，分析红球的区间分布、连号与重号倾向、冷热与遗漏，给出 8-10 个优先关注的红球候选并说明取舍。' +
-        '不要给出最终 6 个，不要编造数据，不要承诺中奖。控制在 250 字内。',
+        '第三轮：只做前区专项——结合上面的统计，分析 35 个前区号的区间分布（01-12 / 13-24 / 25-35）、连号与重号倾向、冷热与遗漏，给出 8-10 个优先关注的前区候选并说明取舍。' +
+        '不要给出最终 5 个，不要编造数据，不要承诺中奖。控制在 250 字内。',
       temperature: 0.4,
       maxTokens: 600,
     },
     {
-      name: '蓝球专项',
+      name: '后区专项',
       prompt:
-        '第四轮：只做蓝球专项——分析蓝球的大小、奇偶、遗漏与近期振幅，给出 2-3 个优先关注的蓝球候选并说明取舍。' +
+        '第四轮：只做后区专项——分析 12 个后区号的大小（01-06 / 07-12）、奇偶、遗漏与近期振幅，给出 3-4 个优先关注的后区候选并说明取舍。' +
         '不要编造数据，不要承诺中奖。控制在 150 字内。',
       temperature: 0.4,
       maxTokens: 400,
@@ -67,18 +67,18 @@ function roundsSsq() {
     {
       name: '算法候选终选',
       prompt:
-        '第五轮：综合前面四轮的结论，只能从上面给出的算法候选池里终选本期号码——红球 6 个、蓝球 1 个，不得自创池外号码。' +
+        '第五轮：综合前面四轮的结论，只能从上面给出的算法候选池里终选本期号码——前区 5 个、后区 2 个，不得自创池外号码。' +
         '只输出一个 JSON 对象，不要解释文字、不要代码块围栏。格式：' +
-        jsonHintSsq() +
-        '。red 必须正好 6 个（1-33，升序、不重复），blue 必须正好 1 个（1-16），且都来自候选池；reasons 的键必须是上面出现过的红球号码。',
+        jsonHintDlt() +
+        '。front 必须正好 5 个（1-35，升序、不重复），back 必须正好 2 个（1-12，升序、不重复），且都来自候选池；reasons 的键必须是上面出现过的前区号码。',
       temperature: 0.3,
     },
     {
       name: '终审校验',
       prompt:
-        '第六轮：终审校验上一轮结果——逐个检查：红球是否正好 6 个、在 1-33 之间且不重复；蓝球是否在 1-16 之间；是否都在算法候选池内。' +
+        '第六轮：终审校验上一轮结果——逐个检查：前区是否正好 5 个、在 1-35 之间且不重复；后区是否正好 2 个、在 1-12 之间且不重复；是否都在算法候选池内。' +
         '有不合规的立即替换为候选池里的次优号。只输出最终 JSON（格式同上一轮），不要解释文字、不要代码块围栏。' +
-        'risk 必须写明「一等奖概率 1/17721088 不变」。',
+        'risk 必须写明「一等奖概率 1/21425712 不变」。',
       temperature: 0.2,
     },
   ]
@@ -178,28 +178,32 @@ function normalizePicks(raw, digitCount = 3) {
   }
 }
 
-/** 规整双色球号码：红球 1-33 去重升序，蓝球 1-16 */
-function normalizePicksSsq(raw) {
+/** 规整大乐透号码：前区 1-35 去重升序，后区 1-12 去重升序 */
+function normalizePicksDlt(raw) {
   if (!raw || typeof raw !== 'object') return null
-  const reds = []
-  for (const x of Array.isArray(raw.red) ? raw.red : []) {
+  const fronts = []
+  for (const x of Array.isArray(raw.front) ? raw.front : []) {
     const n = Number(String(x).replace(/\D/g, ''))
-    if (Number.isInteger(n) && n >= 1 && n <= 33 && !reds.includes(n)) reds.push(n)
+    if (Number.isInteger(n) && n >= 1 && n <= 35 && !fronts.includes(n)) fronts.push(n)
   }
-  const red = reds.sort((a, b) => a - b).slice(0, 8)
-  const bn = Number(String(raw.blue ?? '').replace(/\D/g, ''))
-  const blue = Number.isInteger(bn) && bn >= 1 && bn <= 16 ? bn : null
-  if (red.length < 6) return null
+  const front = fronts.sort((a, b) => a - b).slice(0, 8)
+  const backs = []
+  for (const x of Array.isArray(raw.back) ? raw.back : []) {
+    const n = Number(String(x).replace(/\D/g, ''))
+    if (Number.isInteger(n) && n >= 1 && n <= 12 && !backs.includes(n)) backs.push(n)
+  }
+  const back = backs.sort((a, b) => a - b).slice(0, 4)
+  if (front.length < 5 || back.length < 2) return null
   const reasons = {}
   if (raw.reasons && typeof raw.reasons === 'object') {
     for (const [k, v] of Object.entries(raw.reasons)) {
       const n = Number(String(k).replace(/\D/g, ''))
-      if (Number.isInteger(n) && n >= 1 && n <= 33) reasons[n] = String(v).slice(0, 120)
+      if (Number.isInteger(n) && n >= 1 && n <= 35) reasons[n] = String(v).slice(0, 120)
     }
   }
   return {
-    red,
-    blue,
+    front,
+    back,
     reasons,
     summary: String(raw.summary || '').slice(0, 400),
     risk: String(raw.risk || '').slice(0, 200),
@@ -221,20 +225,20 @@ function sanitizeMessages(messages) {
   return out
 }
 
-/** 校验客户端传来的算法候选池（双色球：红球 1-33 / 蓝球 1-16；数字彩：digitCount 位号码数组） */
+/** 校验客户端传来的算法候选池（大乐透：前区 1-35 / 后区 1-12；数字彩：digitCount 位号码数组） */
 function sanitizeAlgo(raw, digitCount = 3) {
   if (!raw || typeof raw !== 'object') return null
-  if (raw.kind === 'ssq') {
+  if (raw.kind === 'dlt') {
     const ints = (arr, min, max, cap) =>
       (Array.isArray(arr) ? arr : [])
         .map((x) => Number(String(x).replace(/\D/g, '')))
         .filter((n) => Number.isInteger(n) && n >= min && n <= max)
         .filter((n, i, a) => a.indexOf(n) === i)
         .slice(0, cap)
-    const red = ints(raw.red, 1, 33, 20)
-    const blue = ints(raw.blue, 1, 16, 8)
-    if (red.length < 6 || blue.length < 1) return null
-    return { kind: 'ssq', red, blue }
+    const front = ints(raw.front, 1, 35, 20)
+    const back = ints(raw.back, 1, 12, 8)
+    if (front.length < 5 || back.length < 2) return null
+    return { kind: 'dlt', front, back }
   }
   const take = (arr, max) =>
     (Array.isArray(arr) ? arr : [])
@@ -253,11 +257,11 @@ function sanitizeAlgo(raw, digitCount = 3) {
 /** 终选号码必须落在算法候选池内 */
 function restrictToPool(picks, algo) {
   if (!picks || !algo) return picks
-  if (algo.kind === 'ssq') {
+  if (algo.kind === 'dlt') {
     return {
       ...picks,
-      red: (picks.red || []).filter((n) => algo.red.includes(n)),
-      blue: algo.blue.includes(picks.blue) ? picks.blue : null,
+      front: (picks.front || []).filter((n) => algo.front.includes(n)),
+      back: (picks.back || []).filter((n) => algo.back.includes(n)),
     }
   }
   return {
@@ -279,12 +283,13 @@ export default async function handler(req, res) {
     const id = Number(drawId)
     if (!GAMES[game]) return res.status(400).json({ error: '未知彩种' })
     const digitCount = POS_LEN[game] || 3
-    const isSsq = game === 'ssq'
+    const isDlt = game === 'dlt'
     const needStraight = digitCount === 3 ? 3 : 5
     const needGroup = digitCount === 3 ? 2 : 0
     const needGroup3 = digitCount === 3 ? 1 : 0
-    const needRed = 6
-    const ROUNDS = isSsq ? roundsSsq() : roundsFor(digitCount)
+    const needFront = 5
+    const needBack = 2
+    const ROUNDS = isDlt ? roundsDlt() : roundsFor(digitCount)
 
     try {
       sqlRef = getSql()
@@ -408,7 +413,7 @@ export default async function handler(req, res) {
       conv.push(ask, { role: 'assistant', content: text })
     }
     const algoPool = sanitizeAlgo(algo, digitCount)
-    const parsePicks = (raw) => (isSsq ? normalizePicksSsq(raw) : normalizePicks(raw, digitCount))
+    const parsePicks = (raw) => (isDlt ? normalizePicksDlt(raw) : normalizePicks(raw, digitCount))
     let picks = parsePicks(extractJson(rounds[rounds.length - 1].text))
     // 模型偶发拒答或格式漂移：用干净的上下文再要一次纯 JSON
     if (!picks) {
@@ -420,10 +425,10 @@ export default async function handler(req, res) {
             msgs[1],
             {
               role: 'user',
-              content: isSsq
+              content: isDlt
                 ? '只输出一个 JSON 对象，不要任何解释文字、不要代码块围栏。格式：' +
-                  jsonHintSsq() +
-                  '。red 必须正好 6 个（1-33，升序、不重复），blue 必须正好 1 个（1-16）。' +
+                  jsonHintDlt() +
+                  '。front 必须正好 5 个（1-35，升序、不重复），back 必须正好 2 个（1-12，升序、不重复）。' +
                   '只能从上面给出的算法候选池里选，不得自创池外号码。'
                 : '只输出一个 JSON 对象，不要任何解释文字、不要代码块围栏。格式：' +
                   jsonHint(digitCount) +
@@ -456,13 +461,13 @@ export default async function handler(req, res) {
         return out.slice(0, need)
       }
       if (!restricted) {
-        picks = isSsq
+        picks = isDlt
           ? {
-              red: algoPool.red.slice(0, needRed),
-              blue: algoPool.blue[0],
+              front: algoPool.front.slice(0, needFront),
+              back: algoPool.back.slice(0, needBack),
               reasons: {},
               summary: '',
-              risk: '一等奖概率 1/17721088 不变。',
+              risk: '一等奖概率 1/21425712 不变。',
             }
           : {
               straight: algoPool.straight.slice(0, needStraight),
@@ -477,15 +482,15 @@ export default async function handler(req, res) {
             }
         finalSource = 'algo'
         finalNote = 'AI 终选解析失败，已回退到算法候选'
-      } else if (isSsq) {
-        const inPool = Math.min(restricted.red.length, needRed)
-        const blueOk = restricted.blue != null
-        const red = fillTo(restricted.red, algoPool.red, needRed)
-        const blue = blueOk ? restricted.blue : algoPool.blue[0]
-        picks = { ...restricted, red, blue }
-        const missing = needRed - inPool + (blueOk ? 0 : 1)
+      } else if (isDlt) {
+        const inFront = Math.min(restricted.front.length, needFront)
+        const inBack = Math.min(restricted.back.length, needBack)
+        const front = fillTo(restricted.front, algoPool.front, needFront)
+        const back = fillTo(restricted.back, algoPool.back, needBack)
+        picks = { ...restricted, front, back }
+        const missing = needFront - inFront + (needBack - inBack)
         finalNote = missing
-          ? `AI 终选 ${inPool + (blueOk ? 1 : 0)}/${needRed + 1} 个号码在池内，其余 ${missing} 个由算法候选补齐`
+          ? `AI 终选 ${inFront + inBack}/${needFront + needBack} 个号码在池内，其余 ${missing} 个由算法候选补齐`
           : 'AI 已在算法候选池内完成终选'
       } else {
         // AI 的池内终选保留，缺的注数用算法候选池顺序补齐，避免整份作废
@@ -517,8 +522,8 @@ export default async function handler(req, res) {
       finalSource,
       finalNote,
       algoPicks: algoPool
-        ? algoPool.kind === 'ssq'
-          ? { kind: 'ssq', red: algoPool.red.slice(0, 12), blue: algoPool.blue.slice(0, 4) }
+        ? algoPool.kind === 'dlt'
+          ? { kind: 'dlt', front: algoPool.front.slice(0, 12), back: algoPool.back.slice(0, 4) }
           : {
               straight: algoPool.straight.slice(0, needStraight),
               group: algoPool.group.slice(0, needGroup),
@@ -545,8 +550,8 @@ export default async function handler(req, res) {
     try {
       if (sqlRef && picks) {
         await persistPredictions(sqlRef, game, id, [
-          isSsq
-            ? { source: 'ai:site', picks: { red: picks.red, blue: picks.blue } }
+          isDlt
+            ? { source: 'ai:site', picks: { front: picks.front, back: picks.back } }
             : {
                 source: 'ai:site',
                 picks: {

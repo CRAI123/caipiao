@@ -40,27 +40,27 @@ function buildSeries(lottery, chrono) {
     ]
   }
 
-  if (lottery === 'ssq') {
+  if (lottery === 'dlt') {
     return [
       {
-        key: 'redsum',
-        title: '红球和值 K 线',
-        tag: '理论均值 102',
+        key: 'frontsum',
+        title: '前区和值 K 线',
+        tag: '理论均值 90',
         unit: '',
         wick: 0.35,
-        points: chrono.map((d) => ({ id: d.id, date: d.date, value: sumOf(d.red), span: spanOf(d.red) })),
+        points: chrono.map((d) => ({ id: d.id, date: d.date, value: sumOf(d.front), span: spanOf(d.front) })),
         hint:
-          '6 个红球的和值近似正态，理论均值 102、标准差约 24。影线为红球跨度的 0.35 倍。',
+          '5 个前区号的和值近似正态，理论均值 90、标准差约 26。影线为前区跨度的 0.35 倍。',
       },
       {
-        key: 'blue',
-        title: '蓝球 K 线',
-        tag: '1 – 16',
+        key: 'back',
+        title: '后区和值 K 线',
+        tag: '2 – 24',
         unit: '',
         wick: 0.2,
-        points: chrono.map((d) => ({ id: d.id, date: d.date, value: d.blue, span: 0 })),
+        points: chrono.map((d) => ({ id: d.id, date: d.date, value: sumOf(d.back), span: 0 })),
         hint:
-          '蓝球是单个号码，没有真正的开高低收，这里把「上期→本期」的变化画成实体，方便看连号与折返。',
+          '后区 2 个号的和值在 3–23 之间，理论均值 13。这里把「上期→本期」的变化画成实体，方便看折返。',
       },
     ]
   }
@@ -211,15 +211,15 @@ export default function KlinePage({ lottery, draws, positions = POS_LABEL }) {
     [trendPoints, lottery],
   )
 
-  const ssqRedPoints = useMemo(
-    () => (lottery === 'ssq' ? trendPoints.map((d) => ({ id: d.id, date: d.date, label: d.id, hits: d.red })) : []),
+  const dltFrontPoints = useMemo(
+    () => (lottery === 'dlt' ? trendPoints.map((d) => ({ id: d.id, date: d.date, label: d.id, hits: d.front })) : []),
     [trendPoints, lottery],
   )
 
-  const ssqBluePoints = useMemo(
+  const dltBackPoints = useMemo(
     () =>
-      lottery === 'ssq'
-        ? trendPoints.map((d) => ({ id: d.id, date: d.date, label: d.id, hits: [d.blue] }))
+      lottery === 'dlt'
+        ? trendPoints.map((d) => ({ id: d.id, date: d.date, label: d.id, hits: d.back }))
         : [],
     [trendPoints, lottery],
   )
@@ -291,25 +291,25 @@ export default function KlinePage({ lottery, draws, positions = POS_LABEL }) {
         </Card>
       )}
 
-      {lottery === 'ssq' && (
+      {lottery === 'dlt' && (
         <>
-          <Card title="红球走势连线（1 – 33）" tag={`近 ${trendN} 期`}>
+          <Card title="前区走势连线（1 – 35）" tag={`近 ${trendN} 期`}>
             <NumberTrend
-              rows={Array.from({ length: 33 }, (_, i) => i + 1)}
-              points={ssqRedPoints}
+              rows={Array.from({ length: 35 }, (_, i) => i + 1)}
+              points={dltFrontPoints}
               colorFor={() => RANGE_COLOR.red}
               formatRow={(num) => String(num).padStart(2, '0')}
             />
-            <Note>红球 6 个号码的逐期连线。连号、重号、斜连在图上会表现为相邻行的连续点。</Note>
+            <Note>前区 5 个号码的逐期连线。连号、重号、斜连在图上会表现为相邻行的连续点。</Note>
           </Card>
-          <Card title="蓝球走势连线（1 – 16）" tag={`近 ${trendN} 期`}>
+          <Card title="后区走势连线（1 – 12）" tag={`近 ${trendN} 期`}>
             <NumberTrend
-              rows={Array.from({ length: 16 }, (_, i) => i + 1)}
-              points={ssqBluePoints}
+              rows={Array.from({ length: 12 }, (_, i) => i + 1)}
+              points={dltBackPoints}
               colorFor={() => RANGE_COLOR.blue}
               formatRow={(num) => String(num).padStart(2, '0')}
             />
-            <Note>蓝球只有 1 个号，单行上前后的连线反映的是相邻两期是否连号。</Note>
+            <Note>后区 2 个号码的逐期连线，同一期两个号会同时亮起。</Note>
           </Card>
         </>
       )}

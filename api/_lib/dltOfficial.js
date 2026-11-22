@@ -1,26 +1,28 @@
 // ============================================================
-// 双色球官方销售 / 中奖注数 → 真实“购买集中度”模型
+// 大乐透官方销售 / 中奖注数 → 真实“购买集中度”模型
 //
 // 背景：官方从不公布投注明细，唯一公开的全量真实信号是
-//   一等奖注数  = 该期开奖那 1 注组合被买了多少注
-//   二等奖注数 ≈ 该期 6 个红球（不管蓝球）被买了多少注
-// 用二等奖注数除以“按销售额算出的理论注数”，就能反推每期 6 红组合被买的倍数；
-// 再把 6 个红球展开成 33 个哑变量做对数岭回归，得到每个号码的购买偏好系数。
+//   一等奖注数 = 该期开奖那 1 注组合（5 前区 + 2 后区）被买了多少注
+//   二等奖注数 ≈ 该期 5 个前区 + 1 个后区（共 20 种组合）被买了多少注
+// 用二等奖注数除以“按销售额算出的理论注数”，反推每期 5 前区组合被买的倍数；
+// 再把 5 个前区展开成 35 个哑变量做对数岭回归，得到每个前区号的购买偏好系数，
+// 最后用一等奖残差估计 12 个后区号的偏好。
 //
 // 重要：这只影响“中奖后分多少钱”（浮动奖分摊），完全不影响开奖概率。
 //
-// 数据源：500 彩票历史数据页（GBK 编码，境外可访问）
-//   列：期号 红1-6 蓝 [快乐星期天] 奖池 一等奖注数 一等奖单注 二等奖注数 二等奖单注 总投注额 日期
+// 数据源：500 彩票大乐透历史数据页（GBK 编码）
+//   列：期号 前1-5 后1-2 奖池 一等奖注数 一等奖单注 二等奖注数 二等奖单注 总投注额 日期
 // ============================================================
 import { readConfig, writeConfig } from './neon.js'
 
-const HISTORY_URL = 'https://datachart.500.com/ssq/history/newinc/history.php'
-const REFERER = 'https://datachart.500.com/ssq/history/history.shtml'
+const HISTORY_URL = 'https://datachart.500.com/dlt/history/newinc/history.php'
+const REFERER = 'https://datachart.500.com/dlt/history/history.shtml'
 const UA = 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120 Safari/537.36'
-const COMB = 17721088 // C(33,6) × 16，双色球单注组合数
-const RIDGE = 10 // 岭回归正则：抑制 33 个哑变量的共线性
-const MIN_DRAWS = 150 // 样本少于此数不拟合（噪声大于信号）
-const MODEL_KEY = 'ssq_crowd_model'
+const COMB = 21425712 // C(35,5) × C(12,2)，大乐透单注组合数
+const SECOND_COMBOS = 20 // 二等奖（5+1）的组合数
+const RIDGE = 10
+const MIN_DRAWS = 150
+const MODEL_KEY = 'dlt_crowd_model'
 
 /** 5 位期号 → 应用内 7 位期号（26133 → 2026133） */
 export function toDrawId(issue5) {
@@ -28,9 +30,10 @@ export function toDrawId(issue5) {
   return Number.isInteger(n) ? 2000000 + n : null
 }
 
-/** 7 位期号 → 5 位期号（2026133 → 26133） */
+/** 期号 → 5 位期号（2026133 → 26133；本身就是 26133 时保持原样） */
 export function toIssue5(drawId) {
-  return String(drawId).slice(2)
+  const s = String(drawId)
+  return s.length > 5 ? s.slice(2) : s
 }
 
 /** 解析 500 历史数据表格（传 GBK 解码后的 HTML） */
@@ -57,20 +60,20 @@ export function parseHistory(html) {
     out.push({
       issue5: cells[i],
       drawId,
-      red: nums.slice(0, 6).sort((a, b) => a - b),
-      blue: nums[6],
-      pool: money(9),
-      first: money(10),
-      second: money(12),
-      sales: money(14),
+      front: nums.slice(0, 5).sort((a, b) => a - b),
+      back: nums.slice(5, 7).sort((a, b) => a - b),
+      pool: money(8),
+      first: money(9),
+      second: money(11),
+      sales: money(13),
       date,
     })
   }
   return out
 }
 
-/** 抓取历史数据（默认从 2003 年首期开始，单次请求可取全部 3500+ 期） */
-export async function fetchHistory({ start = '03001', end = '' } = {}) {
+/** 抓取历史数据（默认从 2007 年首期开始，单次请求可取全部 2900+ 期） */
+export async function fetchHistory({ start = '07001', end = '' } = {}) {
   const url = `${HISTORY_URL}?start=${encodeURIComponent(start)}&end=${encodeURIComponent(end)}`
   const res = await fetch(url, { headers: { 'User-Agent': UA, Referer: REFERER } })
   if (!res.ok) throw new Error(`500历史数据 HTTP ${res.status}`)
@@ -81,26 +84,26 @@ export async function fetchHistory({ start = '03001', end = '' } = {}) {
 }
 
 /** 批量入库（幂等），随后重拟合模型 */
-export async function syncOfficialSsq(sql, range) {
+export async function syncOfficialDlt(sql, range) {
   const rows = await fetchHistory(range)
   const payload = rows.map((r) => ({
     drawId: r.drawId,
     issue5: r.issue5,
     date: r.date,
-    red: r.red,
-    blue: r.blue,
+    front: r.front,
+    back: r.back,
     sales: r.sales,
     first: r.first,
     second: r.second,
     pool: r.pool,
   }))
   await sql`
-    INSERT INTO ssq_draw_stats (draw_id, issue5, date, red, blue, sales, first_prize, second_prize, pool)
+    INSERT INTO dlt_draw_stats (draw_id, issue5, date, front, back, sales, first_prize, second_prize, pool)
     SELECT (x->>'drawId')::int,
            x->>'issue5',
-           (x->>'date')::date,
-           (x->'red'),
-           (x->>'blue')::int,
+           NULLIF(x->>'date', 'null')::date,
+           (x->'front'),
+           (x->'back'),
            (x->>'sales')::bigint,
            (x->>'first')::int,
            (x->>'second')::int,
@@ -176,43 +179,42 @@ function pearson(xs, ys) {
 
 /**
  * 拟合每号购买偏好：
- *   log(二等奖注数 / 理论注数) ≈ c + Σ β_i·1[i∈红球]
- * 理论注数 = (销售额/2) × 15 / 组合数
- * 蓝球偏好 = 一等奖残差的期望（一等奖 = 6 红 + 指定蓝）
+ *   log(二等奖注数 / 理论注数) ≈ c + Σ β_i·1[i∈前区]
+ * 理论注数 = (销售额/2) × 20 / 组合数
+ * 后区偏好 = 一等奖残差的期望
  */
 export async function fitCrowdModel(sql) {
   const rows = await sql`
-    SELECT draw_id, red, blue, sales, first_prize, second_prize
-    FROM ssq_draw_stats
+    SELECT draw_id, front, back, sales, first_prize, second_prize
+    FROM dlt_draw_stats
     WHERE second_prize >= 8 AND sales IS NOT NULL AND sales > 0
     ORDER BY draw_id`
   if (rows.length < MIN_DRAWS) return null
 
-  const dim = 34 // 0 = 截距，1..33 = 红球
+  const dim = 36 // 0 = 截距，1..35 = 前区
   const A = Array.from({ length: dim }, () => new Float64Array(dim))
   const b = new Float64Array(dim)
-  const redCount = new Float64Array(33)
-  const blueCount = new Float64Array(16)
+  const frontCount = new Float64Array(35)
+  const backCount = new Float64Array(12)
 
   for (const r of rows) {
-    const red = Array.isArray(r.red) ? r.red : JSON.parse(r.red || '[]')
+    const front = Array.isArray(r.front) ? r.front : JSON.parse(r.front || '[]')
     const sales = Number(r.sales)
     const second = Number(r.second_prize)
-    const blue = Number(r.blue)
-    if (!(sales > 0) || !(second > 0) || !(blue >= 1 && blue <= 16)) continue
-    const expected = ((sales / 2) * 15) / COMB
-    // 加权最小二乘：泊松噪声下 Var(log x) ≈ 1/E，故权重取 √E；同时截尾抑制倍投造成的极端值
+    const back = Array.isArray(r.back) ? r.back : JSON.parse(r.back || '[]')
+    if (!(sales > 0) || !(second > 0) || !back.length) continue
+    const expected = ((sales / 2) * SECOND_COMBOS) / COMB
     const w = Math.sqrt(Math.max(expected, 1))
     const y = Math.max(-2.5, Math.min(2.5, Math.log(second / expected)))
     const x = new Float64Array(dim)
     x[0] = w
-    for (const num of red) {
-      if (num >= 1 && num <= 33) {
+    for (const num of front) {
+      if (num >= 1 && num <= 35) {
         x[num] = w
-        redCount[num - 1] += 1
+        frontCount[num - 1] += 1
       }
     }
-    blueCount[blue - 1] += 1
+    for (const num of back) if (num >= 1 && num <= 12) backCount[num - 1] += 1
     for (let i = 0; i < dim; i++) {
       if (!x[i]) continue
       b[i] += x[i] * y
@@ -224,37 +226,42 @@ export async function fitCrowdModel(sql) {
   A[0][0] += 1e-6
   const beta = solveLinear(A, b)
 
-  const meanBeta = beta.slice(1).reduce((s, v) => s + v, 0) / 33
-  const redMult = Array.from({ length: 33 }, (_, i) => Math.exp(beta[i + 1] - meanBeta))
+  const meanBeta = beta.slice(1).reduce((s, v) => s + v, 0) / 35
+  const frontMult = Array.from({ length: 35 }, (_, i) => Math.exp(beta[i + 1] - meanBeta))
 
-  // 蓝球：一等奖残差（6 红偏好已扣除）按蓝球求均值
-  const blueSum = new Float64Array(16)
-  const blueN = new Float64Array(16)
+  // 后区：一等奖残差（5 前区偏好已扣除）按后区号求均值
+  const backSum = new Float64Array(12)
+  const backN = new Float64Array(12)
   for (const r of rows) {
     const first = Number(r.first_prize)
     if (!(first >= 3)) continue
-    const red = Array.isArray(r.red) ? r.red : JSON.parse(r.red || '[]')
+    const front = Array.isArray(r.front) ? r.front : JSON.parse(r.front || '[]')
+    const back = Array.isArray(r.back) ? r.back : JSON.parse(r.back || '[]')
     const sales = Number(r.sales)
-    const blue = Number(r.blue)
-    if (!(sales > 0) || !(blue >= 1 && blue <= 16)) continue
-    const expected = (sales / 2) / COMB
-    const base = beta[0] + red.reduce((s, num) => s + (beta[num] || 0), 0)
-    blueSum[blue - 1] += Math.log(first / expected) - base
-    blueN[blue - 1] += 1
+    if (!(sales > 0) || !back.length) continue
+    const expected = sales / 2 / COMB
+    const base = beta[0] + front.reduce((s, num) => s + (beta[num] || 0), 0)
+    const residual = Math.log(first / expected) - base
+    for (const num of back) {
+      if (num >= 1 && num <= 12) {
+        backSum[num - 1] += residual
+        backN[num - 1] += 1
+      }
+    }
   }
-  const blueLog = Array.from({ length: 16 }, (_, i) => (blueN[i] >= 20 ? blueSum[i] / blueN[i] : 0))
-  const meanBlue = blueLog.reduce((s, v) => s + v, 0) / 16
-  const blueMult = blueLog.map((v) => Math.exp(v - meanBlue))
+  const backLog = Array.from({ length: 12 }, (_, i) => (backN[i] >= 20 ? backSum[i] / backN[i] : 0))
+  const meanBack = backLog.reduce((s, v) => s + v, 0) / 12
+  const backMult = backLog.map((v) => Math.exp(v - meanBack))
 
   // 自查：购买偏好 vs 历史开出频率，理应接近 0（开奖与销量无关）
   const n = rows.length
-  const redR = pearson(
-    Array.from(redCount, (c) => c / n),
-    Array.from({ length: 33 }, (_, i) => beta[i + 1] - meanBeta),
+  const frontR = pearson(
+    Array.from(frontCount, (c) => c / n),
+    Array.from({ length: 35 }, (_, i) => beta[i + 1] - meanBeta),
   )
-  const blueR = pearson(
-    Array.from(blueCount, (c) => c / n),
-    blueLog.map((v) => v - meanBlue),
+  const backR = pearson(
+    Array.from(backCount, (c) => c / n),
+    backLog.map((v) => v - meanBack),
   )
 
   const model = {
@@ -262,9 +269,9 @@ export async function fitCrowdModel(sql) {
     n,
     from: rows[0].draw_id,
     to: rows[rows.length - 1].draw_id,
-    red: redMult.map((v) => +v.toFixed(3)),
-    blue: blueMult.map((v) => +v.toFixed(3)),
-    check: { redR: +redR.toFixed(3), blueR: +blueR.toFixed(3), draws: n },
+    front: frontMult.map((v) => +v.toFixed(3)),
+    back: backMult.map((v) => +v.toFixed(3)),
+    check: { frontR: +frontR.toFixed(3), backR: +backR.toFixed(3), draws: n },
   }
   await writeConfig(sql, MODEL_KEY, JSON.stringify(model))
   return model
@@ -278,12 +285,12 @@ export function recentWithRatios(rows) {
       const first = Number(r.first_prize)
       const second = Number(r.second_prize)
       const e1 = sales > 0 ? sales / 2 / COMB : 0
-      const e2 = sales > 0 ? ((sales / 2) * 15) / COMB : 0
+      const e2 = sales > 0 ? ((sales / 2) * SECOND_COMBOS) / COMB : 0
       return {
         drawId: r.draw_id,
         date: r.date,
-        red: Array.isArray(r.red) ? r.red : JSON.parse(r.red || '[]'),
-        blue: Number(r.blue),
+        front: Array.isArray(r.front) ? r.front : JSON.parse(r.front || '[]'),
+        back: Array.isArray(r.back) ? r.back : JSON.parse(r.back || '[]'),
         sales,
         first,
         second,

@@ -231,7 +231,7 @@ export async function getDailyPushConfig(sql) {
       fc3d: obj.fc3d !== false,
       pl3: obj.pl3 !== false,
       pl5: obj.pl5 !== false,
-      ssq: obj.ssq !== false,
+      dlt: obj.dlt !== false,
     }
   } catch {
     return null
@@ -239,7 +239,7 @@ export async function getDailyPushConfig(sql) {
 }
 
 /** 保存每日推送配置 */
-export async function setDailyPushConfig(sql, { webhook, secret, kl8, fc3d, pl3, pl5, ssq }) {
+export async function setDailyPushConfig(sql, { webhook, secret, kl8, fc3d, pl3, pl5, dlt }) {
   const payload = JSON.stringify({
     webhook: String(webhook || '').trim(),
     secret: String(secret || '').trim(),
@@ -247,7 +247,7 @@ export async function setDailyPushConfig(sql, { webhook, secret, kl8, fc3d, pl3,
     fc3d: fc3d !== false,
     pl3: pl3 !== false,
     pl5: pl5 !== false,
-    ssq: ssq !== false,
+    dlt: dlt !== false,
   })
   await writeConfig(sql, PUSH_CONFIG_KEY, payload)
 }

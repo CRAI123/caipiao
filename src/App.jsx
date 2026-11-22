@@ -30,26 +30,26 @@ import FC3DPrize from './components/FC3DPrize.jsx'
 import FC3DAudit from './components/FC3DAudit.jsx'
 import FC3DTerms from './components/FC3DTerms.jsx'
 import FC3DDataManager from './components/FC3DDataManager.jsx'
-import SSQOverview from './components/SSQOverview.jsx'
-import SSQHotCold from './components/SSQHotCold.jsx'
-import SSQPatterns from './components/SSQPatterns.jsx'
-import SSQRepeats from './components/SSQRepeats.jsx'
-import SSQDanTuo from './components/SSQDanTuo.jsx'
-import SSQCrowding from './components/SSQCrowding.jsx'
-import SSQPrize from './components/SSQPrize.jsx'
-import SSQPredict from './components/SSQPredict.jsx'
-import SSQAudit from './components/SSQAudit.jsx'
-import SSQTerms from './components/SSQTerms.jsx'
-import SSQDataManager from './components/SSQDataManager.jsx'
+import DLTOverview from './components/DLTOverview.jsx'
+import DLTHotCold from './components/DLTHotCold.jsx'
+import DLTPatterns from './components/DLTPatterns.jsx'
+import DLTRepeats from './components/DLTRepeats.jsx'
+import DLTDanTuo from './components/DLTDanTuo.jsx'
+import DLTCrowding from './components/DLTCrowding.jsx'
+import DLTPrize from './components/DLTPrize.jsx'
+import DLTPredict from './components/DLTPredict.jsx'
+import DLTAudit from './components/DLTAudit.jsx'
+import DLTTerms from './components/DLTTerms.jsx'
+import DLTDataManager from './components/DLTDataManager.jsx'
 import { FC3D_DRAWS } from './data/fc3d.js'
 import { PL3_DRAWS } from './data/pl3.js'
 import { PL5_DRAWS } from './data/pl5.js'
-import { SSQ_DRAWS } from './data/ssq.js'
+import { DLT_DRAWS } from './data/dlt.js'
 import { fetchPl3Draws } from './lib/pl3.js'
 import { fetchPl5Draws } from './lib/pl5.js'
 import { fetchFc3dDraws } from './lib/fc3d.js'
 import { fetchKl8Draws } from './lib/kl8.js'
-import { fetchSsqDraws } from './lib/ssq.js'
+import { fetchDltDraws } from './lib/dlt.js'
 import * as pl3Engine from './lib/pl3Predict.js'
 import * as pl5Engine from './lib/pl5Predict.js'
 import * as pl5Stats from './lib/pl5Stats.js'
@@ -84,7 +84,7 @@ const PL5_ALGO_INFO = {
 }
 
 // ---------- 打开软件自动抓取：会话级去重（sessionStorage，Tauri 桌面端同样可用） ----------
-const AUTO_FETCH_LABEL = { kl8: '快乐8', fc3d: '福彩3D', pl3: '排列三', pl5: '排列五', ssq: '双色球' }
+const AUTO_FETCH_LABEL = { kl8: '快乐8', fc3d: '福彩3D', pl3: '排列三', pl5: '排列五', dlt: '大乐透' }
 const AUTO_FETCH_PREFIX = 'caipiao.autofetch.'
 function isAutoFetched(lottery) {
   try {
@@ -151,7 +151,7 @@ const FC3D_TABS = [
   { id: 'data', label: '数据管理', en: 'DATA' },
 ]
 
-const SSQ_TABS = [
+const DLT_TABS = [
   { id: 'overview', label: '总览', en: 'OVERVIEW' },
   { id: 'hotcold', label: '冷热遗漏', en: 'HOT & COLD' },
   { id: 'patterns', label: '形态走势', en: 'PATTERNS' },
@@ -178,15 +178,15 @@ export default function App() {
   const [pl5Draws, setPl5Draws] = useState(PL5_DRAWS)
   const [pl5Tab, setPl5Tab] = useState('overview')
   const [pl5LoadErr, setPl5LoadErr] = useState('')
-  const [ssqDraws, setSsqDraws] = useState(SSQ_DRAWS)
-  const [ssqTab, setSsqTab] = useState('overview')
+  const [dltDraws, setDltDraws] = useState(DLT_DRAWS)
+  const [dltTab, setDltTab] = useState('overview')
   const [autoFetch, setAutoFetch] = useState(null) // 自动抓取状态条 { state: 'loading'|'ok'|'nonew'|'fail', text }
   const [tick, setTick] = useState(0) // 账本变化后刷新「待打卡」标记
   const usingSample = draws[0]?.sample
   const fc3dUsingSample = fc3dDraws[0]?.sample
   const pl3UsingSample = pl3Draws[0]?.sample
   const pl5UsingSample = pl5Draws[0]?.sample
-  const ssqUsingSample = ssqDraws[0]?.sample
+  const dltUsingSample = dltDraws[0]?.sample
 
   // 数字型彩票（福彩3D / 排列三 / 排列五）共用同一套页面与算法，只切换数据源
   const isDigit = lottery === 'fc3d' || lottery === 'pl3' || lottery === 'pl5'
@@ -271,11 +271,11 @@ export default function App() {
     return list || draws
   }, [draws])
 
-  const refreshSsqDraws = useCallback(async () => {
-    const list = await fetchSsqDraws(100)
-    if (list?.length) setSsqDraws(list)
-    return list || ssqDraws
-  }, [ssqDraws])
+  const refreshDltDraws = useCallback(async () => {
+    const list = await fetchDltDraws(100)
+    if (list?.length) setDltDraws(list)
+    return list || dltDraws
+  }, [dltDraws])
 
   // 打开软件 / 切换彩种：本会话未自动抓过的彩种，进入时自动抓一次最新开奖
   // （排列五没有内置快照也由此覆盖；失败时沿用 pl5LoadErr 的空页错误路径）
@@ -290,8 +290,8 @@ export default function App() {
     const prevLatest =
       lottery === 'kl8'
         ? draws[0]?.id
-        : lottery === 'ssq'
-          ? ssqDraws[0]?.id
+        : lottery === 'dlt'
+          ? dltDraws[0]?.id
           : lottery === 'pl5'
             ? pl5Draws[0]?.id
             : lottery === 'pl3'
@@ -303,8 +303,8 @@ export default function App() {
         const list =
           lottery === 'kl8'
             ? await refreshKl8Draws()
-            : lottery === 'ssq'
-              ? await refreshSsqDraws()
+            : lottery === 'dlt'
+              ? await refreshDltDraws()
               : await refreshDigitDraws()
         if (!alive) return
         const latestId = list?.[0]?.id
@@ -403,7 +403,7 @@ export default function App() {
 
   // 手机端页签是横向滚动的，切换后把当前页签滚到可视区域中间
   const navRef = useRef(null)
-  const activeTabId = lottery === 'ssq' ? ssqTab : isDigit ? digitTab : tab
+  const activeTabId = lottery === 'dlt' ? dltTab : isDigit ? digitTab : tab
   useEffect(() => {
     const nav = navRef.current
     if (!nav || nav.scrollWidth <= nav.clientWidth) return
@@ -484,7 +484,7 @@ export default function App() {
                 ) : lottery === 'pl5' ? (
                   <>体彩排列五 · 数据研究档案 <i>PL5 RESEARCH LEDGER</i></>
                 ) : (
-                  <>福彩双色球 · 数据研究档案 <i>SSQ RESEARCH LEDGER</i></>
+                  <>体彩大乐透 · 数据研究档案 <i>DLT RESEARCH LEDGER</i></>
                 )}
               </p>
             </div>
@@ -498,12 +498,12 @@ export default function App() {
                   数据源：{usingSample ? '内置演示数据' : '真实开奖数据'}
                 </div>
               </>
-            ) : lottery === 'ssq' ? (
+            ) : lottery === 'dlt' ? (
               <>
-                <div>33 选 6 红 + 16 选 1 蓝</div>
-                <div>头奖概率 1 / 17,721,088</div>
-                <div className={ssqUsingSample ? 'meta-sample' : 'meta-real'}>
-                  数据源：{ssqUsingSample ? '内置演示数据' : '真实开奖数据'}
+                <div>35 选 5 前区 + 12 选 2 后区</div>
+                <div>头奖概率 1 / 21,425,712</div>
+                <div className={dltUsingSample ? 'meta-sample' : 'meta-real'}>
+                  数据源：{dltUsingSample ? '内置演示数据' : '真实开奖数据'}
                 </div>
               </>
             ) : lottery === 'pl5' ? (
@@ -564,11 +564,11 @@ export default function App() {
               </button>
               <button
                 role="tab"
-                aria-selected={lottery === 'ssq'}
-                className={`lottery-tab ${lottery === 'ssq' ? 'active' : ''}`}
-                onClick={() => setLottery('ssq')}
+                aria-selected={lottery === 'dlt'}
+                className={`lottery-tab ${lottery === 'dlt' ? 'active' : ''}`}
+                onClick={() => setLottery('dlt')}
               >
-                双色球
+                大乐透
               </button>
               <span className={`lottery-indicator ${lottery}`} />
             </div>
@@ -608,13 +608,13 @@ export default function App() {
         </nav>
       )}
 
-      {lottery === 'ssq' && (
-        <nav className="tabs" aria-label="双色球 页面导航" ref={navRef}>
-          {SSQ_TABS.map((t) => (
+      {lottery === 'dlt' && (
+        <nav className="tabs" aria-label="大乐透 页面导航" ref={navRef}>
+          {DLT_TABS.map((t) => (
             <button
               key={t.id}
-              className={`tab-btn ${ssqTab === t.id ? 'active' : ''}`}
-              onClick={() => setSsqTab(t.id)}
+              className={`tab-btn ${dltTab === t.id ? 'active' : ''}`}
+              onClick={() => setDltTab(t.id)}
             >
               {t.label}
               <i>{t.en}</i>
@@ -632,21 +632,21 @@ export default function App() {
             {autoFetch.text}
           </p>
         )}
-        {lottery === 'ssq' ? (
+        {lottery === 'dlt' ? (
           <>
-            {ssqTab === 'overview' && <SSQOverview draws={ssqDraws} />}
-            {ssqTab === 'hotcold' && <SSQHotCold draws={ssqDraws} />}
-            {ssqTab === 'patterns' && <SSQPatterns draws={ssqDraws} />}
-            {ssqTab === 'kline' && <KlinePage lottery="ssq" draws={ssqDraws} />}
-            {ssqTab === 'repeats' && <SSQRepeats draws={ssqDraws} />}
-            {ssqTab === 'dantuo' && <SSQDanTuo draws={ssqDraws} />}
-            {ssqTab === 'crowd' && <SSQCrowding draws={ssqDraws} />}
-            {ssqTab === 'prize' && <SSQPrize />}
-            {ssqTab === 'predict' && <SSQPredict draws={ssqDraws} />}
-            {ssqTab === 'audit' && <SSQAudit draws={ssqDraws} />}
-            {ssqTab === 'learning' && <LearningCenter game="ssq" />}
-            {ssqTab === 'terms' && <SSQTerms />}
-            {ssqTab === 'data' && <SSQDataManager draws={ssqDraws} setDraws={setSsqDraws} />}
+            {dltTab === 'overview' && <DLTOverview draws={dltDraws} />}
+            {dltTab === 'hotcold' && <DLTHotCold draws={dltDraws} />}
+            {dltTab === 'patterns' && <DLTPatterns draws={dltDraws} />}
+            {dltTab === 'kline' && <KlinePage lottery="dlt" draws={dltDraws} />}
+            {dltTab === 'repeats' && <DLTRepeats draws={dltDraws} />}
+            {dltTab === 'dantuo' && <DLTDanTuo draws={dltDraws} />}
+            {dltTab === 'crowd' && <DLTCrowding draws={dltDraws} />}
+            {dltTab === 'prize' && <DLTPrize />}
+            {dltTab === 'predict' && <DLTPredict draws={dltDraws} />}
+            {dltTab === 'audit' && <DLTAudit draws={dltDraws} />}
+            {dltTab === 'learning' && <LearningCenter game="dlt" />}
+            {dltTab === 'terms' && <DLTTerms />}
+            {dltTab === 'data' && <DLTDataManager draws={dltDraws} setDraws={setDltDraws} />}
           </>
         ) : isDigit ? (
           !digitDraws.length ? (
@@ -838,7 +838,7 @@ export default function App() {
           { id: 'fc3d', label: '福彩3D', glyph: '3' },
           { id: 'pl3', label: '排列三', glyph: '三' },
           { id: 'pl5', label: '排列五', glyph: '五' },
-          { id: 'ssq', label: '双色球', glyph: '双' },
+          { id: 'dlt', label: '大乐透', glyph: '透' },
         ].map((it) => (
           <button
             key={it.id}

@@ -1,13 +1,13 @@
 // ============================================================
 // 每日推荐推送 —— Vercel Cron（14:00 Asia/Shanghai = 06:00 UTC）
-// 计算快乐8 / 福彩3D / 排列三 / 排列五 / 双色球 下期参考号码，推送到飞书自定义机器人 Webhook。
+// 计算快乐8 / 福彩3D / 排列三 / 排列五 / 大乐透 下期参考号码，推送到飞书自定义机器人 Webhook。
 // 每个彩种都走站内当前最强算法，卡片标题里标明档位：排列三、排列五 = v3 Pro（9 专家 Hedge 权重 + 结构约束）。
 //
 // 配置来源（优先数据库）：
 //   1) Neon admin_config 表 key = 'daily_push_config'
 //      value = {"webhook":"https://open.feishu.cn/open-apis/bot/v2/hook/xxx",
 //               "secret":"（可选，机器人开启签名校验时必填）",
-//               "kl8":true,"fc3d":true,"pl3":true,"pl5":true,"ssq":true}
+//               "kl8":true,"fc3d":true,"pl3":true,"pl5":true,"dlt":true}
 //   2) 环境变量 FEISHU_WEBHOOK_URL / FEISHU_WEBHOOK_SECRET
 //
 // 手动触发：GET /api/daily-push?test=1
@@ -18,7 +18,7 @@ import { fetchKl8Draws } from './_lib/kl8.js'
 import { fetchFc3dDraws } from './_lib/fc3d.js'
 import { fetchPl3Draws } from './_lib/pl3.js'
 import { fetchPl5Draws } from './_lib/pl5.js'
-import { fetchSsqDraws } from './_lib/ssq.js'
+import { fetchDltDraws } from './_lib/dlt.js'
 import { resolveLlmSettings, callAi } from './_lib/ai.js'
 import { scoreBalls, pickBalanced, BALL_MAX, comb } from '../src/lib/stats.js'
 import { v7Recommend } from '../src/lib/kl8V7.js'
@@ -34,7 +34,7 @@ import {
 import { predictFC3Dv2 } from '../src/lib/fc3dPredict.js'
 import { predictPL3Pro } from '../src/lib/pl3Predict.js'
 import { predictPL5 } from '../src/lib/pl5Predict.js'
-import { predictSSQ } from '../src/lib/ssqPredict.js'
+import { predictDLT } from '../src/lib/dltPredict.js'
 import { applyCors } from './_lib/http.js'
 import {
   loadLearning,
@@ -69,7 +69,7 @@ const shDate = (d = new Date()) =>
 /**
  * 判断数据是否够新。
  * 快乐8 / 3D / 排列三 每天开一期，14:00 推送时最新一期应当是「昨天」（maxAgeDays=1）；
- * 双色球每周二、四、日开奖，14:00 推送时最新一期最多是 3 天前，所以放宽到 4 天。
+ * 大乐透每周一、三、六开奖，14:00 推送时最新一期最多是 3 天前，所以放宽到 4 天。
  * state='stale' 表示数据源还没更新，卡片顶部会亮红字提醒。
  */
 function freshness(latest, maxAgeDays = 1) {
@@ -119,7 +119,7 @@ async function loadConfig() {
     fc3d: cfg.fc3d !== false,
     pl3: cfg.pl3 !== false,
     pl5: cfg.pl5 !== false,
-    ssq: cfg.ssq !== false,
+    dlt: cfg.dlt !== false,
   }
 }
 
@@ -185,14 +185,14 @@ function buildPl5(draws, learned = null) {
   return { latest: draws[0], pred: p }
 }
 
-/** 双色球：红球结构评分枚举 + 蓝球周期/振荡评分 */
-function buildSsq(draws, learned = null) {
+/** 大乐透：前区结构评分枚举 + 后区周期/振荡评分 */
+function buildDlt(draws, learned = null) {
   const opts = {}
   if (learned && !learned.coldStart) {
-    if (Array.isArray(learned.redSignals?.weights)) opts.redWeightsOverride = learned.redSignals.weights
-    if (Array.isArray(learned.blueSignals?.weights)) opts.blueWeightsOverride = learned.blueSignals.weights
+    if (Array.isArray(learned.frontSignals?.weights)) opts.frontWeightsOverride = learned.frontSignals.weights
+    if (Array.isArray(learned.backSignals?.weights)) opts.backWeightsOverride = learned.backSignals.weights
   }
-  const p = predictSSQ(draws, opts)
+  const p = predictDLT(draws, opts)
   if (!p) return null
   return { latest: draws[0], pred: p }
 }
@@ -660,16 +660,16 @@ function digitAlgoPrev(draws, game = 'fc3d') {
   return h ? { drawId: Number(latest.id), ...h } : null
 }
 
-function ssqAlgoPrev(draws) {
+function dltAlgoPrev(draws) {
   const latest = draws?.[0]
   const hist = draws?.slice(1) || []
-  if (!latest || hist.length < 10) return null
-  const p = predictSSQ(hist)
+  if (!latest || hist.length < 12) return null
+  const p = predictDLT(hist)
   if (!p) return null
   return {
     drawId: Number(latest.id),
-    red: p.red.filter((n) => latest.red.includes(n)).length,
-    blue: p.blue === latest.blue,
+    front: p.front.filter((n) => latest.front.includes(n)).length,
+    back: p.back.filter((n) => latest.back.includes(n)).length,
   }
 }
 
@@ -881,30 +881,32 @@ function buildPl5Card(pl5, title, warning, ai = null, hits = null) {
   })
 }
 
-/** 双色球卡：绿头，6 红 + 1 蓝 + 结构 + 覆盖档位 */
-function buildSsqCard(ssq, title, warning, hits = null) {
-  const p = ssq.pred
+/** 大乐透卡：绿头，5 前区 + 2 后区 + 结构 + 覆盖档位 */
+function buildDltCard(dlt, title, warning, hits = null) {
+  const p = dlt.pred
   const s = p.structure
   const tiers = p.tiers || []
-  const firstPrize = Math.round(comb(33, 6) * 16)
+  const firstPrize = 21425712 // C(35,5) × C(12,2)
   return buildCard({
     title,
     template: 'green',
     warning,
     blocks: [
       line(
-        `上期开奖：红 ${grey(ssq.latest.red.map(pad).join(' '))}　蓝 ${grey(pad(ssq.latest.blue))}`,
+        `上期开奖：前区 ${grey(dlt.latest.front.map(pad).join(' '))}　后区 ${grey(
+          dlt.latest.back.map(pad).join(' '),
+        )}`,
       ),
-      line(`**概率** 一等奖 1/${firstPrize.toLocaleString('en-US')}（红球 6/33 + 蓝球 1/16）`),
+      line(`**概率** 一等奖 1/${firstPrize.toLocaleString('en-US')}（前区 5/35 + 后区 2/12）`),
       hits
         ? line(
-            `**上期命中**（第 ${hits.drawId} 期）：红球 ${hits.red}/6 · 蓝球 ${hits.blue ? '命中' : '未中'}`,
+            `**上期命中**（第 ${hits.drawId} 期）：前区 ${hits.front}/5 · 后区 ${hits.back}/2`,
           )
         : line(grey('上期命中：暂无上期推荐记录，下次推送起显示')),
       HR,
-      line(`**推荐 6 红**\n<font color='red'>${p.red.map(pad).join(' ')}</font>`),
+      line(`**推荐 5 前区**\n<font color='red'>${p.front.map(pad).join(' ')}</font>`),
       line(
-        `**推荐蓝球** <font color='red'>${pad(p.blue)}</font>　备选 ${p.blueBackups
+        `**推荐 2 后区** <font color='red'>${p.back.map(pad).join(' ')}</font>　备选 ${p.backBackups
           .map(pad)
           .join(' ')}`,
       ),
@@ -912,7 +914,7 @@ function buildSsqCard(ssq, title, warning, hits = null) {
       line(
         `和值 ${s.sum}　跨度 ${s.span}　三区 ${s.zone3.join(':')}　大小 ${s.big}:${s.small}　奇偶 ${s.odd}:${s.even}`,
       ),
-      line(`杀红 ${grey(p.kill.map(pad).join(' '))}`),
+      line(`杀号 ${grey(p.kill.map(pad).join(' '))}`),
       HR,
       line(
         `**覆盖档位** ${tiers
@@ -970,16 +972,16 @@ export default async function handler(req, res) {
     // 机器人查询用：only 只算单个彩种；dry=1 只返回卡片内容，不往群里发
     const only = String(req.query?.only || '').trim()
     if (only) {
-      for (const k of ['kl8', 'fc3d', 'pl3', 'pl5', 'ssq']) if (k !== only) cfg[k] = false
+      for (const k of ['kl8', 'fc3d', 'pl3', 'pl5', 'dlt']) if (k !== only) cfg[k] = false
     }
 
     // 并行走五个数据源，单个失败不影响其它
-    let [kl8Res, fc3dRes, pl3Res, pl5Res, ssqRes] = await Promise.allSettled([
+    let [kl8Res, fc3dRes, pl3Res, pl5Res, dltRes] = await Promise.allSettled([
       cfg.kl8 ? fetchKl8Draws(100) : Promise.resolve(null),
       cfg.fc3d ? fetchFc3dDraws(100) : Promise.resolve(null),
       cfg.pl3 ? fetchPl3Draws(100) : Promise.resolve(null),
       cfg.pl5 ? fetchPl5Draws(100) : Promise.resolve(null),
-      cfg.ssq ? fetchSsqDraws(100) : Promise.resolve(null),
+      cfg.dlt ? fetchDltDraws(100) : Promise.resolve(null),
     ])
 
     // 数据源偶发缓存：抓到的最新一期还停在旧日期时，等 1.5 秒补抓一次（四路并行，不叠加耗时）
@@ -997,12 +999,12 @@ export default async function handler(req, res) {
       // 补抓没变新就保留原结果，至少还能发出去
       return retried?.length ? again : r
     }
-    ;[kl8Res, fc3dRes, pl3Res, pl5Res, ssqRes] = await Promise.all([
+    ;[kl8Res, fc3dRes, pl3Res, pl5Res, dltRes] = await Promise.all([
       refetchIfStale(kl8Res, cfg.kl8, fetchKl8Draws),
       refetchIfStale(fc3dRes, cfg.fc3d, fetchFc3dDraws),
       refetchIfStale(pl3Res, cfg.pl3, fetchPl3Draws),
       refetchIfStale(pl5Res, cfg.pl5, fetchPl5Draws),
-      refetchIfStale(ssqRes, cfg.ssq, fetchSsqDraws, 4),
+      refetchIfStale(dltRes, cfg.dlt, fetchDltDraws, 4),
     ])
 
     // ── 学习循环 / AI 共享缓存共用的数据库（提前到打分步骤之前获取） ──
@@ -1021,7 +1023,7 @@ export default async function handler(req, res) {
     const fc3dDraws = drawsOf(fc3dRes)
     const pl3Draws = drawsOf(pl3Res)
     const pl5Draws = drawsOf(pl5Res)
-    const ssqDraws = drawsOf(ssqRes)
+    const dltDraws = drawsOf(dltRes)
 
     // ② 对最新开奖打分并推进权重（五彩种并行；失败只记日志，不阻塞推送）
     const learningSummary = {}
@@ -1033,8 +1035,8 @@ export default async function handler(req, res) {
           ['fc3d', fc3dDraws],
           ['pl3', pl3Draws],
           ['pl5', pl5Draws],
-          ['ssq', ssqDraws],
-        ].filter(([g, d]) => d?.length && freshness(d[0], g === 'ssq' ? 4 : 1).state === 'ok')
+          ['dlt', dltDraws],
+        ].filter(([g, d]) => d?.length && freshness(d[0], g === 'dlt' ? 4 : 1).state === 'ok')
         const results = await Promise.all(candidates.map(([g, d]) => scoreAndLearn(sqlAi, g, d)))
         candidates.forEach(([g], i) => {
           learningSummary[g] = results[i]
@@ -1075,7 +1077,7 @@ export default async function handler(req, res) {
           ['fc3d', fc3dDraws],
           ['pl3', pl3Draws],
           ['pl5', pl5Draws],
-          ['ssq', ssqDraws],
+          ['dlt', dltDraws],
         ].filter(([, d]) => d?.length)
         const states = await Promise.all(entries.map(([g]) => loadLearning(sqlAi, g)))
         entries.forEach(([g], i) => {
@@ -1090,7 +1092,7 @@ export default async function handler(req, res) {
     const fc3d = fc3dRes.status === 'fulfilled' && fc3dRes.value ? buildFc3d(fc3dDraws, learnedOf.fc3d) : null
     const pl3 = pl3Res.status === 'fulfilled' && pl3Res.value ? buildPl3(pl3Draws, learnedOf.pl3) : null
     const pl5 = pl5Res.status === 'fulfilled' && pl5Res.value ? buildPl5(pl5Draws, learnedOf.pl5) : null
-    const ssq = ssqRes.status === 'fulfilled' && ssqRes.value ? buildSsq(ssqDraws, learnedOf.ssq) : null
+    const dlt = dltRes.status === 'fulfilled' && dltRes.value ? buildDlt(dltDraws, learnedOf.dlt) : null
 
     // ④ AI 终选：彩种并行（优先复用站内共享结果，没有才现场调用一次大模型）
     let llm = null
@@ -1175,9 +1177,9 @@ export default async function handler(req, res) {
             })
           if (rows.length) await persistPredictions(sqlAi, g, Number(dList[0].id) + 1, rows)
         }
-        if (ssq)
-          await persistPredictions(sqlAi, 'ssq', Number(ssq.latest.id) + 1, [
-            { source: 'algo:ssq', picks: { red: ssq.pred.red, blue: ssq.pred.blue } },
+        if (dlt)
+          await persistPredictions(sqlAi, 'dlt', Number(dlt.latest.id) + 1, [
+            { source: 'algo:dlt', picks: { front: dlt.pred.front, back: dlt.pred.back } },
           ])
       }
     } catch (e) {
@@ -1186,7 +1188,7 @@ export default async function handler(req, res) {
 
     // 上期命中：算法部分用「上期及更早」的数据严格前推重算，AI 部分读站内共享结果/上次推送记录
     const prevHistory = await loadHistory()
-    const hits = { kl8: null, fc3d: null, pl3: null, pl5: null, ssq: null }
+    const hits = { kl8: null, fc3d: null, pl3: null, pl5: null, dlt: null }
     if (kl8 && kl8Draws) {
       const algo = kl8AlgoPrev(kl8Draws)
       const aiPicks = await kl8AiPrev(sqlAi, kl8Draws, prevHistory)
@@ -1235,14 +1237,14 @@ export default async function handler(req, res) {
           }
         : null
     }
-    if (ssq && ssqDraws) hits.ssq = ssqAlgoPrev(ssqDraws)
+    if (dlt && dltDraws) hits.dlt = dltAlgoPrev(dltDraws)
 
     const fresh = {
       kl8: kl8 ? freshness(kl8.latest) : null,
       fc3d: fc3d ? freshness(fc3d.latest) : null,
       pl3: pl3 ? freshness(pl3.latest) : null,
       pl5: pl5 ? freshness(pl5.latest) : null,
-      ssq: ssq ? freshness(ssq.latest, 4) : null,
+      dlt: dlt ? freshness(dlt.latest, 4) : null,
     }
 
     const skipped = {
@@ -1250,10 +1252,10 @@ export default async function handler(req, res) {
       fc3d: fc3dRes.status === 'rejected' ? fc3dRes.reason?.message : null,
       pl3: pl3Res.status === 'rejected' ? pl3Res.reason?.message : null,
       pl5: pl5Res.status === 'rejected' ? pl5Res.reason?.message : null,
-      ssq: ssqRes.status === 'rejected' ? ssqRes.reason?.message : null,
+      dlt: dltRes.status === 'rejected' ? dltRes.reason?.message : null,
     }
 
-    if (!kl8 && !fc3d && !pl3 && !pl5 && !ssq) {
+    if (!kl8 && !fc3d && !pl3 && !pl5 && !dlt) {
       const errs = Object.values(skipped).filter(Boolean)
       const error = `开奖数据获取失败：${errs.join('；') || '未知原因'}`
       await savePushStatus({ at: new Date().toISOString(), ok: false, error, skipped })
@@ -1269,7 +1271,7 @@ export default async function handler(req, res) {
 
     const prefix = isTest ? '【测试】' : ''
 
-    // 一个彩种一张卡：快乐8 蓝头、3D 红头、排列三橙头、双色球绿头，分别发送
+    // 一个彩种一张卡：快乐8 蓝头、3D 红头、排列三橙头、大乐透绿头，分别发送
     const cards = []
     if (kl8)
       cards.push(
@@ -1303,8 +1305,8 @@ export default async function handler(req, res) {
           hits.pl5,
         ),
       )
-    if (ssq)
-      cards.push(buildSsqCard(ssq, `${prefix}双色球 推荐 · ${dateText}`, staleWarning(fresh.ssq, '双色球'), hits.ssq))
+    if (dlt)
+      cards.push(buildDltCard(dlt, `${prefix}大乐透 推荐 · ${dateText}`, staleWarning(fresh.dlt, '大乐透'), hits.dlt))
 
     // 机器人：只取卡片内容用于回复，不群发、不覆盖推送记录
     if (isDry) {
@@ -1354,9 +1356,9 @@ export default async function handler(req, res) {
       fc3d: fc3dAi ? { targetId: Number(fc3dAi.drawId) + 1, ai: fc3dAi.picks } : prevHistory?.fc3d || null,
       pl3: pl3Ai ? { targetId: Number(pl3Ai.drawId) + 1, ai: pl3Ai.picks } : prevHistory?.pl3 || null,
       pl5: pl5Ai ? { targetId: Number(pl5Ai.drawId) + 1, ai: pl5Ai.picks } : prevHistory?.pl5 || null,
-      ssq: ssq
-        ? { targetId: Number(ssq.latest.id) + 1, red: ssq.pred.red, blue: ssq.pred.blue }
-        : prevHistory?.ssq || null,
+      dlt: dlt
+        ? { targetId: Number(dlt.latest.id) + 1, front: dlt.pred.front, back: dlt.pred.back }
+        : prevHistory?.dlt || null,
     })
 
     await savePushStatus({
@@ -1364,14 +1366,14 @@ export default async function handler(req, res) {
       ok: true,
       test: isTest,
       sent,
-      pushed: { kl8: !!kl8, fc3d: !!fc3d, pl3: !!pl3, pl5: !!pl5, ssq: !!ssq },
+      pushed: { kl8: !!kl8, fc3d: !!fc3d, pl3: !!pl3, pl5: !!pl5, dlt: !!dlt },
       // 抓取失败原因（重试后仍失败才算），用于排查某彩种卡片整张缺失
       fetchErrors: Object.entries({
         kl8: kl8Res,
         fc3d: fc3dRes,
         pl3: pl3Res,
         pl5: pl5Res,
-        ssq: ssqRes,
+        dlt: dltRes,
       })
         .filter(([, r]) => r.status === 'rejected')
         .map(([g, r]) => `${g}: ${String(r.reason?.message || r.reason).slice(0, 120)}`),
@@ -1384,7 +1386,7 @@ export default async function handler(req, res) {
     return res.status(200).json({
       ok: true,
       test: isTest,
-      pushed: { kl8: !!kl8, fc3d: !!fc3d, pl3: !!pl3, pl5: !!pl5, ssq: !!ssq },
+      pushed: { kl8: !!kl8, fc3d: !!fc3d, pl3: !!pl3, pl5: !!pl5, dlt: !!dlt },
       ai: {
         kl8: kl8Ai ? { source: kl8Ai.source, cached: kl8Ai.cached, ten: kl8Ai.ten } : null,
         fc3d: fc3dAi ? { source: fc3dAi.source, cached: fc3dAi.cached, picks: fc3dAi.picks } : null,

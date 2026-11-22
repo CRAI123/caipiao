@@ -188,19 +188,28 @@ export function Note({ children, tone = 'info' }) {
   return <p className={`note note-${tone}`}>{children}</p>
 }
 
-/** 双色球一期开奖：6 个红球 + 1 个蓝球 */
-export function SsqDraw({ draw, size = 'md', hitSet = null, hitBlue = false, danSet = null }) {
+/** 大乐透一期开奖：5 个前区号 + 2 个后区号 */
+export function DltDraw({ draw, size = 'md', hitSet = null, hitBack = null, danSet = null }) {
   if (!draw) return null
+  const backHits = hitBack instanceof Set ? hitBack : null
   return (
     <span className="draw-balls ssq-draw">
-      {draw.red.map((n) => {
+      {draw.front.map((n) => {
         const cls = [hitSet?.has(n) ? 'ball-hit' : '', danSet?.has(n) ? 'ball-dan' : '']
           .filter(Boolean)
           .join(' ')
-        return <Ball key={`r${n}`} n={n} kind="red" size={size} className={cls} />
+        return <Ball key={`f${n}`} n={n} kind="red" size={size} className={cls} />
       })}
       <span className="ssq-divider" aria-hidden="true" />
-      <Ball n={draw.blue} kind="blue" size={size} className={hitBlue ? 'ball-hit' : ''} />
+      {draw.back.map((n) => (
+        <Ball
+          key={`b${n}`}
+          n={n}
+          kind="blue"
+          size={size}
+          className={backHits?.has(n) ? 'ball-hit' : ''}
+        />
+      ))}
     </span>
   )
 }

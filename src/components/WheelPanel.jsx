@@ -1,5 +1,5 @@
 // 保底缩水器 —— 覆盖设计构造 + 穷举校验 + 命中分布
-// 双色球与数字彩共用：只关心「号码池 + 每注个数 k + 目标保证 t」
+// 大乐透与数字彩共用：只关心「号码池 + 每注个数 k + 目标保证 t」
 import React, { useMemo, useState } from 'react'
 import { Card, Note, pad2 } from './common.jsx'
 import {
@@ -87,11 +87,11 @@ function buildPlan({ pool, dan, k, t, maxTickets }) {
 }
 
 export default function WheelPanel({
-  kind = 'ssq',
+  kind = 'dlt',
   pool = [],
   dan = [],
-  kOptions = [6],
-  tOptions = [4, 5, 6],
+  kOptions = [5],
+  tOptions = [3, 4, 5],
   defaultK,
   defaultT,
   defaultMaxTickets = 600,
@@ -153,7 +153,7 @@ export default function WheelPanel({
   const fmtNum = kind === 'digit' ? (n) => String(n) : pad2
 
   return (
-    <Card title="保底缩水" tag={`覆盖设计 · ${kind === 'ssq' ? '红球' : '组选口径'}`}>
+    <Card title="保底缩水" tag={`覆盖设计 · ${kind === 'dlt' ? '前区' : '组选口径'}`}>
       <Note tone="warn">
         <b>先读这句：</b>缩水不改变中奖概率。它只是把同样多的钱摊到更多组合上，换取
         「若开奖号码全部落在你的号码池内（且胆码全部开出），则至少有一注命中 t 个号」的
@@ -250,7 +250,7 @@ export default function WheelPanel({
               <div className="wheel-stat-label">总成本</div>
               <div className="wheel-stat-value">
                 ¥{fmt(plan.cost)}
-                <small>{kind === 'ssq' ? '蓝球按 1 个计' : '每注 2 元'}</small>
+                <small>{kind === 'dlt' ? '后区按 1 组计' : '每注 2 元'}</small>
               </div>
             </div>
             <div className="wheel-stat">
@@ -362,7 +362,7 @@ export default function WheelPanel({
 
       <Note>
         保证是<b>条件保证</b>：前提是开奖号码全部落在号码池内、且胆码全部开出。
-        若开奖含池外号码或胆码未全中，保证不成立。{kind === 'digit' ? ' 本卡片按组选（不定位）口径计算；若按直选投注，成本与覆盖含义需另行换算。' : ' 本卡片只统计红球，蓝球按每注 1 个计。'}
+        若开奖含池外号码或胆码未全中，保证不成立。{kind === 'digit' ? ' 本卡片按组选（不定位）口径计算；若按直选投注，成本与覆盖含义需另行换算。' : ' 本卡片只统计前区，后区按每注 1 组（2 个号）计。'}
       </Note>
     </Card>
   )

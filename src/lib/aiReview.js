@@ -152,43 +152,43 @@ export function buildKl8Review(runs, draws) {
 }
 
 /**
- * 双色球上期复盘：AI 终选 6 红 1 蓝 vs 实际开奖
- * @param {Array} runs auditDigitAi({ game: 'ssq' }) 返回的历史记录
- * @param {Array} draws 双色球开奖（最新在前，含 red / blue）
+ * 大乐透上期复盘：AI 终选 5 前区 2 后区 vs 实际开奖
+ * @param {Array} runs auditDigitAi({ game: 'dlt' }) 返回的历史记录
+ * @param {Array} draws 大乐透开奖（最新在前，含 front / back）
  */
-export function buildSsqReview(runs, draws) {
+export function buildDltReview(runs, draws) {
   if (!Array.isArray(runs) || !Array.isArray(draws) || !draws.length) return null
   const latest = draws[0]
   const latestId = Number(latest.id)
   const run = runs.find((r) => Number(r.drawId) === latestId - 1 && r.picks)
   const p = run?.picks
-  if (!p || !Array.isArray(latest.red) || !Array.isArray(p.red) || !p.red.length) return null
+  if (!p || !Array.isArray(latest.front) || !Array.isArray(p.front) || !p.front.length) return null
 
-  const redHit = latest.red.filter((n) => p.red.includes(n))
-  const blueHit = p.blue === latest.blue
-  const stat = (red) => {
-    const nums = [...red].sort((x, y) => x - y)
+  const frontHit = latest.front.filter((n) => (p.front || []).includes(n))
+  const backHit = (p.back || []).filter((n) => (latest.back || []).includes(n))
+  const stat = (front) => {
+    const nums = [...front].sort((x, y) => x - y)
     return {
       sum: nums.reduce((s, n) => s + n, 0),
       span: nums[nums.length - 1] - nums[0],
       odd: nums.filter((n) => n % 2 === 1).length,
-      zone: [0, 1, 2].map((i) => nums.filter((n) => n >= i * 11 + 1 && n <= i * 11 + 11).length),
+      zone: [0, 1, 2].map((i) => nums.filter((n) => n >= i * 12 + 1 && n <= (i === 2 ? 35 : i * 12 + 12)).length),
     }
   }
-  const a = stat(latest.red)
-  const b = stat(p.red)
+  const a = stat(latest.front)
+  const b = stat(p.front)
 
   const headline =
-    `上期（第 ${latestId} 期）开奖 红 ${latest.red.map(pad2).join(' ')} 蓝 ${pad2(latest.blue)}：` +
-    `AI 上期终选红球命中 ${redHit.length}/6、蓝球${blueHit ? '命中' : '未中'}` +
-    (redHit.length ? `（${redHit.map(pad2).join(' ')}）` : '')
+    `上期（第 ${latestId} 期）开奖 前区 ${latest.front.map(pad2).join(' ')} 后区 ${(latest.back || []).map(pad2).join(' ')}：` +
+    `AI 上期终选前区命中 ${frontHit.length}/5、后区命中 ${backHit.length}/2` +
+    (frontHit.length ? `（${frontHit.map(pad2).join(' ')}）` : '')
 
   const text = [
     headline,
-    `结构对照：和值 ${a.sum}（上期预测 ${b.sum}，差 ${a.sum - b.sum}）；跨度 ${a.span}（预测 ${b.span}）；三区 ${a.zone.join(':')}（预测 ${b.zone.join(':')}）；奇偶 ${a.odd}:${6 - a.odd}（预测 ${b.odd}:${6 - b.odd}）。`,
-    `本期修正：终选时把三区配比向 ${a.zone.join(':')} 靠拢、和值参考收窄到 ${Math.max(70, a.sum - 15)}–${Math.min(200, a.sum + 15)} 附近，奇偶按 ${a.odd}:${6 - a.odd} 平衡；仍只在候选池内选号。`,
-    '复盘只用于修正本期选号思路，红球单注仍是 1/17721088，概率不变。',
+    `结构对照：和值 ${a.sum}（上期预测 ${b.sum}，差 ${a.sum - b.sum}）；跨度 ${a.span}（预测 ${b.span}）；三区 ${a.zone.join(':')}（预测 ${b.zone.join(':')}）；奇偶 ${a.odd}:${5 - a.odd}（预测 ${b.odd}:${5 - b.odd}）。`,
+    `本期修正：终选时把三区配比向 ${a.zone.join(':')} 靠拢、和值参考收窄到 ${Math.max(50, a.sum - 15)}–${Math.min(150, a.sum + 15)} 附近，奇偶按 ${a.odd}:${5 - a.odd} 平衡，后区沿用 ${(latest.back || []).length} 个号的大小搭配；仍只在候选池内选号。`,
+    '复盘只用于修正本期选号思路，前区单注仍是 1/21425712，概率不变。',
   ].join('\n')
 
-  return { drawId: latestId, headline, text, hits: redHit.length, blueHit }
+  return { drawId: latestId, headline, text, hits: frontHit.length, backHits: backHit.length }
 }

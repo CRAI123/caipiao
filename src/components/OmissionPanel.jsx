@@ -1,6 +1,6 @@
 // 定位号码 K 线：按「单个号码」看走势（红柱=当期开出，绿柱=未开出，柱高=遗漏）
 // 指标口径与行情软件一致：布林通道、KDJ(9,3,3)、MACD(12,26,9)
-// 3D / 排列三：按 百 / 十 / 个 位切换 0–9；快乐8：1–80 任选；双色球：红 1–33 / 蓝 1–16
+// 3D / 排列三：按 百 / 十 / 个 位切换 0–9；快乐8：1–80 任选；大乐透：前区 1–35 / 后区 1–12
 import React, { useMemo, useState } from 'react'
 import { Card, Note } from './common.jsx'
 import OmissionChart from './OmissionChart.jsx'
@@ -39,22 +39,22 @@ export default function OmissionPanel({
   positions = POS_LABEL,
 }) {
   const isDigit = lottery === 'fc3d' || lottery === 'pl3' || lottery === 'pl5'
-  const isSsq = lottery === 'ssq'
+  const isDlt = lottery === 'dlt'
   const [pos, setPos] = useState(0)
   const [digit, setDigit] = useState(0)
-  const [kind, setKind] = useState('red')
+  const [kind, setKind] = useState('front')
   const [num, setNum] = useState(1)
   const [sortKey, setSortKey] = useState('default')
   const [filterKey, setFilterKey] = useState('all')
 
-  const maxNum = isSsq ? (kind === 'red' ? 33 : 16) : 80
+  const maxNum = isDlt ? (kind === 'front' ? 35 : 12) : 80
   const selNum = Math.min(num, maxNum)
   const selDigit = isDigit ? digit : selNum
 
   const hitFn = useMemo(() => {
     if (isDigit) return (d) => d.num[pos] === selDigit
     if (lottery === 'kl8') return (d) => d.nums.includes(selDigit)
-    return kind === 'red' ? (d) => d.red.includes(selDigit) : (d) => d.blue === selDigit
+    return kind === 'front' ? (d) => d.front.includes(selDigit) : (d) => d.back.includes(selDigit)
   }, [isDigit, lottery, pos, selDigit, kind])
 
   const rows = useMemo(() => omissionSeries(draws, hitFn, windowN), [draws, hitFn, windowN])
@@ -103,8 +103,8 @@ export default function OmissionPanel({
 
   const title = isDigit
     ? `定位号码 K 线 · ${positions[pos]}`
-    : isSsq
-      ? `号码 K 线 · ${kind === 'red' ? '红球' : '蓝球'} ${selNum}`
+    : isDlt
+      ? `号码 K 线 · ${kind === 'front' ? '前区' : '后区'} ${selNum}`
       : `号码 K 线 · ${selNum} 号`
 
   return (
@@ -116,13 +116,13 @@ export default function OmissionPanel({
               {label}
             </button>
           ))}
-        {isSsq && (
+        {isDlt && (
           <>
-            <button className={`tab-btn ${kind === 'red' ? 'active' : ''}`} onClick={() => setKind('red')}>
-              红球
+            <button className={`tab-btn ${kind === 'front' ? 'active' : ''}`} onClick={() => setKind('front')}>
+              前区
             </button>
-            <button className={`tab-btn ${kind === 'blue' ? 'active' : ''}`} onClick={() => setKind('blue')}>
-              蓝球
+            <button className={`tab-btn ${kind === 'back' ? 'active' : ''}`} onClick={() => setKind('back')}>
+              后区
             </button>
           </>
         )}

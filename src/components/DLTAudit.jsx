@@ -1,21 +1,21 @@
-// 双色球 方法体检 —— 滚动回测：每期只用之前的数据推算，再与真实开奖对比
+// 大乐透 方法体检 —— 滚动回测：每期只用之前的数据推算，再与真实开奖对比
 import React, { useMemo, useState } from 'react'
 import { Card, StatCard, Note, Ball } from './common.jsx'
-import { walkForwardAuditSSQ, PRIZE_TABLE } from '../lib/ssqPredict.js'
+import { walkForwardAuditDLT, PRIZE_TABLE, FRONT_PICK, BACK_PICK } from '../lib/dltPredict.js'
 import AiHitLog from './AiHitLog.jsx'
 import RandomnessCard from './RandomnessCard.jsx'
 
 const PERIODS = [30, 50, 80, 120]
 
-export default function SSQAudit({ draws }) {
-  const [periods, setPeriods] = useState(50)
-  const audit = useMemo(
-    () => walkForwardAuditSSQ(draws, { periods, minTrain: 30 }),
-    [draws, periods],
-  )
+/** 5/35 前区命中分布的理论占比（超几何分布） */
+const THEORY = [0.439, 0.4221, 0.1251, 0.0134, 0.00046, 0.0000031]
 
-  const redDelta = (audit.avgRedHits - audit.baselineRed).toFixed(3)
-  const blueDelta = (audit.blueRate - audit.baselineBlue).toFixed(1)
+export default function DLTAudit({ draws }) {
+  const [periods, setPeriods] = useState(50)
+  const audit = useMemo(() => walkForwardAuditDLT(draws, { periods, minTrain: 30 }), [draws, periods])
+
+  const frontDelta = (audit.avgFrontHits - audit.baselineFront).toFixed(3)
+  const backDelta = (audit.backRate - audit.baselineBack).toFixed(1)
   const prizeMap = {}
   for (const r of audit.rows) if (r.prize) prizeMap[r.prize] = (prizeMap[r.prize] || 0) + 1
 
@@ -43,31 +43,26 @@ export default function SSQAudit({ draws }) {
 
       <div className="stat-grid">
         <StatCard
-          label="红球平均命中"
-          value={audit.avgRedHits}
-          note={`纯随机基准 ${audit.baselineRed} · 差 ${redDelta > 0 ? '+' : ''}${redDelta}`}
+          label="前区平均命中"
+          value={audit.avgFrontHits}
+          note={`纯随机基准 ${audit.baselineFront} · 差 ${frontDelta > 0 ? '+' : ''}${frontDelta}`}
         />
         <StatCard
-          label="蓝球命中率"
-          value={`${audit.blueRate}%`}
+          label="后区全中率"
+          value={`${audit.backRate}%`}
           tone="blue"
-          note={`纯随机基准 ${audit.baselineBlue}% · 差 ${blueDelta > 0 ? '+' : ''}${blueDelta}`}
+          note={`纯随机基准 ${audit.baselineBack}% · 差 ${backDelta > 0 ? '+' : ''}${backDelta}`}
         />
         <StatCard
           label="中奖期数"
           value={`${audit.winCount} / ${audit.periods}`}
           tone="amber"
-          note="含六等奖（仅中蓝球）"
+          note="含九等奖（最低奖级）"
         />
-        <StatCard
-          label="样本期数"
-          value={audit.periods}
-          tone="green"
-          note={`数据总量 ${draws.length} 期`}
-        />
+        <StatCard label="样本期数" value={audit.periods} tone="green" note={`数据总量 ${draws.length} 期`} />
       </div>
 
-      <Card title="红球命中分布" tag={`${audit.periods} 期`}>
+      <Card title="前区命中分布" tag={`${audit.periods} 期`}>
         <div className="ssq-dist-bars">
           {audit.dist.map((d) => (
             <div key={d.k} className="ssq-dist-item">
@@ -83,11 +78,13 @@ export default function SSQAudit({ draws }) {
           ))}
         </div>
         <div className="mono small muted" style={{ marginTop: 10 }}>
-          理论期望：0 中 {(audit.periods * 0.304).toFixed(1)} 期 · 1 中 {(audit.periods * 0.437).toFixed(1)} 期 · 2 中{' '}
-          {(audit.periods * 0.198).toFixed(1)} 期 · 3 中 {(audit.periods * 0.053).toFixed(1)} 期
+          理论期望：
+          {audit.dist
+            .map((d) => `${d.k} 中 ${(audit.periods * (THEORY[d.k] || 0)).toFixed(1)} 期`)
+            .join(' · ')}
         </div>
         <Note>
-          命中个数的理论分布来自超几何分布（33 选 6，实际开出 6 个）。若实测与理论接近，
+          命中个数的理论分布来自超几何分布（35 选 5，实际开出 5 个）。若实测与理论接近，
           说明方法没有提供额外信息——这正是随机开奖应有的结果。
         </Note>
       </Card>
@@ -115,52 +112,48 @@ export default function SSQAudit({ draws }) {
               <tr>
                 <th>期号</th>
                 <th>实际开奖</th>
-                <th>推荐红球</th>
-                <th>推荐蓝球</th>
-                <th>红球命中</th>
-                <th>蓝球</th>
+                <th>推荐前区</th>
+                <th>推荐后区</th>
+                <th>前区命中</th>
+                <th>后区</th>
                 <th>奖级</th>
               </tr>
             </thead>
             <tbody>
               {audit.rows.slice(0, 100).map((r) => {
-                const hitSet = new Set(r.prediction.red)
-                const actualHit = r.draw.red.filter((n) => hitSet.has(n))
+                const hitSet = new Set(r.prediction.front)
+                const actualHit = r.draw.front.filter((n) => hitSet.has(n))
+                const backSet = new Set(r.prediction.back)
                 return (
                   <tr key={r.draw.id}>
                     <td className="mono">{r.draw.id}</td>
                     <td>
                       <span className="ssq-repeat-nums">
-                        {r.draw.red.map((n) => (
-                          <Ball
-                            key={`a${n}`}
-                            n={n}
-                            kind="red"
-                            size="xs"
-                            className={hitSet.has(n) ? 'ball-hit' : ''}
-                          />
+                        {r.draw.front.map((n) => (
+                          <Ball key={`a${n}`} n={n} kind="red" size="xs" className={hitSet.has(n) ? 'ball-hit' : ''} />
                         ))}
                         <span className="ssq-divider" aria-hidden="true" />
-                        <Ball
-                          n={r.draw.blue}
-                          kind="blue"
-                          size="xs"
-                          className={r.blueHit ? 'ball-hit' : ''}
-                        />
+                        {r.draw.back.map((n) => (
+                          <Ball key={`ab${n}`} n={n} kind="blue" size="xs" className={backSet.has(n) ? 'ball-hit' : ''} />
+                        ))}
                       </span>
                     </td>
                     <td>
                       <span className="ssq-repeat-nums">
-                        {r.prediction.red.map((n) => (
+                        {r.prediction.front.map((n) => (
                           <Ball key={`p${n}`} n={n} kind="red" size="xs" dim={!actualHit.includes(n)} />
                         ))}
                       </span>
                     </td>
                     <td>
-                      <Ball n={r.prediction.blue} kind="blue" size="xs" dim={!r.blueHit} />
+                      <span className="ssq-repeat-nums">
+                        {r.prediction.back.map((n) => (
+                          <Ball key={`pb${n}`} n={n} kind="blue" size="xs" dim={!r.draw.back.includes(n)} />
+                        ))}
+                      </span>
                     </td>
-                    <td className="mono">{r.redHits}</td>
-                    <td>{r.blueHit ? '中' : '—'}</td>
+                    <td className="mono">{r.frontHits}</td>
+                    <td className="mono">{r.backHits}/{BACK_PICK}</td>
                     <td>
                       {r.prize ? (
                         <span className="prize-badge prize-badge-win">{r.prize}</span>
@@ -176,14 +169,14 @@ export default function SSQAudit({ draws }) {
         </div>
       </Card>
 
-      <AiHitLog kind="ssq" game="ssq" draws={draws} />
+      <AiHitLog kind="dlt" game="dlt" draws={draws} />
 
       <Note tone="warn">
         回测结果与理论基准的差异属于随机波动。样本越小波动越大，
         请勿把某一时段的“超出基准”理解为方法有效。
       </Note>
 
-      <RandomnessCard draws={draws} game="ssq" maxNum={33} />
+      <RandomnessCard draws={draws} game="dlt" maxNum={35} />
     </div>
   )
 }

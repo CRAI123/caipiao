@@ -1,4 +1,4 @@
-// 双色球 重号 / 邻号 / 孤号 + 新旧码 + 5 期重号池 + 二码同出
+// 大乐透 重号 / 邻号 / 孤号 + 新旧码 + 5 期重号池 + 二码同出
 import React, { useState } from 'react'
 import { Card, StatCard, Note, Ball } from './common.jsx'
 import {
@@ -6,16 +6,17 @@ import {
   newOldRatio,
   recent5Pool,
   pairStats,
-  redStats,
-} from '../lib/ssqPredict.js'
+  frontStats,
+  FRONT_MAX,
+  FRONT_PICK,
+} from '../lib/dltPredict.js'
 
 const WINDOWS = [20, 30, 50, 100]
 
-export default function SSQRepeats({ draws }) {
+export default function DLTRepeats({ draws }) {
   const [windowN, setWindowN] = useState(30)
   const recent = draws.slice(0, 15)
 
-  // 逐对统计重号 / 邻号 / 孤号
   const pairs = []
   for (let i = 0; i < recent.length - 1; i++) {
     const curr = recent[i]
@@ -25,7 +26,7 @@ export default function SSQRepeats({ draws }) {
   }
 
   const sample = draws.slice(0, Math.min(windowN, draws.length))
-  const dist = [0, 1, 2, 3, 4, 5, 6].map(() => 0)
+  const dist = [0, 1, 2, 3, 4, 5].map(() => 0)
   for (let i = 0; i < sample.length - 1; i++) {
     const rn = repeatNeighbor(sample[i + 1], sample[i])
     if (rn) dist[rn.repeat.length]++
@@ -48,7 +49,7 @@ export default function SSQRepeats({ draws }) {
   const no = newOldRatio(draws)
   const pool = recent5Pool(draws)
   const pairTop = pairStats(draws, 50).slice(0, 12)
-  const stats = redStats(draws)
+  const stats = frontStats(draws)
   const hotPool = new Set(stats.filter((s) => s.level === '热').map((s) => s.n))
 
   return (
@@ -78,7 +79,7 @@ export default function SSQRepeats({ draws }) {
         />
         <StatCard
           label="2 个及以上重号"
-          value={`${(((dist[2] + dist[3] + dist[4] + dist[5] + dist[6]) / pairCount) * 100).toFixed(0)}%`}
+          value={`${(((dist[2] + dist[3] + dist[4] + dist[5]) / pairCount) * 100).toFixed(0)}%`}
           tone="green"
           note="重号偏多的期数"
         />
@@ -89,10 +90,7 @@ export default function SSQRepeats({ draws }) {
           {dist.map((c, k) => (
             <div key={k} className="ssq-dist-item">
               <div className="ssq-dist-bar-wrap">
-                <div
-                  className="ssq-dist-bar"
-                  style={{ height: `${(c / Math.max(...dist, 1)) * 100}%` }}
-                />
+                <div className="ssq-dist-bar" style={{ height: `${(c / Math.max(...dist, 1)) * 100}%` }} />
               </div>
               <div className="ssq-dist-label">{k} 个</div>
               <div className="ssq-dist-val mono">{c}</div>
@@ -100,8 +98,8 @@ export default function SSQRepeats({ draws }) {
           ))}
         </div>
         <Note>
-          相邻两期的重号个数近似二项分布；单号重复概率恒为 6/33≈18.2%，
-          与它上期是否开出无关。
+          相邻两期的重号个数近似二项分布；单号重复概率恒为 {FRONT_PICK}/{FRONT_MAX}≈
+          {((FRONT_PICK / FRONT_MAX) * 100).toFixed(1)}%，与它上期是否开出无关。
         </Note>
       </Card>
 
@@ -111,14 +109,14 @@ export default function SSQRepeats({ draws }) {
             <div key={curr.id} className="ssq-repeat-row">
               <span className="mono muted">{String(prev.id).slice(-5)}</span>
               <span className="ssq-repeat-nums">
-                {prev.red.map((n) => (
+                {prev.front.map((n) => (
                   <Ball key={`p${n}`} n={n} kind="red" size="xs" dim />
                 ))}
               </span>
               <span className="ssq-repeat-arrow">→</span>
               <span className="mono muted">{String(curr.id).slice(-5)}</span>
               <span className="ssq-repeat-nums">
-                {curr.red.map((n) => (
+                {curr.front.map((n) => (
                   <Ball
                     key={`c${n}`}
                     n={n}
@@ -130,7 +128,9 @@ export default function SSQRepeats({ draws }) {
                   />
                 ))}
               </span>
-              <span className="ssq-repeat-tag">重 {rn.repeat.length} · 邻 {rn.neighbor.length} · 孤 {rn.orphan.length}</span>
+              <span className="ssq-repeat-tag">
+                重 {rn.repeat.length} · 邻 {rn.neighbor.length} · 孤 {rn.orphan.length}
+              </span>
             </div>
           ))}
         </div>
@@ -140,7 +140,7 @@ export default function SSQRepeats({ draws }) {
       </Card>
 
       <div className="two-col">
-        <Card title="新旧码配比" tag="三层法">
+        <Card title="新旧码配比" tag="二层法">
           {no ? (
             <>
               <div className="ssq-two-metric">
@@ -155,7 +155,7 @@ export default function SSQRepeats({ draws }) {
                   <small>近 5 期未出</small>
                 </div>
               </div>
-              <Note>旧码池 {no.poolSize} 个，上期 6 红中旧码 {no.old} 个。</Note>
+              <Note>旧码池 {no.poolSize} 个，上期 5 个前区中旧码 {no.old} 个。</Note>
             </>
           ) : (
             <Note>数据不足</Note>
@@ -168,8 +168,7 @@ export default function SSQRepeats({ draws }) {
             ))}
           </div>
           <Note>
-            近 5 期出现过的红球共 {pool.count} 个（理论期望约 5×6×(1−…)≈25 个），
-            ≥20 个视为重号偏强。
+            近 5 期出现过的前区号共 {pool.count} 个（最多 25 个），≥17 个视为重号偏强。
           </Note>
         </Card>
       </div>
@@ -202,9 +201,7 @@ export default function SSQRepeats({ draws }) {
             </tbody>
           </table>
         </div>
-        <Note>
-          任一两码同出的理论概率约 C(31,4)/C(33,6) ≈ 2.9%，50 期里出现 1–2 次属正常。
-        </Note>
+        <Note>任一两码同出的理论概率约 C(33,3)/C(35,5) ≈ 1.7%，50 期里出现 1 次左右属正常。</Note>
       </Card>
 
       <Card title="热号池" tag="近 200 期三层法热号">
