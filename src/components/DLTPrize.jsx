@@ -133,7 +133,9 @@ export default function DLTPrize() {
                     <td className="mono">{p.condition}</td>
                     <td className="mono">{p.money}</td>
                     <td className="mono">
-                      {ADDON_LEVELS.includes(p.level) ? `${Math.round(o.prize * 0.8).toLocaleString('zh-CN')} 元` : '—'}
+                      {ADDON_LEVELS.includes(p.level)
+                        ? `${['一等奖', '二等奖'].includes(p.level) ? '约 ' : ''}${Math.round(o.prize * 0.8).toLocaleString('zh-CN')} 元`
+                        : '—'}
                     </td>
                     <td className="mono">{o ? o.combos.toLocaleString('zh-CN') : '—'}</td>
                     <td className="mono">{o ? fmtOneIn(o.prob) : '—'}</td>

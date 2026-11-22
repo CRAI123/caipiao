@@ -16,8 +16,11 @@ function parseDltText(text) {
     let date = null
     const nums = []
     for (const p of parts) {
-      if (/^\d{4,}$/.test(p) && id === null) id = Number(p)
-      else if (/^\d{4}-\d{1,2}-\d{1,2}$/.test(p)) date = p
+      if (/^\d{4,}$/.test(p) && id === null) {
+        const raw = Number(p)
+        // 统一成 5 位期号：2026133 → 26133，避免与抓取数据混排
+        id = String(raw).length > 5 ? Number(String(raw).slice(2)) : raw
+      } else if (/^\d{4}-\d{1,2}-\d{1,2}$/.test(p)) date = p
       else if (/^\d{1,2}$/.test(p)) nums.push(Number(p))
     }
     if (id === null) {

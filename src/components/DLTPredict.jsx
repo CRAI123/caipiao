@@ -17,7 +17,6 @@ import {
   DLT_FRONT_SIGNALS,
   DLT_BACK_SIGNALS,
   wilsonInterval,
-  BACK_MAX,
   BACK_PICK,
 } from '../lib/dltPredict.js'
 import { readLearning } from '../lib/learning.js'
@@ -642,6 +641,7 @@ export default function DLTPredict({ draws }) {
         <Note>
           覆盖 k 个前区号的单号平均命中 = k × 5/35。档位升高只增加覆盖与花费，
           “5 个前区全覆盖概率”仍是 C(k,5)/C(35,5)，不存在更划算的档位。
+          若选择追加投注，每注从 2 元变为 3 元，上表成本需乘以 1.5；追加只增加中奖后的奖金，不改变命中概率。
         </Note>
       </Card>
 
