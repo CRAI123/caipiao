@@ -556,13 +556,15 @@ ${schemaPrompt(k)}`
 
     // 第三次：把 20 码算法候选交给 AI 终审，让它自己决定最终 k 码（失败则回退算法结果）
     const candLine = wide.map((x) => `${pad(x.n)}(算法${x.algo}/票${x.ai})`).join(' ')
+    // JSON 示例必须给具体数字：用“号码”占位时模型会把字符串原样写回，导致解析后被全部过滤
+    const demoPicks = Array.from({ length: k }, (_, i) => i + 1).join(',')
     const messages3 = [
       {
         role: 'system',
         content:
           '你是快乐8研究助手，现在做第 13 步终审。候选号已按「底层算法评分 × 12 轮模型投票」排好序，' +
           `你的任务是复核后从这 ${wide.length} 个候选里挑出正好 ${k} 个（可以放弃算法排名靠后的号），并给出每个号一句话理由。只能输出 JSON：` +
-          '{"picks":[号码],"reasons":{"号码":"一句话"},"summary":"80 字内"}。' +
+          `{"picks":[${demoPicks}],"reasons":{"1":"一句话"},"summary":"80 字内"}。` +
           `picks 必须正好 ${k} 个、不重复、且只能来自候选；不要承诺中奖。`,
       },
       {
@@ -575,7 +577,7 @@ ${schemaPrompt(k)}`
     let finalTenNote = ''
     const wideNums = wide.map((x) => x.n)
     try {
-      const judge = await askOnce(llm, MODELS[0].id, messages3, 0.3, 700)
+      const judge = await askOnce(llm, MODELS[0].id, messages3, 0.3, 900)
       const picked = [...new Set((judge?.picks || []).map(Number))]
         .filter((n) => wideNums.includes(n))
         .slice(0, k)
