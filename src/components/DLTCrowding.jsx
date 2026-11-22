@@ -324,7 +324,7 @@ export default function DLTCrowding({ draws = [] }) {
         ) : (
           <>
             <p className="muted small">
-              覆盖 {model.n} 期（{String(model.to).slice(2)} → {String(model.from).slice(2)}）· 更新{' '}
+              覆盖 {model.n} 期（{String(model.from).slice(2)} → {String(model.to).slice(2)}）· 更新{' '}
               {timeText(model.at)}
               <br />
               倍数 1.00 = 平均票；&gt;1 表示被重复购买多、中了分得少，&lt;1 表示冷门。
