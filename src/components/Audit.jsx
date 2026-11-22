@@ -5,7 +5,7 @@ import { Card, Ball, DrawBalls, Note, StatCard, BarList, pad2, ballKindByRange }
 import { walkForwardAudit, hyperHits, PLAY_LABEL, BALL_MAX, PER_DRAW } from '../lib/stats.js'
 import AiHitLog from './AiHitLog.jsx'
 
-const PLAYS = [3, 5, 7, 10]
+const PLAYS = [3, 5, 6, 7, 10]
 
 /** 2026-11 本地实测：两个开源项目在「选十」上的留出检验结果（每期只用之前数据） */
 const EXTERNAL = [
@@ -23,7 +23,7 @@ const MODES = [
 ]
 
 export default function Audit({ draws }) {
-  const [play, setPlay] = useState(10)
+  const [play, setPlay] = useState(6)
   const [hotMode, setHotMode] = useState('mix')
 
   const audit = useMemo(
