@@ -364,8 +364,15 @@ export default async function handler(req, res) {
         await sqlRef`DELETE FROM kl8_ai_deep_runs WHERE draw_id = ${nextId} AND play = ${k}`
         row = undefined
       }
-      // 旧版结果（没有终选 10 码）直接重算
-      if (row && row.status === 'done' && row.result && row.result.schema !== SCHEMA) {
+      // 旧版结果（结构不符，或号码数与当前玩法不一致）直接重算
+      if (
+        row &&
+        row.status === 'done' &&
+        row.result &&
+        (row.result.schema !== SCHEMA ||
+          !Array.isArray(row.result.final10) ||
+          row.result.final10.length !== k)
+      ) {
         await sqlRef`DELETE FROM kl8_ai_deep_runs WHERE draw_id = ${nextId} AND play = ${k}`
         row = undefined
       }
@@ -543,24 +550,24 @@ ${schemaPrompt(k)}`
     for (const { picks } of [...round1, ...round2]) {
       for (const n of picks) hitsMap[n] = (hitsMap[n] || 0) + 1
     }
-    // 第二次收敛：只买 10 个球时，用底层算法分 + AI 投票融合出候选（AI/算法配比读学习状态）
-    const ten = finalize10(v7.pool, voteMap, hitsMap, 10, mixW)
-    const wide = finalize10(v7.pool, voteMap, hitsMap, 20, mixW)
+    // 第二次收敛：按目标玩法收敛到 k 个，另出一份 20 码候选供终审
+    const ten = finalize10(v7.pool, voteMap, hitsMap, k, mixW)
+    const wide = finalize10(v7.pool, voteMap, hitsMap, Math.max(20, k), mixW)
 
-    // 第三次：把 20 码算法候选交给 AI 终审，让它自己决定最终 10 码（失败则回退算法结果）
+    // 第三次：把 20 码算法候选交给 AI 终审，让它自己决定最终 k 码（失败则回退算法结果）
     const candLine = wide.map((x) => `${pad(x.n)}(算法${x.algo}/票${x.ai})`).join(' ')
     const messages3 = [
       {
         role: 'system',
         content:
           '你是快乐8研究助手，现在做第 13 步终审。候选号已按「底层算法评分 × 12 轮模型投票」排好序，' +
-          '你的任务是复核后从这 20 个候选里挑出正好 10 个（可以放弃算法排名靠后的号），并给出每注一句话理由。只能输出 JSON：' +
-          '{"picks":[1,2,3,4,5,6,7,8,9,10],"reasons":{"1":"一句话"},"summary":"80 字内"}。' +
-          'picks 必须正好 10 个、不重复、且只能来自候选；不要承诺中奖。',
+          `你的任务是复核后从这 ${wide.length} 个候选里挑出正好 ${k} 个（可以放弃算法排名靠后的号），并给出每个号一句话理由。只能输出 JSON：` +
+          '{"picks":[号码],"reasons":{"号码":"一句话"},"summary":"80 字内"}。' +
+          `picks 必须正好 ${k} 个、不重复、且只能来自候选；不要承诺中奖。`,
       },
       {
         role: 'user',
-        content: [context, '', `终审候选（算法分/票分）：${candLine}`, '', '请给出终审的 10 个号码。'].join('\n'),
+        content: [context, '', `终审候选（算法分/票分）：${candLine}`, '', `请给出终审的 ${k} 个号码。`].join('\n'),
       },
     ]
     let finalTen = ten.map((x) => x.n)
@@ -571,20 +578,20 @@ ${schemaPrompt(k)}`
       const judge = await askOnce(llm, MODELS[0].id, messages3, 0.3, 700)
       const picked = [...new Set((judge?.picks || []).map(Number))]
         .filter((n) => wideNums.includes(n))
-        .slice(0, 10)
+        .slice(0, k)
       if (picked.length) {
-        // 终审不足 10 个时按算法融合顺序补齐，保证永远正好给出 10 个
+        // 终审不足 k 个时按算法融合顺序补齐，保证永远正好给出 k 个
         const filled = [...picked]
         for (const n of finalTen) {
-          if (filled.length >= 10) break
+          if (filled.length >= k) break
           if (!filled.includes(n)) filled.push(n)
         }
-        finalTen = filled.slice(0, 10)
+        finalTen = filled.slice(0, k)
         finalTenSource = 'ai'
         finalTenNote =
-          picked.length === 10
+          picked.length === k
             ? String(judge.summary || '').slice(0, 200)
-            : `AI 终审给出 ${picked.length} 个有效号，其余 ${10 - picked.length} 个按算法融合顺序补齐`
+            : `AI 终审给出 ${picked.length} 个有效号，其余 ${k - picked.length} 个按算法融合顺序补齐`
       } else {
         finalTenNote = '终审未给出有效号码，已采用算法融合结果'
       }
