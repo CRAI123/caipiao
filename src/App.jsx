@@ -1,5 +1,6 @@
 import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import logoImg from './assets/logo.webp'
+import logoBanner from './assets/logo-banner.jpg'
 import { HISTORY_DRAWS, SAMPLE_DRAWS } from './data/sample.js'
 import Overview from './components/Overview.jsx'
 import DailyCheckin from './components/DailyCheckin.jsx'
@@ -574,25 +575,26 @@ export default function App() {
       <header className="masthead">
         <div className="masthead-inner">
           <div className="masthead-title">
-            <img className="masthead-mark" src={logoImg} alt="研彩室" />
-            <div>
-              <h1>研彩室</h1>
-              <p className="masthead-sub">
-                {lottery === 'kl8' ? (
-                  <>福彩快乐8 · 数据研究档案 <i>KUAILE 8 RESEARCH LEDGER</i></>
-                ) : lottery === 'fc3d' ? (
-                  <>福彩3D · 数据研究档案 <i>FC3D RESEARCH LEDGER</i></>
-                ) : lottery === 'pl3' ? (
-                  <>体彩排列三 · 数据研究档案 <i>PL3 RESEARCH LEDGER</i></>
-                ) : lottery === 'pl5' ? (
-                  <>体彩排列五 · 数据研究档案 <i>PL5 RESEARCH LEDGER</i></>
-                ) : lottery === 'qxc' ? (
-                  <>体彩七星彩 · 数据研究档案 <i>QXC RESEARCH LEDGER</i></>
-                ) : (
-                  <>体彩大乐透 · 数据研究档案 <i>DLT RESEARCH LEDGER</i></>
-                )}
-              </p>
-            </div>
+            <img
+              className="masthead-banner"
+              src={logoBanner}
+              alt="研彩室 · 研彩于心，乐在其中"
+            />
+            <p className="masthead-sub">
+              {lottery === 'kl8' ? (
+                <>福彩快乐8 · 数据研究档案 <i>KUAILE 8 RESEARCH LEDGER</i></>
+              ) : lottery === 'fc3d' ? (
+                <>福彩3D · 数据研究档案 <i>FC3D RESEARCH LEDGER</i></>
+              ) : lottery === 'pl3' ? (
+                <>体彩排列三 · 数据研究档案 <i>PL3 RESEARCH LEDGER</i></>
+              ) : lottery === 'pl5' ? (
+                <>体彩排列五 · 数据研究档案 <i>PL5 RESEARCH LEDGER</i></>
+              ) : lottery === 'qxc' ? (
+                <>体彩七星彩 · 数据研究档案 <i>QXC RESEARCH LEDGER</i></>
+              ) : (
+                <>体彩大乐透 · 数据研究档案 <i>DLT RESEARCH LEDGER</i></>
+              )}
+            </p>
           </div>
           <div className="masthead-meta mono">
             {lottery === 'kl8' ? (

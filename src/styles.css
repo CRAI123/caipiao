@@ -85,7 +85,20 @@ body {
   gap: 16px;
   flex-wrap: wrap;
 }
-.masthead-title { display: flex; align-items: center; gap: 16px; }
+.masthead-title {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 10px;
+  min-width: 0;
+}
+.masthead-banner {
+  display: block;
+  height: 92px;
+  width: auto;
+  max-width: 100%;
+  border-radius: 8px;
+}
 .masthead-mark {
   display: block;
   width: 58px;
@@ -95,14 +108,9 @@ body {
   box-shadow: var(--shadow-hard);
   transform: rotate(-3deg);
 }
-.masthead-title h1 {
-  margin: 0;
-  font-size: 34px;
-  font-weight: 900;
-  letter-spacing: 10px;
-}
 .masthead-sub {
-  margin: 2px 0 0;
+  margin: 0;
+  max-width: 100%;
   font-size: 12.5px;
   color: var(--ink-60);
   letter-spacing: 2px;
@@ -495,7 +503,6 @@ body {
 .grid-2 { display: grid; grid-template-columns: 1fr 1fr; gap: 18px; align-items: start; }
 @media (max-width: 860px) {
   .grid-2 { grid-template-columns: 1fr; }
-  .masthead-title h1 { font-size: 26px; letter-spacing: 6px; }
 }
 
 /* ---------- 卡片 ---------- */
@@ -2134,14 +2141,14 @@ code {
     flex-wrap: nowrap;
     gap: 10px;
   }
-  .masthead-title { gap: 9px; min-width: 0; }
+  .masthead-title { gap: 5px; min-width: 0; }
+  .masthead-banner { height: 54px; border-radius: 6px; }
   .masthead-mark {
     width: 34px;
     height: 34px;
     border-radius: 5px;
     transform: rotate(-3deg);
   }
-  .masthead-title h1 { font-size: 20px; letter-spacing: 4px; }
   .masthead-sub {
     margin-top: 0;
     font-size: 10.5px;
