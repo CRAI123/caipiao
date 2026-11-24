@@ -292,10 +292,10 @@ export async function scoreAndLearn(sql, game, draws) {
     const changes = [] // 本期各键权重新旧变动（供日报与前端展示）
     const hitsOut = {} // 本期各来源命中数
     const today = new Date().toISOString().slice(0, 10)
-    /** 取族当前状态（库里 n>=阈值 用库值，否则默认） */
+    /** 取族当前状态：有历史就接着累加（冷启动阶段也必须累积，否则样本永远停在 1/8） */
     const getFamily = (paramKey, keys, weights) => {
       const v = stateRows.get(paramKey)
-      if (v && v.n >= MIN_SAMPLES && Array.isArray(v.weights) && v.weights.length === keys.length) return v
+      if (v && Array.isArray(v.weights) && v.weights.length === keys.length) return v
       return newStateValue(keys, weights)
     }
     const saveFamily = async (paramKey, value, prev) => {

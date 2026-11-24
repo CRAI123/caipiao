@@ -36,7 +36,7 @@ import {
   buildQXCMessages,
 } from '../src/lib/digitAi.js'
 import { predictFC3Dv2 } from '../src/lib/fc3dPredict.js'
-import { predictPL3Pro } from '../src/lib/pl3Predict.js'
+import { predictFC3Dv4 } from '../src/lib/pl3Predict.js'
 import { predictPL5 } from '../src/lib/pl5Predict.js'
 import { predictQXC } from '../src/lib/qxcPredict.js'
 import { predictDLT } from '../src/lib/dltPredict.js'
@@ -166,14 +166,9 @@ function buildFc3d(draws, learned = null) {
   return { latest: draws[0], pred: p }
 }
 
-/** 排列三：v3 Pro 档（9 专家 Hedge 自适应权重 + 六维结构约束），站内概率最高的一档 */
-function buildPl3(draws, learned = null) {
-  const ex = learned && !learned.coldStart ? learned.experts : null
-  const wOverride =
-    ex && Array.isArray(ex.p0) && Array.isArray(ex.p1) && Array.isArray(ex.p2)
-      ? [ex.p0, ex.p1, ex.p2]
-      : null
-  const p = predictPL3Pro(draws, wOverride ? { weightsOverride: wOverride } : {})
+/** 排列三：v4 技术指标档（MA/布林/MACD 投影和值·跨度 + KDJ 温和修正，按需求作为推送默认算法） */
+function buildPl3(draws) {
+  const p = predictFC3Dv4(draws)
   if (!p) return null
   return { latest: draws[0], pred: p }
 }
@@ -1210,7 +1205,7 @@ export default async function handler(req, res) {
 
     const kl8 = kl8Res.status === 'fulfilled' && kl8Res.value ? buildKl8(kl8Draws, learnedOf.kl8) : null
     const fc3d = fc3dRes.status === 'fulfilled' && fc3dRes.value ? buildFc3d(fc3dDraws, learnedOf.fc3d) : null
-    const pl3 = pl3Res.status === 'fulfilled' && pl3Res.value ? buildPl3(pl3Draws, learnedOf.pl3) : null
+    const pl3 = pl3Res.status === 'fulfilled' && pl3Res.value ? buildPl3(pl3Draws) : null
     const pl5 = pl5Res.status === 'fulfilled' && pl5Res.value ? buildPl5(pl5Draws, learnedOf.pl5) : null
     const qxc = qxcRes.status === 'fulfilled' && qxcRes.value ? buildQxc(qxcDraws, learnedOf.qxc) : null
     const dlt = dltRes.status === 'fulfilled' && dltRes.value ? buildDlt(dltDraws, learnedOf.dlt) : null
@@ -1430,7 +1425,7 @@ export default async function handler(req, res) {
       cards.push(
         buildPl3Card(
           pl3,
-          `${prefix}排列三 v3 Pro 推荐 · ${dateText}`,
+          `${prefix}排列三 v4 技术指标 推荐 · ${dateText}`,
           staleWarning(fresh.pl3, '排列三'),
           pl3Ai,
           hits.pl3,
