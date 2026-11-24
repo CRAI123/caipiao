@@ -18,22 +18,26 @@ const GAMES = { fc3d: '福彩3D', pl3: '排列三', pl5: '排列五', qxc: '七�
 // 每位彩种的号码位数：排列三 3 位（直选/组选），排列五 5 位，七星彩 7 位（前 6 位 0-9 + 后区 0-14）
 const POS_LEN = { fc3d: 3, pl3: 3, pl5: 5, qxc: 7 }
 const maskId = (id) => (id ? `尾号${String(id).slice(-4)}` : '匿名设备')
-// 结果结构版本：v8 起双色球位改为大乐透（前区 5 + 后区 2），命中旧版会重算
-const SCHEMA = 8
+// 结果结构版本：v9 起 AI 结果包含四段完整分析（analysis），命中旧版会重算
+const SCHEMA = 9
 
 /** 某个位数对应的 JSON 输出格式说明（供模型与重试用） */
 function jsonHint(len) {
+  const analysis =
+    '"analysis":"四段完整分析：①结构概览 ②位置观察 ③组合参考 ④风险提示，300-450 字，分段输出，不要 Markdown 表格"'
   if (len === 7) {
-    return '{"straight":["7 2 4 7 6 3 14","1 9 3 5 2 8 12"],"reasons":{"7 2 4 7 6 3 14":"一句话理由"},"summary":"80 字内","risk":"一句风险提示"}'
+    return `{"straight":["7 2 4 7 6 3 14","1 9 3 5 2 8 12"],"reasons":{"7 2 4 7 6 3 14":"一句话理由"},${analysis},"summary":"80 字内","risk":"一句风险提示"}`
   }
   return len === 5
-    ? '{"straight":["01234","56789"],"reasons":{"01234":"一句话理由"},"summary":"80 字内","risk":"一句风险提示"}'
-    : '{"straight":["123","456","789"],"group":["135","246"],"group3":["112"],"reasons":{"123":"一句话理由"},"summary":"80 字内","risk":"一句风险提示"}'
+    ? `{"straight":["01234","56789"],"reasons":{"01234":"一句话理由"},${analysis},"summary":"80 字内","risk":"一句风险提示"}`
+    : `{"straight":["123","456","789"],"group":["135","246"],"group3":["112"],"reasons":{"123":"一句话理由"},${analysis},"summary":"80 字内","risk":"一句风险提示"}`
 }
 
 /** 大乐透的 JSON 输出格式说明 */
 function jsonHintDlt() {
-  return '{"front":[3,11,17,24,31],"back":[4,9],"reasons":{"3":"一句话理由"},"summary":"80 字内","risk":"一句风险提示"}'
+  const analysis =
+    '"analysis":"四段完整分析：①结构概览 ②冷热观察 ③组合参考 ④风险提示，300-450 字，分段输出，不要 Markdown 表格"'
+  return `{"front":[3,11,17,24,31],"back":[4,9],"reasons":{"3":"一句话理由"},${analysis},"summary":"80 字内","risk":"一句风险提示"}`
 }
 
 /** 大乐透六轮：结构解读 → 反向质询 → 前区专项 → 后区专项 → 算法候选终选 → 终审校验 */
@@ -210,6 +214,7 @@ function normalizePicks(raw, digitCount = 3) {
       group: [],
       group3: [],
       reasons,
+      analysis: String(raw.analysis || '').slice(0, 2000),
       summary: String(raw.summary || '').slice(0, 400),
       risk: String(raw.risk || '').slice(0, 200),
     }
@@ -235,6 +240,7 @@ function normalizePicks(raw, digitCount = 3) {
     group,
     group3,
     reasons,
+    analysis: String(raw.analysis || '').slice(0, 2000),
     summary: String(raw.summary || '').slice(0, 400),
     risk: String(raw.risk || '').slice(0, 200),
   }
@@ -267,6 +273,7 @@ function normalizePicksDlt(raw) {
     front,
     back,
     reasons,
+    analysis: String(raw.analysis || '').slice(0, 2000),
     summary: String(raw.summary || '').slice(0, 400),
     risk: String(raw.risk || '').slice(0, 200),
   }
@@ -480,7 +487,7 @@ export default async function handler(req, res) {
       const r = ROUNDS[i]
       const ask = { role: 'user', content: i === 0 ? r.prompt + notesBlock : r.prompt }
       const text = await callAi(llm, [...conv, ask], {
-        maxTokens: r.maxTokens || 1200,
+        maxTokens: r.maxTokens || 2000,
         temperature: r.temperature,
       })
       rounds.push({ name: r.name, text })
@@ -515,7 +522,7 @@ export default async function handler(req, res) {
                   '只能从上面给出的算法候选池里选，不得自创池外号码。',
             },
           ],
-          { maxTokens: 700, temperature: 0.2 },
+          { maxTokens: 2000, temperature: 0.2 },
         )
         picks = parsePicks(extractJson(retry))
       } catch {
@@ -594,7 +601,8 @@ export default async function handler(req, res) {
       label: String(label || GAMES[game]).slice(0, 20),
       // 有推荐号码时正文只放结论摘要，避免把 JSON 原文当解读展示
       text: picks
-        ? [picks.summary, picks.risk].filter(Boolean).join('\n\n') || rounds[rounds.length - 1].text
+        ? [picks.analysis, picks.summary, picks.risk].filter(Boolean).join('\n\n') ||
+          rounds[rounds.length - 1].text
         : rounds[rounds.length - 1].text,
       picks,
       finalSource,

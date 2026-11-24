@@ -60,7 +60,7 @@ const STATUS_KEY = 'daily_push_last'
 const HISTORY_KEY = 'daily_push_history'
 const FRESH_RETRY_MS = 1500
 // AI 终选与站内共用同一套结构版本号，只有同版本的历史结果才复用
-const DIGIT_SCHEMA = 7
+const DIGIT_SCHEMA = 9
 export const KL8_SCHEMA = 5
 // 夜间学习批次（22:00）预生成的次日快乐8终选，14:00 推送直接复用
 const PREWARM_KL8_KEY = 'push_prewarm_kl8'

@@ -52,7 +52,7 @@ const WAIT_STAGES = AI_ROUNDS.map((label, i) => ({
     '校验前区 5 个不重复、后区 2 个不重复、范围内且属于候选池，不合规即替换',
   ][i],
 }))
-const AI_SCHEMA = 7
+const AI_SCHEMA = 9
 
 // AI 终选：算法候选池 → AI 只在池内终选 5 前区 + 2 后区，结果全站共享、每期一条记录
 function DltAiCard({ draws, pred }) {
@@ -289,6 +289,11 @@ function DltAiCard({ draws, pred }) {
             与 AI 定稿重合：前区 {(picks.front || []).filter((n) => pred.front.includes(n)).length}/5 · 后区{' '}
             {(picks.back || []).filter((n) => pred.back.includes(n)).length}/2
           </div>
+          {picks.analysis && (
+            <div className="ai-report-body" style={{ marginTop: 10, whiteSpace: 'pre-wrap' }}>
+              {String(picks.analysis)}
+            </div>
+          )}
           {picks.summary && <div className="note note-info" style={{ marginTop: 8 }}>{String(picks.summary)}</div>}
           {picks.risk && <div className="note note-warn" style={{ marginTop: 8 }}>{String(picks.risk)}</div>}
           {stale && <Note tone="warn">这一版解析来自旧结构，可点「重新分析」生成新的记录。</Note>}

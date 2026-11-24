@@ -50,7 +50,7 @@ const WAIT_STAGES = ROUND_STAGES.map((label, i) => ({
 }))
 
 // 结果结构版本：与服务端 SCHEMA 对齐，旧版（候选池 / 自由推演 / 复核制）会重算
-const SCHEMA = 7
+const SCHEMA = 9
 
 const digitsOf = (s, digitCount = 3) => String(s).replace(/\D/g, '').slice(0, digitCount)
 
@@ -593,6 +593,11 @@ function DigitAIInner({ draws, label = '福彩3D', game = 'fc3d', onRefreshData,
                 </div>
               )}
 
+              {picks.analysis && (
+                <div className="ai-report-body" style={{ marginTop: 10, whiteSpace: 'pre-wrap' }}>
+                  {String(picks.analysis)}
+                </div>
+              )}
               {picks.summary && (
                 <div className="note note-info" style={{ marginTop: 10 }}>{String(picks.summary)}</div>
               )}
