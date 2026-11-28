@@ -44,19 +44,15 @@ import DLTTerms from './components/DLTTerms.jsx'
 import DLTDataManager from './components/DLTDataManager.jsx'
 import { FC3D_DRAWS } from './data/fc3d.js'
 import { PL3_DRAWS } from './data/pl3.js'
-import { PL5_DRAWS } from './data/pl5.js'
 import { QXC_DRAWS } from './data/qxc.js'
 import { DLT_DRAWS } from './data/dlt.js'
 import { fetchPl3Draws } from './lib/pl3.js'
-import { fetchPl5Draws } from './lib/pl5.js'
 import { fetchQxcDraws } from './lib/qxc.js'
 import { fetchFc3dDraws } from './lib/fc3d.js'
 import { fetchKl8Draws } from './lib/kl8.js'
 import { fetchDltDraws } from './lib/dlt.js'
 import * as pl3Engine from './lib/pl3Predict.js'
-import * as pl5Engine from './lib/pl5Predict.js'
 import * as qxcEngine from './lib/qxcPredict.js'
-import * as pl5Stats from './lib/pl5Stats.js'
 import * as qxcStats from './lib/qxcStats.js'
 import { loadJournal, getRecord } from './lib/journal.js'
 import { loadSettings, isNeonReady } from './lib/settings.js'
@@ -79,15 +75,6 @@ const PL3_ALGO_INFO = {
   },
 }
 
-// 排列五推算引擎算法说明（只有直选玩法，5 位穷举 10 万注）
-const PL5_ALGO_INFO = {
-  pro: {
-    name: '排列五 v3 Pro',
-    desc: '9 专家 Hedge 自适应权重 + 六维结构约束 + 5 位穷举 10 万注',
-    recommend: true,
-  },
-}
-
 // 七星彩推算引擎算法说明（前 6 位 0-9 + 后区 0-14，Top-K 候选枚举）
 const QXC_ALGO_INFO = {
   pro: {
@@ -102,7 +89,6 @@ const AUTO_FETCH_LABEL = {
   kl8: '快乐8',
   fc3d: '福彩3D',
   pl3: '排列三',
-  pl5: '排列五',
   qxc: '七星彩',
   dlt: '大乐透',
 }
@@ -211,9 +197,6 @@ export default function App() {
   const [fc3dTab, setFc3dTab] = useState('overview')
   const [pl3Draws, setPl3Draws] = useState(PL3_DRAWS)
   const [pl3Tab, setPl3Tab] = useState('overview')
-  const [pl5Draws, setPl5Draws] = useState(PL5_DRAWS)
-  const [pl5Tab, setPl5Tab] = useState('overview')
-  const [pl5LoadErr, setPl5LoadErr] = useState('')
   const [qxcDraws, setQxcDraws] = useState(QXC_DRAWS)
   const [qxcTab, setQxcTab] = useState('overview')
   const [qxcLoadErr, setQxcLoadErr] = useState('')
@@ -224,65 +207,29 @@ export default function App() {
   const usingSample = draws[0]?.sample
   const fc3dUsingSample = fc3dDraws[0]?.sample
   const pl3UsingSample = pl3Draws[0]?.sample
-  const pl5UsingSample = pl5Draws[0]?.sample
   const qxcUsingSample = qxcDraws[0]?.sample
   const dltUsingSample = dltDraws[0]?.sample
 
-  // 数字型彩票（福彩3D / 排列三 / 排列五 / 七星彩）共用同一套页面与算法，只切换数据源
-  const isPl = lottery === 'pl3' || lottery === 'pl5'
+  // 数字型彩票（福彩3D / 排列三 / 七星彩）共用同一套页面与算法，只切换数据源
+  const isPl = lottery === 'pl3'
   const indicatorKey = isPl ? 'pl3' : lottery
   const isDigit = lottery === 'fc3d' || isPl || lottery === 'qxc'
   const digitDraws =
-    lottery === 'qxc'
-      ? qxcDraws
-      : lottery === 'pl5'
-        ? pl5Draws
-        : lottery === 'pl3'
-          ? pl3Draws
-          : fc3dDraws
+    lottery === 'qxc' ? qxcDraws : lottery === 'pl3' ? pl3Draws : fc3dDraws
   const digitTab =
-    lottery === 'qxc'
-      ? qxcTab
-      : lottery === 'pl5'
-        ? pl5Tab
-        : lottery === 'pl3'
-          ? pl3Tab
-          : fc3dTab
+    lottery === 'qxc' ? qxcTab : lottery === 'pl3' ? pl3Tab : fc3dTab
   const setDigitTab =
-    lottery === 'qxc'
-      ? setQxcTab
-      : lottery === 'pl5'
-        ? setPl5Tab
-        : lottery === 'pl3'
-          ? setPl3Tab
-          : setFc3dTab
+    lottery === 'qxc' ? setQxcTab : lottery === 'pl3' ? setPl3Tab : setFc3dTab
   const digitLabel =
-    lottery === 'qxc'
-      ? '七星彩'
-      : lottery === 'pl5'
-        ? '排列五'
-        : lottery === 'pl3'
-          ? '排列三'
-          : '福彩3D'
+    lottery === 'qxc' ? '七星彩' : lottery === 'pl3' ? '排列三' : '福彩3D'
   const digitUsingSample =
-    lottery === 'qxc'
-      ? qxcUsingSample
-      : lottery === 'pl5'
-        ? pl5UsingSample
-        : lottery === 'pl3'
-          ? pl3UsingSample
-          : fc3dUsingSample
-  const digitCount = lottery === 'qxc' ? 7 : lottery === 'pl5' ? 5 : 3
-  const digitPositions =
-    lottery === 'qxc' ? qxcStats.POSITIONS : lottery === 'pl5' ? pl5Stats.POSITIONS : undefined
+    lottery === 'qxc' ? qxcUsingSample : lottery === 'pl3' ? pl3UsingSample : fc3dUsingSample
+  const digitCount = lottery === 'qxc' ? 7 : 3
+  const digitPositions = lottery === 'qxc' ? qxcStats.POSITIONS : undefined
   const digitPosLabels =
-    lottery === 'qxc'
-      ? qxcStats.POSITIONS.map((p) => `${p}位`)
-      : lottery === 'pl5'
-        ? pl5Stats.POSITIONS.map((p) => `${p}位`)
-        : undefined
-  const digitStats = lottery === 'qxc' ? qxcStats : lottery === 'pl5' ? pl5Stats : undefined
-  const digitLoadErr = lottery === 'qxc' ? qxcLoadErr : lottery === 'pl5' ? pl5LoadErr : ''
+    lottery === 'qxc' ? qxcStats.POSITIONS.map((p) => `${p}位`) : undefined
+  const digitStats = lottery === 'qxc' ? qxcStats : undefined
+  const digitLoadErr = lottery === 'qxc' ? qxcLoadErr : ''
 
   // ---------- 访问控制 ----------
   // gate: loading(检查中) | open(已授权/本地模式) | gated(未授权，渲染门禁)
@@ -338,11 +285,6 @@ export default function App() {
       if (list?.length) setQxcDraws(list)
       return list || qxcDraws
     }
-    if (lottery === 'pl5') {
-      const list = await fetchPl5Draws(100)
-      if (list?.length) setPl5Draws(list)
-      return list || pl5Draws
-    }
     if (lottery === 'pl3') {
       const list = await fetchPl3Draws(100)
       if (list?.length) setPl3Draws(list)
@@ -351,7 +293,7 @@ export default function App() {
     const list = await fetchFc3dDraws(100)
     if (list?.length) setFc3dDraws(list)
     return list || fc3dDraws
-  }, [lottery, qxcDraws, pl3Draws, pl5Draws, fc3dDraws])
+  }, [lottery, qxcDraws, pl3Draws, fc3dDraws])
 
   const refreshKl8Draws = useCallback(async () => {
     const list = await fetchKl8Draws(100)
@@ -366,7 +308,7 @@ export default function App() {
   }, [dltDraws])
 
   // 打开软件 / 切换彩种：本会话未自动抓过的彩种，进入时自动抓一次最新开奖
-  // （排列五 / 七星彩没有内置快照也由此覆盖；失败时写入对应空页错误路径）
+  // （七星彩没有内置快照也由此覆盖；失败时写入对应空页错误路径）
   useEffect(() => {
     if (gate !== 'open') return
     const hasData =
@@ -376,8 +318,6 @@ export default function App() {
           ? dltDraws.length > 0
           : lottery === 'qxc'
             ? qxcDraws.length > 0
-            : lottery === 'pl5'
-              ? pl5Draws.length > 0
               : lottery === 'pl3'
                 ? pl3Draws.length > 0
                 : fc3dDraws.length > 0
@@ -394,8 +334,6 @@ export default function App() {
           ? dltDraws[0]?.id
           : lottery === 'qxc'
             ? qxcDraws[0]?.id
-            : lottery === 'pl5'
-              ? pl5Draws[0]?.id
               : lottery === 'pl3'
                 ? pl3Draws[0]?.id
                 : fc3dDraws[0]?.id
@@ -415,7 +353,6 @@ export default function App() {
             state: 'fail',
             text: `${AUTO_FETCH_LABEL[lottery]}暂未取到开奖数据，可在「数据管理」手动抓取`,
           })
-          if (lottery === 'pl5') setPl5LoadErr('未取到开奖数据')
           if (lottery === 'qxc') setQxcLoadErr('未取到开奖数据')
           return
         }
@@ -432,7 +369,6 @@ export default function App() {
         // 静默降级：不弹错误框，只在状态条显示失败文案，用户仍可手动点按钮重试
         const msg = e?.message || String(e)
         setAutoFetch({ state: 'fail', text: `${AUTO_FETCH_LABEL[lottery]}自动抓取失败：${msg}` })
-        if (lottery === 'pl5') setPl5LoadErr(msg)
         if (lottery === 'qxc') setQxcLoadErr(msg)
       }
     })()
@@ -587,8 +523,6 @@ export default function App() {
                 <>福彩3D · 数据研究档案 <i>FC3D RESEARCH LEDGER</i></>
               ) : lottery === 'pl3' ? (
                 <>体彩排列三 · 数据研究档案 <i>PL3 RESEARCH LEDGER</i></>
-              ) : lottery === 'pl5' ? (
-                <>体彩排列五 · 数据研究档案 <i>PL5 RESEARCH LEDGER</i></>
               ) : lottery === 'qxc' ? (
                 <>体彩七星彩 · 数据研究档案 <i>QXC RESEARCH LEDGER</i></>
               ) : (
@@ -617,14 +551,6 @@ export default function App() {
               <>
                 <div>7 位数 · 前 6 位 0–9 + 后区 0–14</div>
                 <div>一等奖概率 1 / 15,000,000</div>
-                <div className={digitUsingSample ? 'meta-sample' : 'meta-real'}>
-                  数据源：{digitUsingSample ? '内置演示数据' : '真实开奖数据'}
-                </div>
-              </>
-            ) : lottery === 'pl5' ? (
-              <>
-                <div>5 位数 · 00000 – 99999</div>
-                <div>直选概率 1 / 100,000</div>
                 <div className={digitUsingSample ? 'meta-sample' : 'meta-real'}>
                   数据源：{digitUsingSample ? '内置演示数据' : '真实开奖数据'}
                 </div>
@@ -665,11 +591,9 @@ export default function App() {
                 role="tab"
                 aria-selected={isPl}
                 className={`lottery-tab ${isPl ? 'active' : ''}`}
-                onClick={() => {
-                  if (!isPl) setLottery('pl3')
-                }}
+                onClick={() => setLottery('pl3')}
               >
-                排列三·五
+                排列三
               </button>
               <button
                 role="tab"
@@ -709,27 +633,6 @@ export default function App() {
             </button>
           ))}
         </nav>
-      )}
-      {isPl && (
-        <div className="pl-kind-switch" role="tablist" aria-label="排列三 / 排列五 切换">
-          <span className="pl-kind-label">排列三·五</span>
-          <button
-            role="tab"
-            aria-selected={lottery === 'pl3'}
-            className={`pl-kind-btn ${lottery === 'pl3' ? 'active' : ''}`}
-            onClick={() => setLottery('pl3')}
-          >
-            排列三
-          </button>
-          <button
-            role="tab"
-            aria-selected={lottery === 'pl5'}
-            className={`pl-kind-btn ${lottery === 'pl5' ? 'active' : ''}`}
-            onClick={() => setLottery('pl5')}
-          >
-            排列五
-          </button>
-        </div>
       )}
       {isDigit && (
         <nav className="tabs" aria-label={`${digitLabel} 页面导航`} ref={navRef}>
@@ -803,11 +706,6 @@ export default function App() {
                       fetchQxcDraws(100)
                         .then((list) => list?.length && setQxcDraws(list))
                         .catch((e) => setQxcLoadErr(e?.message || '拉取失败'))
-                    } else if (lottery === 'pl5') {
-                      setPl5LoadErr('')
-                      fetchPl5Draws(100)
-                        .then((list) => list?.length && setPl5Draws(list))
-                        .catch((e) => setPl5LoadErr(e?.message || '拉取失败'))
                     }
                   }}
                 >
@@ -822,14 +720,10 @@ export default function App() {
                 draws={digitDraws}
                 positions={digitPositions}
                 stats={digitStats}
-                sumTheory={lottery === 'qxc' ? 34 : lottery === 'pl5' ? 22.5 : undefined}
-                spanTheory={
-                  lottery === 'qxc' ? '约 9.5' : lottery === 'pl5' ? '约 6.6' : undefined
-                }
-                formName={lottery === 'qxc' ? '全不同' : lottery === 'pl5' ? '全不同' : undefined}
-                formTheory={
-                  lottery === 'qxc' ? '历史参考' : lottery === 'pl5' ? '约 30%' : undefined
-                }
+                sumTheory={lottery === 'qxc' ? 34 : undefined}
+                spanTheory={lottery === 'qxc' ? '约 9.5' : undefined}
+                formName={lottery === 'qxc' ? '全不同' : undefined}
+                formTheory={lottery === 'qxc' ? '历史参考' : undefined}
               />
             )}
             {digitTab === 'hotcold' && (
@@ -870,21 +764,6 @@ export default function App() {
                   defaultCover={6}
                   algoFn={{ pro: { predict: 'predictQXC', backtest: 'backtestQXC' } }}
                 />
-              ) : lottery === 'pl5' ? (
-                <FC3D
-                  key={lottery}
-                  draws={digitDraws}
-                  engine={pl5Engine}
-                  algoInfo={PL5_ALGO_INFO}
-                  showTiers
-                  label={digitLabel}
-                  game="pl5"
-                  onRefreshData={refreshDigitDraws}
-                  positions={digitPositions}
-                  digitCount={5}
-                  defaultCover={4}
-                  algoFn={{ pro: { predict: 'predictPL5', backtest: 'backtestPL5' } }}
-                />
               ) : lottery === 'pl3' ? (
                 <FC3D
                   key={lottery}
@@ -917,24 +796,6 @@ export default function App() {
                   digitCount={7}
                   periodsList={[10, 20, 30]}
                   formNote="全同/2种数字/…/全不同（后区 0–14）"
-                />
-              ) : lottery === 'pl5' ? (
-                <FC3DAudit
-                  key={lottery}
-                  game="pl5"
-                  draws={digitDraws}
-                  engine={pl5Engine}
-                  defaultPeriods={20}
-                  defaultAlgo="pro"
-                  auditFns={{ pro: 'walkForwardAuditPL5' }}
-                  predictFns={{ pro: 'predictPL5' }}
-                  proEnabled
-                  proLabel="排列五 v3 Pro"
-                  compareEnabled={false}
-                  ceilingEnabled={false}
-                  digitCount={5}
-                  periodsList={[10, 20, 30]}
-                  formNote="五同/四同一异/…/全不同"
                 />
               ) : lottery === 'pl3' ? (
                 <FC3DAudit
@@ -969,20 +830,6 @@ export default function App() {
                   digitCount={7}
                   positions={qxcStats.POSITIONS}
                   maxValues={[10, 10, 10, 10, 10, 10, 15]}
-                />
-              ) : lottery === 'pl5' ? (
-                <FC3DDataManager
-                  key={lottery}
-                  draws={pl5Draws}
-                  setDraws={setPl5Draws}
-                  label="排列五"
-                  fetchDraws={fetchPl5Draws}
-                  sampleDraws={PL5_DRAWS}
-                  filePrefix="pl5"
-                  sourceUrl="https://www.lottery.gov.cn/kj/kjlb.html?pl5"
-                  sourceName="中国体彩网开奖公告"
-                  digitCount={5}
-                  positions={pl5Stats.POSITIONS}
                 />
               ) : lottery === 'pl3' ? (
                 <FC3DDataManager
@@ -1046,7 +893,7 @@ export default function App() {
         {[
           { id: 'kl8', label: '快乐8', glyph: '八' },
           { id: 'fc3d', label: '福彩3D', glyph: '3' },
-          { id: 'pl3', label: '排列三·五', glyph: '三' },
+          { id: 'pl3', label: '排列三', glyph: '三' },
           { id: 'qxc', label: '七星彩', glyph: '七' },
           { id: 'dlt', label: '大乐透', glyph: '透' },
         ].map((it) => (

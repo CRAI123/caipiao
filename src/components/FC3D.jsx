@@ -140,12 +140,12 @@ export default function FC3D({
     }
   }, [game])
   // learning_state 'experts:p0..pN' → 引擎 weightsOverride：
-  // pl3/pl5 为按位顺序数组（每项长度=专家数）；fc3d 引擎取单条扁平权重，逐位平均
+  // pl3/qxc 为按位顺序数组（每项长度=专家数）；fc3d 引擎取单条扁平权重，逐位平均
   const learnW = useMemo(() => {
     if (!learning || learning.source === 'none' || learning.coldStart) return null
     const experts = engine.FC3D_EXPERTS || engine.PRO_EXPERTS
     if (!experts) return null
-    const npos = game === 'qxc' ? 7 : game === 'pl5' ? 5 : 3
+    const npos = game === 'qxc' ? 7 : 3
     const fams = []
     let n = Infinity
     for (let pos = 0; pos < npos; pos++) {
@@ -170,7 +170,6 @@ export default function FC3D({
     !!learnW &&
     ((game === 'fc3d' && fn.predict === 'predictFC3Dv2') ||
       (game === 'pl3' && fn.predict === 'predictPL3Pro') ||
-      (game === 'pl5' && fn.predict === 'predictPL5') ||
       (game === 'qxc' && fn.predict === 'predictQXC'))
 
   const pred = useMemo(

@@ -65,14 +65,13 @@ function buildSeries(lottery, chrono) {
     ]
   }
 
-  // 福彩3D / 排列三 / 排列五 / 七星彩
-  const isPl5 = lottery === 'pl5'
+  // 福彩3D / 排列三 / 七星彩
   const isQxc = lottery === 'qxc'
   return [
     {
       key: 'sum',
       title: '和值 K 线',
-      tag: isQxc ? '0 – 68' : isPl5 ? '0 – 45' : '0 – 27',
+      tag: isQxc ? '0 – 68' : '0 – 27',
       unit: '',
       wick: 0.5,
       points: chrono.map((d) => ({
@@ -83,9 +82,7 @@ function buildSeries(lottery, chrono) {
       })),
       hint: isQxc
         ? '七星彩和值把后区 0–14 也计入，理论均值 34、范围 0–68。开=上期和值、收=本期和值，影线取本期跨度的 0.5 倍。'
-        : isPl5
-          ? '和值理论均值 22.5。开=上期和值、收=本期和值，影线取本期跨度的 0.5 倍，颜色红涨绿跌。'
-          : '和值理论均值 13.5。开=上期和值、收=本期和值，影线取本期跨度的 0.5 倍，颜色红涨绿跌。',
+        : '和值理论均值 13.5。开=上期和值、收=本期和值，影线取本期跨度的 0.5 倍，颜色红涨绿跌。',
     },
     {
       key: 'span',
@@ -101,9 +98,7 @@ function buildSeries(lottery, chrono) {
       })),
       hint: isQxc
         ? '跨度 = 最大号 − 最小号，后区参与计算，取值 0 – 14。均线只用于看区间漂移。'
-        : isPl5
-          ? '跨度 = 最大号 − 最小号，取值 0 – 9。跨度序列本身波动大，均线只用于看区间漂移。'
-          : '跨度 = 最大号 − 最小号，理论均值约 6.3。跨度序列本身波动大，均线只用于看区间漂移。',
+        : '跨度 = 最大号 − 最小号，理论均值约 6.3。跨度序列本身波动大，均线只用于看区间漂移。',
     },
   ]
 }
@@ -196,7 +191,7 @@ export default function KlinePage({ lottery, draws, positions = POS_LABEL }) {
     [draws, trendN],
   )
 
-  const isDigit = lottery === 'fc3d' || lottery === 'pl3' || lottery === 'pl5' || lottery === 'qxc'
+  const isDigit = lottery === 'fc3d' || lottery === 'pl3' || lottery === 'qxc'
   const posCur = Math.min(pos, positions.length - 1)
 
   const digitPoints = useMemo(

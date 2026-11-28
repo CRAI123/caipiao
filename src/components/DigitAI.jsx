@@ -12,10 +12,6 @@ import {
   buildDigitMessages,
   rankDigitCandidates,
   digitCandidatePool,
-  summarizeDigit5,
-  buildPL5Messages,
-  rankPL5Candidates,
-  pl5CandidatePool,
   summarizeQxc,
   buildQXCMessages,
   rankQXCCandidates,
@@ -110,13 +106,12 @@ function DigitAIInner({ draws, label = '福彩3D', game = 'fc3d', onRefreshData,
   const [elapsed, setElapsed] = useState(0)
   const [stale, setStale] = useState(false)
 
-  const is5 = digitCount === 5
   const is7 = digitCount === 7
   const waitFacts = useMemo(() => buildFunFacts(game, draws), [game, draws])
   const summary = useMemo(() => {
     if (!Array.isArray(draws) || !draws.length) return null
-    return (is7 ? summarizeQxc : is5 ? summarizeDigit5 : summarizeDigit)(draws, 100)
-  }, [draws, is5, is7])
+    return (is7 ? summarizeQxc : summarizeDigit)(draws, 100)
+  }, [draws, is7])
   const busyRef = useRef(false)
   const latestId = Number(draws?.[0]?.id) || 0
 
@@ -130,37 +125,33 @@ function DigitAIInner({ draws, label = '福彩3D', game = 'fc3d', onRefreshData,
 
   const picks = useMemo(() => sanitizePicks(meta?.picks, digitCount), [meta, digitCount])
 
-  // 算法层：全盘评分排序（3 位：直选 1000 / 组六 120 / 组三 90；5 位：直选 10 万）
+  // 算法层：全盘评分排序（3 位：直选 1000 / 组六 120 / 组三 90；7 位：七位候选枚举）
   const algo = useMemo(
     () =>
       summary
         ? is7
           ? rankQXCCandidates(summary)
-          : is5
-            ? rankPL5Candidates(summary)
-            : rankDigitCandidates(summary)
+          : rankDigitCandidates(summary)
         : null,
-    [summary, is5, is7],
+    [summary, is7],
   )
   const algoTop = useMemo(
     () => ({
-      straight: (algo?.straight || []).slice(0, is7 ? 5 : is5 ? 5 : 3),
+      straight: (algo?.straight || []).slice(0, is7 ? 5 : 3),
       group: (algo?.group || []).slice(0, 2),
       group3: (algo?.group3 || []).slice(0, 1),
     }),
-    [algo, is5, is7],
+    [algo, is7],
   )
-  // 算法候选池：3 位为直选 24 注 / 组六 12 组 / 组三 8 组；5 位为直选 20 注；7 位为直选 24 注
+  // 算法候选池：3 位为直选 24 注 / 组六 12 组 / 组三 8 组；7 位为直选 24 注
   const pool = useMemo(
     () =>
       summary
         ? is7
           ? qxcCandidatePool(summary)
-          : is5
-            ? pl5CandidatePool(summary)
-            : digitCandidatePool(summary)
+          : digitCandidatePool(summary)
         : null,
-    [summary, is5, is7],
+    [summary, is7],
   )
   /** 号码在全盘算法里的名次（1 起），找不到返回 null */
   const algoRank = (kind, num) => {
@@ -219,23 +210,21 @@ function DigitAIInner({ draws, label = '福彩3D', game = 'fc3d', onRefreshData,
         if (!is7 && digitCount === 3 && uniq === 2 && (run.picks.group3 || []).some((x) => [...x].sort().join('') === key)) g3Hit++
       }
       // 纯算法基准：只用该期及更早的数据建评分（严格前推，不用未来数据）
-      const histSum = (is7 ? summarizeQxc : is5 ? summarizeDigit5 : summarizeDigit)(draws.slice(i, i + 100), 100)
+      const histSum = (is7 ? summarizeQxc : summarizeDigit)(draws.slice(i, i + 100), 100)
       const rk = histSum
         ? is7
           ? rankQXCCandidates(histSum)
-          : is5
-            ? rankPL5Candidates(histSum)
-            : rankDigitCandidates(histSum)
+          : rankDigitCandidates(histSum)
         : null
       if (rk) {
         an++
-        if (rk.straight.slice(0, is7 ? 5 : is5 ? 5 : 3).some((x) => (Array.isArray(x.num) ? x.num.join(' ') : x.num) === actual)) aS++
+        if (rk.straight.slice(0, is7 ? 5 : 3).some((x) => (Array.isArray(x.num) ? x.num.join(' ') : x.num) === actual)) aS++
         if (!is7 && digitCount === 3 && uniq === 3 && rk.group.slice(0, 2).some((x) => x.num === key)) aG++
         if (!is7 && digitCount === 3 && uniq === 2 && rk.group3.slice(0, 1).some((x) => x.num === key)) aG3++
       }
     }
     return { n, sHit, gHit, g3Hit, an, aS, aG, aG3 }
-  }, [audit, draws, digitCount, is5, is7])
+  }, [audit, draws, digitCount, is7])
 
   if (!summary || summary.total < 10) return null
 
@@ -269,12 +258,12 @@ function DigitAIInner({ draws, label = '福彩3D', game = 'fc3d', onRefreshData,
       }
       const latestFresh = Array.isArray(fresh) ? fresh[0] : null
       if (!latestFresh) throw new Error('没有取到开奖数据，请稍后重试')
-      const freshSummary = (is7 ? summarizeQxc : is5 ? summarizeDigit5 : summarizeDigit)(fresh, 100)
+      const freshSummary = (is7 ? summarizeQxc : summarizeDigit)(fresh, 100)
       if (!freshSummary) throw new Error('最新数据不足 10 期，无法分析')
 
       const drawId = Number(latestFresh.id)
 
-      // 2. 上期复盘：重新读取历史 AI 记录，对照上期实际开奖后作为本轮提示
+      // 2. 上期复盘：重新读取历史 AI 记录，仅用于页面展示，不注入本轮提示词
       let runs = audit || []
       try {
         const a = await auditDigitAi({ game })
@@ -285,7 +274,6 @@ function DigitAIInner({ draws, label = '福彩3D', game = 'fc3d', onRefreshData,
       } catch {
         /* 读取失败时沿用已加载的记录，没有记录就跳过复盘 */
       }
-      const reviewNow = buildDigitReview(runs, fresh, digitCount)
 
       // 3. 本期是否已有共享解析（旧版结构没有号码，视为需要重算）
       let cached = null
@@ -332,16 +320,8 @@ function DigitAIInner({ draws, label = '福彩3D', game = 'fc3d', onRefreshData,
           game,
           drawId,
           label,
-          messages: (is7 ? buildQXCMessages : is5 ? buildPL5Messages : buildDigitMessages)(
-            freshSummary,
-            label,
-            reviewNow?.text || '',
-          ),
-          algo: is7
-            ? qxcCandidatePool(freshSummary)
-            : is5
-              ? pl5CandidatePool(freshSummary)
-              : digitCandidatePool(freshSummary),
+          messages: (is7 ? buildQXCMessages : buildDigitMessages)(freshSummary, label),
+          algo: is7 ? qxcCandidatePool(freshSummary) : digitCandidatePool(freshSummary),
           deviceId: getDeviceId()?.id || '',
         })
         await timer
@@ -410,9 +390,7 @@ function DigitAIInner({ draws, label = '福彩3D', game = 'fc3d', onRefreshData,
         流程和快乐8一致：<b>算法先选 → AI 终选</b>。底层算法按频率 / 遗漏 / 同位转移对全盘打分
         {is7
           ? '（前 6 位 0–9 + 后区 0–14），每位取前列候选交叉成 24 注候选池，由 AI 只在池内终选 5 注直选。'
-          : is5
-            ? '（直选 10 万注），选出直选 20 注候选池后由 AI 只在池内终选 5 注直选。'
-            : '（直选 1000 注、组六 120 组、组三 90 组），选出候选池后由 AI 只在池内终选 3 注直选 + 2 注组六 + 1 注组三。'}
+          : '（直选 1000 注、组六 120 组、组三 90 组），选出候选池后由 AI 只在池内终选 3 注直选 + 2 注组六 + 1 注组三。'}
       </div>
       <div className="predict-row">
         <div className="predict-label">算法候选 · 直选</div>
@@ -428,7 +406,7 @@ function DigitAIInner({ draws, label = '福彩3D', game = 'fc3d', onRefreshData,
           </span>
         </div>
       </div>
-      {!is5 && !is7 && (
+      {!is7 && (
         <>
           <div className="predict-row">
             <div className="predict-label">算法候选 · 组六</div>
@@ -516,7 +494,7 @@ function DigitAIInner({ draws, label = '福彩3D', game = 'fc3d', onRefreshData,
             <div style={{ marginTop: 8 }}>
               <div className="predict-sub" style={{ marginTop: 0, marginBottom: 6 }}>
                 {meta?.finalSource === 'algo'
-                  ? `⚠️ AI 终选未通过校验，已回退到算法前${is5 || is7 ? '五' : '三'}`
+                  ? `⚠️ AI 终选未通过校验，已回退到算法前${is7 ? '五' : '三'}`
                   : '✅ 算法候选 → AI 终选已完成'}
                 {meta?.finalNote ? ` · ${meta.finalNote}` : ''}
               </div>
@@ -524,10 +502,10 @@ function DigitAIInner({ draws, label = '福彩3D', game = 'fc3d', onRefreshData,
                 [
                   '直选推荐',
                   picks.straight,
-                  is7 ? '每注 1/15000000' : is5 ? '每注 1/100000' : '每注 1/1000',
+                  is7 ? '每注 1/15000000' : '每注 1/1000',
                   'straight',
                 ],
-                ...(is5 || is7
+                ...(is7
                   ? []
                   : [
                       ['组选推荐 · 组六', picks.group, '约 1/167', 'group'],
@@ -572,7 +550,7 @@ function DigitAIInner({ draws, label = '福彩3D', game = 'fc3d', onRefreshData,
                 <div className="note note-info" style={{ marginTop: 10 }}>
                   <b>纯算法基准</b>（不加 AI，直接取全盘评分最高）：直选{' '}
                   {algoTop.straight.map((x) => fmtNum(x.num)).join(' ')}
-                  {!is5 && !is7 && (
+                  {!is7 && (
                     <>
                       {' '}· 组六 {algoTop.group.map((x) => x.num).join(' ')} · 组三{' '}
                       {algoTop.group3.map((x) => x.num).join(' ')}
@@ -582,7 +560,7 @@ function DigitAIInner({ draws, label = '福彩3D', game = 'fc3d', onRefreshData,
                   与 AI 定稿重合：直选{' '}
                   {picks.straight.filter((n) => algoTop.straight.some((x) => fmtNum(x.num) === n)).length}/
                   {picks.straight.length}
-                  {!is5 && !is7 && (
+                  {!is7 && (
                     <>
                       {' '}· 组六 {picks.group.filter((n) => algoTop.group.some((x) => x.num === n)).length}/
                       {picks.group.length} · 组三{' '}
@@ -635,7 +613,7 @@ function DigitAIInner({ draws, label = '福彩3D', game = 'fc3d', onRefreshData,
           {backtest.n > 0 && (
             <>
               AI 推荐命中 直选 <b>{backtest.sHit}/{backtest.n}</b>
-              {!is5 && !is7 && (
+              {!is7 && (
                 <>、组六 <b>{backtest.gHit}/{backtest.n}</b>、组三 <b>{backtest.g3Hit}/{backtest.n}</b></>
               )}；
             </>
@@ -643,23 +621,19 @@ function DigitAIInner({ draws, label = '福彩3D', game = 'fc3d', onRefreshData,
           {backtest.an > 0 && (
             <>
               纯算法基准命中 直选 <b>{backtest.aS}/{backtest.an}</b>
-              {!is5 && !is7 && (
+              {!is7 && (
                 <>、组六 <b>{backtest.aG}/{backtest.an}</b>、组三 <b>{backtest.aG3}/{backtest.an}</b></>
               )}。
             </>
           )}
           {Math.max(backtest.n, backtest.an) < 5
             ? '样本太少，还看不出真实水平。'
-            : is5
-              ? '这是实际命中记录，不是估计值；概率仍是直选 1/100000。'
-              : '这是实际命中记录，不是估计值；概率仍是直选 1/1000、组六 1/167、组三 1/333。'}
+            : '这是实际命中记录，不是估计值；概率仍是直选 1/1000、组六 1/167、组三 1/333。'}
         </div>
       )}
 
       <Note>
-        {is5
-          ? '流程与快乐8一致：底层算法对全盘 10 万注打分，选出直选 20 注候选池，AI 只在池内终选 5 注并给出理由；终选不合规自动回退算法前五。概率仍是直选 1/100000，选号方式不会改变这一点。'
-          : '流程与快乐8一致：底层算法对全盘打分（直选 1000 注、组六 120 组、组三 90 组），选出直选 12 注 / 组六 8 组 / 组三 5 组的候选池，AI 只在池内终选 3 + 2 + 1 注并给出理由；终选不合规自动回退算法前三。概率仍是直选 1/1000、组六 1/167、组三 1/333，选号方式不会改变这一点。'}
+        流程与快乐8一致：底层算法对全盘打分（直选 1000 注、组六 120 组、组三 90 组），选出直选 12 注 / 组六 8 组 / 组三 5 组的候选池，AI 只在池内终选 3 + 2 + 1 注并给出理由；终选不合规自动回退算法前三。概率仍是直选 1/1000、组六 1/167、组三 1/333，选号方式不会改变这一点。
       </Note>
     </Card>
   )

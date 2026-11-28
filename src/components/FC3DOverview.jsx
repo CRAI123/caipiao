@@ -1,4 +1,4 @@
-// 福彩3D / 排列五 总览页 —— 最新开奖、关键指标、近期走势速览
+// 福彩3D / 七星彩 总览页 —— 最新开奖、关键指标、近期走势速览
 import React from 'react'
 import { Card, StatCard, Note } from './common.jsx'
 import * as defaultStats from '../lib/fc3dStats.js'

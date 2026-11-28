@@ -305,7 +305,6 @@ export default function Journal({ draws }) {
             ['kl8', LOTTERY_LABEL.kl8],
             ['fc3d', LOTTERY_LABEL.fc3d],
             ['pl3', LOTTERY_LABEL.pl3],
-            ['pl5', LOTTERY_LABEL.pl5],
             ['qxc', LOTTERY_LABEL.qxc],
           ].map(([k, label]) => (
             <button

@@ -2,14 +2,13 @@
 // 夜间学习批次（当晚 21:15-21:30 开奖后立即运转）：
 // 1. 并发抓取五个彩种最新开奖（单一彩种失败不影响其他）
 // 2. 逐彩种打分学习：命中回填 + Hedge 增量更新权重（幂等，重复触发自动跳过）
-// 3. AI 自我复盘：达到门槛时沉淀一条经验笔记，注入后续分析
+// 3. AI 自我复盘：达到门槛时沉淀一条经验笔记，学习中心展示，并精简为方向提示注入首轮
 // 4. 快乐8 当期复盘记录（预测 vs 开奖 + AI 总结，无预测或已复盘则跳过）
 
 import { getSql, ensureTables, writeConfig } from './_lib/neon.js'
 import { fetchKl8Draws } from './_lib/kl8.js'
 import { fetchFc3dDraws } from './_lib/fc3d.js'
 import { fetchPl3Draws } from './_lib/pl3.js'
-import { fetchPl5Draws } from './_lib/pl5.js'
 import { fetchQxcDraws } from './_lib/qxc.js'
 import { fetchDltDraws } from './_lib/dlt.js'
 import { resolveLlmSettings, callAi } from './_lib/ai.js'
@@ -29,12 +28,11 @@ import { KL8_PLAY, KL8_PLAY_LABEL } from '../src/lib/kl8Math.js'
 export const config = { maxDuration: 60 }
 
 const PLAY = KL8_PLAY // 快乐8 默认玩法：选六（与每日推送同口径）
-const GAMES = ['kl8', 'fc3d', 'pl3', 'pl5', 'qxc', 'dlt']
+const GAMES = ['kl8', 'fc3d', 'pl3', 'qxc', 'dlt']
 const GAME_LABEL = {
   kl8: '快乐8',
   fc3d: '福彩3D',
   pl3: '排列三',
-  pl5: '排列五',
   qxc: '七星彩',
   dlt: '大乐透',
 }
@@ -56,16 +54,15 @@ export default async function handler(req, res) {
     await ensureTables(sql)
 
     // 1. 并发抓最新开奖（取 100 期，给打分学习的专家模型足够历史；单个彩种失败按空数据跳过）
-    //    注意：排列三/排列五/大乐透返回 { draws, source }，快乐8/福彩3D 直接返回数组
+    //    注意：排列三/大乐透返回 { draws, source }，快乐8/福彩3D 直接返回数组
     const safeFetch = (fn) =>
       fn(100)
         .then((r) => (Array.isArray(r) ? r : Array.isArray(r?.draws) ? r.draws : []))
         .catch(() => [])
-    const [kl8Draws, fc3dDraws, pl3Draws, pl5Draws, qxcDraws, dltDraws] = await Promise.all([
+    const [kl8Draws, fc3dDraws, pl3Draws, qxcDraws, dltDraws] = await Promise.all([
       safeFetch(fetchKl8Draws),
       safeFetch(fetchFc3dDraws),
       safeFetch(fetchPl3Draws),
-      safeFetch(fetchPl5Draws),
       safeFetch(fetchQxcDraws),
       safeFetch(fetchDltDraws),
     ])
@@ -73,7 +70,6 @@ export default async function handler(req, res) {
       kl8: kl8Draws,
       fc3d: fc3dDraws,
       pl3: pl3Draws,
-      pl5: pl5Draws,
       qxc: qxcDraws,
       dlt: dltDraws,
     }
@@ -377,7 +373,7 @@ async function generateAdvice(llm, sql, learning) {
 
 /** 预生成次日 AI 终选（14:00 推送直接读缓存）；任何失败都静默降级，不影响学习主流程 */
 async function prewarmNext(llm, sql, drawMap, afterOf) {
-  const out = { kl8: null, fc3d: null, pl3: null, pl5: null, qxc: null }
+  const out = { kl8: null, fc3d: null, pl3: null, qxc: null }
   const failed = {}
   const tasks = []
 
@@ -415,7 +411,6 @@ async function prewarmNext(llm, sql, drawMap, afterOf) {
   for (const [g, label] of [
     ['fc3d', '福彩3D'],
     ['pl3', '排列三'],
-    ['pl5', '排列五'],
     ['qxc', '七星彩'],
   ]) {
     const d = drawMap[g]

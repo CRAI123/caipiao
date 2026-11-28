@@ -524,13 +524,13 @@ function dltTests(draws) {
   return out
 }
 
-/** 数字彩（3D / 排三 / 排五）：每位 0–9 分开做频次卡方，再检验整期序列 */
+/** 数字彩（3D / 排三 / 七星彩）：每位 0–9 分开做频次卡方，再检验整期序列 */
 function digitTests(draws, game) {
   const out = []
   const nums = draws.map((d) => (Array.isArray(d?.num) ? d.num : null)).filter(Boolean)
   const n = nums.length
   if (n < 20) return out
-  const digitCount = game === 'qxc' ? 7 : game === 'pl5' ? 5 : nums[0]?.length || 3
+  const digitCount = game === 'qxc' ? 7 : nums[0]?.length || 3
 
   // 每位号码频次：前区 10 个取值；七星彩后区 15 个取值
   if (n >= 50) {
@@ -715,7 +715,7 @@ function kl8Tests(draws) {
  * 因此期数 <60 时结果会偏少，属于「检验效力有限」而非「没有偏离」。
  *
  * @param {object[]} draws 最新在前的开奖列表
- * @param {{game?: 'dlt'|'fc3d'|'pl3'|'pl5'|'kl8', maxNum?: number}} opts
+ * @param {{game?: 'dlt'|'fc3d'|'pl3'|'qxc'|'kl8', maxNum?: number}} opts
  * @returns {{id:string, name:string, stat:number, df:number, p:number,
  *            verdict:'pass'|'warn'|'fail', note:string}[]}
  */
@@ -725,7 +725,7 @@ export function runAllTests(draws, { game = 'fc3d', maxNum } = {}) {
   try {
     if (game === 'dlt') return dltTests(list)
     if (game === 'kl8') return kl8Tests(list)
-    if (game === 'fc3d' || game === 'pl3' || game === 'pl5' || game === 'qxc') return digitTests(list, game)
+    if (game === 'fc3d' || game === 'pl3' || game === 'qxc') return digitTests(list, game)
     return []
   } catch (err) {
     // 数据缺字段时不让整页崩掉，只返回已完成的检验

@@ -94,7 +94,7 @@ export async function ensureTables(sql) {
   await sql`
     CREATE INDEX IF NOT EXISTS lp_scored_idx
       ON learning_predictions (game, scored, draw_id DESC)`
-  // AI 经验笔记：自我复盘产物，注入后续分析 prompt，每彩种最多 12 条 active
+  // AI 经验笔记：自我复盘产物，学习中心展示 + 精简后作方向提示，每彩种最多 12 条 active
   await sql`
     CREATE TABLE IF NOT EXISTS ai_experience_notes (
       id bigint GENERATED ALWAYS AS IDENTITY PRIMARY KEY,

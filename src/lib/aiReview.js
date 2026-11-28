@@ -25,10 +25,10 @@ const digitStat = (s) => {
 }
 
 /**
- * 数字彩（福彩3D / 排列三 / 排列五）上期复盘
+ * 数字彩（福彩3D / 排列三 / 七星彩）上期复盘
  * @param {Array} runs auditDigitAi 返回的历史记录 [{ drawId, picks }]
  * @param {Array} draws 开奖数据（最新在前，数字彩用 num 数组）
- * @param {number} digitCount 3 或 5
+ * @param {number} digitCount 3 或 7
  */
 export function buildDigitReview(runs, draws, digitCount = 3) {
   if (!Array.isArray(runs) || !Array.isArray(draws) || !draws.length) return null

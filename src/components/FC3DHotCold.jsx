@@ -1,4 +1,4 @@
-// 福彩3D / 排列五 / 七星彩 冷热号 & 遗漏 —— 分位频次网格 + 遗漏走势
+// 福彩3D / 七星彩 冷热号 & 遗漏 —— 分位频次网格 + 遗漏走势
 import React, { useState } from 'react'
 import { Card, Note } from './common.jsx'
 import * as defaultStats from '../lib/fc3dStats.js'
@@ -27,7 +27,7 @@ export default function FC3DHotCold({ draws, positions = defaultStats.POSITIONS,
   const totalOmit = digitMissing(draws, windowN)
   const { hot, cold } = hotColdClass(totalFreq)
 
-  // 分位频次表头 + 行：3D/排列五共用 0–9；七星彩前区 0–9、后区 0–14 分开展示
+  // 分位频次表头 + 行：3D 共用 0–9；七星彩前区 0–9、后区 0–14 分开展示
   const renderHead = (values) => (
     <div
       className="fc3d-pos-head"

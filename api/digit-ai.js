@@ -1,5 +1,5 @@
 // ============================================================
-// POST /api/digit-ai —— 福彩3D / 排列三 / 排列五 近 100 期 AI 解读（全站共享）
+// POST /api/digit-ai —— 福彩3D / 排列三 / 七星彩 近 100 期 AI 解读（全站共享）
 //
 // 每期每彩种只允许首位用户触发真实的大模型调用，结果写入数据库；
 // 后续用户读到同一份结果（前端会补一段模拟等待，保证体验一致）。
@@ -14,9 +14,9 @@ import { notesForPrompt, persistPredictions } from './_lib/learning.js'
 
 export const config = { maxDuration: 60 }
 
-const GAMES = { fc3d: '福彩3D', pl3: '排列三', pl5: '排列五', qxc: '七星彩', dlt: '大乐透' }
-// 每位彩种的号码位数：排列三 3 位（直选/组选），排列五 5 位，七星彩 7 位（前 6 位 0-9 + 后区 0-14）
-const POS_LEN = { fc3d: 3, pl3: 3, pl5: 5, qxc: 7 }
+const GAMES = { fc3d: '福彩3D', pl3: '排列三', qxc: '七星彩', dlt: '大乐透' }
+// 每位彩种的号码位数：排列三 3 位（直选/组选），七星彩 7 位（前 6 位 0-9 + 后区 0-14）
+const POS_LEN = { fc3d: 3, pl3: 3, qxc: 7 }
 const maskId = (id) => (id ? `尾号${String(id).slice(-4)}` : '匿名设备')
 // 结果结构版本：v9 起 AI 结果包含四段完整分析（analysis），命中旧版会重算
 const SCHEMA = 9
@@ -28,9 +28,7 @@ function jsonHint(len) {
   if (len === 7) {
     return `{"straight":["7 2 4 7 6 3 14","1 9 3 5 2 8 12"],"reasons":{"7 2 4 7 6 3 14":"一句话理由"},${analysis},"summary":"80 字内","risk":"一句风险提示"}`
   }
-  return len === 5
-    ? `{"straight":["01234","56789"],"reasons":{"01234":"一句话理由"},${analysis},"summary":"80 字内","risk":"一句风险提示"}`
-    : `{"straight":["123","456","789"],"group":["135","246"],"group3":["112"],"reasons":{"123":"一句话理由"},${analysis},"summary":"80 字内","risk":"一句风险提示"}`
+  return `{"straight":["123","456","789"],"group":["135","246"],"group3":["112"],"reasons":{"123":"一句话理由"},${analysis},"summary":"80 字内","risk":"一句风险提示"}`
 }
 
 /** 大乐透的 JSON 输出格式说明 */
@@ -93,7 +91,6 @@ function roundsDlt() {
 
 // 四轮真实分析：结构解读 → 反向质询 → 算法候选终选 → 终审校验（每轮单独调用一次大模型）
 function roundsFor(len) {
-  const is5 = len === 5
   const is7 = len === 7
   return [
     {
@@ -116,12 +113,7 @@ function roundsFor(len) {
           '只输出一个 JSON 对象，不要解释文字、不要代码块围栏。格式：' +
           jsonHint(7) +
           '。straight 必须正好 5 个，每个号码 7 位（前 6 位 0-9，后区 0-14，用空格分隔），且都来自候选池；reasons 的键必须是上面出现过的号码。'
-        : is5
-          ? '第三轮：只能从上面给出的算法候选池里终选本期号码——直选 5 注，不得自创池外号码。' +
-            '只输出一个 JSON 对象，不要解释文字、不要代码块围栏。格式：' +
-            jsonHint(5) +
-            '。straight 必须正好 5 个，且都来自候选池；reasons 的键必须是上面出现过的号码。'
-          : '第三轮：只能从上面给出的算法候选池里终选本期号码——直选 3 注、组六 2 注、组三 1 注，不得自创池外号码。' +
+        : '第三轮：只能从上面给出的算法候选池里终选本期号码——直选 3 注、组六 2 注、组三 1 注，不得自创池外号码。' +
             '只输出一个 JSON 对象，不要解释文字、不要代码块围栏。格式：' +
             jsonHint(3) +
             '。straight 必须正好 3 个、group 必须正好 2 个、group3 必须正好 1 个，且都来自候选池；reasons 的键必须是上面出现过的号码。',
@@ -133,11 +125,7 @@ function roundsFor(len) {
         ? '第四轮：终审校验上一轮结果——逐个检查：直选是否正好 5 注、是否都在算法候选池内、是否都是 7 位（前 6 位 0-9，后区 0-14）。' +
           '有不合规的立即替换为候选池里的次优号。只输出最终 JSON（格式同上一轮），不要解释文字、不要代码块围栏。' +
           'risk 必须写明「每注直选 1/15000000 不变，一、二等奖为浮动奖金」。'
-        : is5
-          ? '第四轮：终审校验上一轮结果——逐个检查：直选是否正好 5 注、是否都在算法候选池内、是否都是 5 位数字。' +
-            '有不合规的立即替换为候选池里的次优号。只输出最终 JSON（格式同上一轮），不要解释文字、不要代码块围栏。' +
-            'risk 必须写明「每注直选 1/100000 不变」。'
-          : '第四轮：终审校验上一轮结果——逐个检查：直选是否正好 3 注、组六 2 注、组三 1 注；是否都在算法候选池内；是否都是 3 位数字，组六三位互不相同，组三两同一异。' +
+        : '第四轮：终审校验上一轮结果——逐个检查：直选是否正好 3 注、组六 2 注、组三 1 注；是否都在算法候选池内；是否都是 3 位数字，组六三位互不相同，组三两同一异。' +
             '有不合规的立即替换为候选池里的次优号。只输出最终 JSON（格式同上一轮），不要解释文字、不要代码块围栏。' +
             'risk 必须写明「每注直选 1/1000、组六约 1/167、组三约 1/333 不变」。',
       temperature: 0.2,
@@ -470,7 +458,7 @@ export default async function handler(req, res) {
 
     const started = Date.now()
     const llm = await resolveLlmSettings()
-    // 四轮开始前注入 AI 自我复盘沉淀的历史经验笔记（空跳过）
+    // 历史经验只提供方向性结论（笔记已去除号码），仅在首轮注入
     let notesText = ''
     try {
       notesText = await notesForPrompt(sqlRef, game)
@@ -478,9 +466,8 @@ export default async function handler(req, res) {
       notesText = ''
     }
     const notesBlock = notesText
-      ? '\n\n【历史经验笔记（AI 自我复盘沉淀，仅供参考，不提高中奖概率）】\n' + notesText.slice(0, 1200)
+      ? `\n\n【历史经验（仅方向提示，不含号码；不提高中奖概率）】\n${notesText}`
       : ''
-    const noteCount = notesText ? notesText.split('\n').filter(Boolean).length : 0
     const conv = [...msgs]
     const rounds = []
     for (let i = 0; i < ROUNDS.length; i++) {
@@ -561,9 +548,7 @@ export default async function handler(req, res) {
               risk:
                 digitCount === 7
                   ? '每注直选 1/15000000 不变，一、二等奖为浮动奖金。'
-                  : digitCount === 5
-                    ? '每注直选 1/100000 不变。'
-                    : '每注直选 1/1000、组六约 1/167、组三约 1/333 不变。',
+                  : '每注直选 1/1000、组六约 1/167、组三约 1/333 不变。',
             }
         finalSource = 'algo'
         finalNote = 'AI 终选解析失败，已回退到算法候选'
@@ -617,7 +602,6 @@ export default async function handler(req, res) {
             }
         : null,
       schema: SCHEMA,
-      notesInjected: noteCount,
       rounds,
       roundCount: ROUNDS.length,
       model: llm.llmModel,

@@ -12,7 +12,6 @@ const GAME_LABEL = {
   kl8: '快乐8',
   fc3d: '福彩3D',
   pl3: '排列三',
-  pl5: '排列五',
   qxc: '七星彩',
   dlt: '大乐透',
 }
@@ -31,7 +30,6 @@ const HIT_SOURCES = {
   kl8: ['algo:v7', 'ai:final', 'ai:site'],
   fc3d: ['ai:final', 'ai:site'],
   pl3: ['ai:final', 'ai:site'],
-  pl5: ['ai:final', 'ai:site'],
   qxc: ['ai:final', 'ai:site'],
   dlt: ['algo:dlt', 'ai:final', 'ai:site'],
 }
@@ -621,7 +619,7 @@ function LearningCenterInner({ game }) {
   const historyCharts = useMemo(() => buildHistoryCharts(history), [history])
   const battle = useMemo(() => buildBattleBoard(runs, game), [runs, game])
   const digestNote = useMemo(() => (data?.notes || []).find((n) => n.meta?.kind === 'digest') || null, [data])
-  const isDigit = game === 'fc3d' || game === 'pl3' || game === 'pl5' || game === 'qxc'
+  const isDigit = game === 'fc3d' || game === 'pl3' || game === 'qxc'
 
   return (
     <div className="page">

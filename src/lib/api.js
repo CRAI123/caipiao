@@ -38,11 +38,11 @@ async function apiFetch(path, options = {}) {
   return data
 }
 
-/** AI 深度分析：3 模型 × 3 温度 + 复核轮 + 60 期样本外回测（每期每玩法仅首位用户可触发）；review = 上期复盘结论 */
-export async function aiDeep({ draws, play = 10, deviceId = '', review = '' }) {
+/** AI 深度分析：3 模型 × 3 温度 + 复核轮 + 60 期样本外回测（每期每玩法仅首位用户可触发）；不传任何往期生成内容 */
+export async function aiDeep({ draws, play = 10, deviceId = '' }) {
   return apiFetch('/api/ai-deep', {
     method: 'POST',
-    body: JSON.stringify({ draws, play, deviceId, review, action: 'run' }),
+    body: JSON.stringify({ draws, play, deviceId, action: 'run' }),
   })
 }
 

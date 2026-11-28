@@ -39,7 +39,7 @@ const FEATURES = [
 const LOTTERIES = [
   { name: '快乐8', en: 'KUAILE 8', note: '80 选 20 · 多玩法统计', mark: '8' },
   { name: '福彩3D', en: 'FC3D', note: '三位数 · 定位与形态', mark: '3D' },
-  { name: '排列三·五', en: 'PL3 · PL5', note: '三 / 五位数 · 分位研究', mark: 'P3' },
+  { name: '排列三', en: 'PL3', note: '三位数 · 分位研究', mark: 'P3' },
   { name: '七星彩', en: 'QXC', note: '七位数 · 前 6 位 + 后区', mark: 'Q7' },
   { name: '大乐透', en: 'DLT', note: '前区 + 后区 · 结构分析', mark: '透' },
 ]

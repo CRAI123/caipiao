@@ -4,7 +4,7 @@ import { Card, Note } from './common.jsx'
 import { FC3D_DRAWS } from '../data/fc3d.js'
 import { fetchFc3dDraws } from '../lib/fc3d.js'
 
-/** 解析用户粘贴的福彩3D / 排列五 / 七星彩历史文本：每行一期，期号 日期 各位数字 */
+/** 解析用户粘贴的福彩3D / 七星彩历史文本：每行一期，期号 日期 各位数字 */
 function parseFc3dText(text, digitCount = 3, maxValues = null) {
   const lines = text.split(/\r?\n/).map((l) => l.trim()).filter(Boolean)
   const draws = []
@@ -153,9 +153,7 @@ export default function FC3DDataManager({
             placeholder={
               digitCount === 3
                 ? '2024300,2024-11-05,3,7,2\n2024301 2024-11-06 8 1 5\n2024302 049'
-                : digitCount === 5
-                  ? '26306,2026-11-15,0,3,2,4,3\n26307 2026-11-16 7 1 4 9 6\n26308 03183'
-                  : '26134,2026-11-15,7,2,4,7,6,3,14\n26135 2026-11-16 1 9 3 5 2 8 12\n26136 72476314'
+                : '26134,2026-11-15,7,2,4,7,6,3,14\n26135 2026-11-16 1 9 3 5 2 8 12\n26136 72476314'
             }
             value={text}
             onChange={(e) => setText(e.target.value)}

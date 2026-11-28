@@ -324,7 +324,6 @@ export default function Predict({ draws, onRefreshData }) {
       } catch {
         /* 读取失败时沿用已加载的记录 */
       }
-      const reviewNow = buildKl8Review(runs, fresh)
 
       // 3. 本期是否已有共享解析
       let cached = null
@@ -350,7 +349,7 @@ export default function Predict({ draws, onRefreshData }) {
       const dev = getDeviceId()
       const timer = fakeAnalyze({ seconds: 65, stages: KL8_STAGES, onTick })
       waitTimer = timer
-      const result = await aiDeep({ draws: fresh, play, deviceId: dev?.id || '', review: reviewNow?.text || '' })
+      const result = await aiDeep({ draws: fresh, play, deviceId: dev?.id || '' })
       await timer
       setDeep(result)
       setDeepOwner(result.owner || '')

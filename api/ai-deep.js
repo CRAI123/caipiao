@@ -25,7 +25,7 @@ import { kl8Calibration } from '../src/lib/kl8Calib.js'
 import { resolveLlmSettings, callAi } from './_lib/ai.js'
 import { applyCors } from './_lib/http.js'
 import { getSql, ensureTables } from './_lib/neon.js'
-import { loadLearning, notesForPrompt, persistPredictions } from './_lib/learning.js'
+import { loadLearning, persistPredictions } from './_lib/learning.js'
 
 export const config = { maxDuration: 60 }
 
@@ -121,7 +121,7 @@ function calibText(calib) {
   )
 }
 
-function buildContext(draws, play, v7, calib, bt, review = '', notes = '') {
+function buildContext(draws, play, v7, calib, bt) {
   const nextId = draws[0].id + 1
   const pool = v7.pool.map((x) => `${pad(x.n)}(分${x.score},遗${x.miss})`).join(' ')
   const kill = v7.kill.map((x) => pad(x.n)).join(' ')
@@ -145,21 +145,6 @@ function buildContext(draws, play, v7, calib, bt, review = '', notes = '') {
     `  结论：${bt.significant ? '达到 5% 显著性（仍需警惕多重比较）' : '与随机无显著差异'}`,
     '',
   ]
-  if (review) {
-    lines.push(
-      '【上期复盘（程序对照上一期实际开奖计算）】',
-      String(review).slice(0, 800),
-      '请结合上期偏差修正本期终选思路（区间配比、奇偶结构等），但不得声称因此提高中奖概率，也不得承诺命中。',
-      '',
-    )
-  }
-  if (notes) {
-    lines.push(
-      '【历史经验笔记（AI 自我复盘沉淀，仅供参考，不提高中奖概率）】',
-      String(notes).slice(0, 1200),
-      '',
-    )
-  }
   lines.push('请在推荐池内选号并按格式输出 JSON。')
   return lines.join('\n')
 }
@@ -277,7 +262,7 @@ export default async function handler(req, res) {
   let sqlRef = null
   let claimedKey = null
   try {
-    const { draws = [], play = 10, action = 'run', deviceId = '', drawId, review = '' } = req.body || {}
+    const { draws = [], play = 10, action = 'run', deviceId = '', drawId } = req.body || {}
 
     // ---- 只读：历史 AI 终选记录（用于方法体检的命中对照） ----
     if (action === 'audit') {
@@ -415,13 +400,11 @@ export default async function handler(req, res) {
       claimedKey = { drawId: nextId, play: k }
     }
 
-    // 读服务端学习状态与经验笔记（冷启动/读失败回退硬编码常量）
+    // 读服务端学习状态（冷启动/读失败回退硬编码常量）；不读取任何往期 AI 生成内容
     let learnedKl8 = null
-    let kl8Notes = ''
     try {
-      const [st, nt] = await Promise.all([loadLearning(sqlRef, 'kl8'), notesForPrompt(sqlRef, 'kl8')])
+      const st = await loadLearning(sqlRef, 'kl8')
       if (st && !st.coldStart) learnedKl8 = st
-      kl8Notes = nt || ''
     } catch (e) {
       console.warn('ai-deep: 读取学习状态失败，使用默认权重：', e.message)
     }
@@ -446,7 +429,7 @@ export default async function handler(req, res) {
     }
     const calib = kl8Calibration(history, 300)
     const bt = walkForward(history, { periods: 60, play: k })
-    const context = buildContext(history, k, v7, calib, bt, review, kl8Notes)
+    const context = buildContext(history, k, v7, calib, bt)
     const poolSet = new Set(v7.pool.map((x) => x.n))
 
     const llm = await resolveLlmSettings()
@@ -654,7 +637,6 @@ ${schemaPrompt(k)}`
         mix: mixW.map((v) => +v.toFixed(4)),
         modelW: modelW.map((v) => +v.toFixed(4)),
         tempW: tempW.map((v) => +v.toFixed(4)),
-        noteCount: kl8Notes ? kl8Notes.split('\n').filter(Boolean).length : 0,
       },
       backtest: bt,
       v7: {

@@ -2,8 +2,9 @@
 // AI 自主学习核心（服务端唯一权威学习状态）
 //
 // 写者唯一：只有 daily-push 调 scoreAndLearn 打分并推进权重；
-// 站内 ai-deep / digit-ai 只读 loadLearning / notesForPrompt，
+// 站内 ai-deep / digit-ai 只读 loadLearning（权重），
 // 并把本期 AI picks 通过 persistPredictions 追加写 learning_predictions。
+// 经验笔记仅供学习中心展示，注入提示词前会精简为方向提示（去号码、≤120 字）。
 //
 // 诚实口径：学习循环调整的是信号权重与 AI/算法配比，优化推荐的一致性与
 // 可解释性；开奖是独立随机事件，本功能不提高中奖概率。
@@ -14,7 +15,6 @@
 
 import { scoreBalls } from '../../src/lib/stats.js'
 import { PRO_EXPERTS as PL3_EXPERTS } from '../../src/lib/pl3Predict.js'
-import { PRO_EXPERTS as PL5_EXPERTS } from '../../src/lib/pl5Predict.js'
 import { PRO_EXPERTS as QXC_EXPERTS } from '../../src/lib/qxcPredict.js'
 import { FC3D_EXPERTS } from '../../src/lib/fc3dPredict.js'
 import { WINDOWS as KL8_WINDOWS } from '../../src/lib/kl8V7.js'
@@ -58,13 +58,6 @@ export const LEARN_DEFAULTS = {
       keys: PL3_EXPERTS.map((e) => e.key),
       weights: norm(PL3_EXPERTS.map(() => 1)),
       positions: 3,
-    },
-  },
-  pl5: {
-    experts: {
-      keys: PL5_EXPERTS.map((e) => e.key),
-      weights: norm(PL5_EXPERTS.map(() => 1)),
-      positions: 5,
     },
   },
   qxc: {
@@ -178,12 +171,10 @@ async function upsertState(sql, game, paramKey, value) {
 function digitExperts(game) {
   if (game === 'fc3d') return FC3D_EXPERTS
   if (game === 'qxc') return QXC_EXPERTS
-  if (game === 'pl5') return PL5_EXPERTS
   return PL3_EXPERTS
 }
 function digitPositions(game) {
-  if (game === 'qxc') return 7
-  return game === 'pl5' ? 5 : 3
+  return game === 'qxc' ? 7 : 3
 }
 
 /**
@@ -246,7 +237,17 @@ export async function loadLearning(sql, game) {
   return out
 }
 
-/** 取该彩种 + 'all' 最近 3 条 active 经验笔记，拼为可直接注入 prompt 的字符串 */
+/** 经验笔记注入版：只保留方向性结论，去掉号码串，控制在 120 字内 */
+function condenseNote(text) {
+  return String(text || '')
+    .replace(/(命中号码|推荐号码|直选号码|开奖号码|号码)[：:]\s*[^。；\n]*/g, '')
+    .replace(/\b\d{3}\b/g, '')
+    .replace(/\s+/g, ' ')
+    .trim()
+    .slice(0, 120)
+}
+
+/** 取该彩种 + 'all' 最近 1 条 active 经验笔记，精简为方向提示（不含号码） */
 export async function notesForPrompt(sql, game) {
   try {
     if (!sql) return ''
@@ -255,11 +256,9 @@ export async function notesForPrompt(sql, game) {
       WHERE game IN (${game}, 'all') AND active = true
         AND COALESCE(meta->>'kind', '') <> 'digest'
       ORDER BY created_at DESC
-      LIMIT 3`
-    return rows
-      .map((r) => String(r.content || '').slice(0, 400))
-      .join('\n')
-      .slice(0, 1200)
+      LIMIT 1`
+    const raw = rows[0]?.content
+    return raw ? condenseNote(raw) : ''
   } catch (e) {
     console.error('[learning] notesForPrompt 失败：', e.message)
     return ''
@@ -423,36 +422,43 @@ export async function scoreAndLearn(sql, game, draws) {
         return hitLoss(hits, 30, 0.25)
       })
       await saveFamily('windows', hedgeUpdate(winFam, winLosses), winFam)
-    } else if (game === 'fc3d' || game === 'pl3' || game === 'pl5' || game === 'qxc') {
+    } else if (game === 'fc3d' || game === 'pl3' || game === 'qxc') {
       const npos = digitPositions(game)
       const experts = digitExperts(game)
       // ── 算法池 / AI 终选 / 站内 AI：按注回填命中 ──
+      // 兼容两种注结构：数组 [2,7,0] 或字符串 "270" / 七星彩 "7 2 4 7 6 3 14"
+      const toDigits = (v) => {
+        if (Array.isArray(v)) return v.map(Number)
+        const s = String(v ?? '').trim()
+        const parts = s.split(/[\s,，]+/).filter(Boolean)
+        if (parts.length === npos) return parts.map(Number)
+        return s.replace(/\D/g, '').split('').map(Number)
+      }
+      const validNote = (arr) => arr.length === npos && arr.every((x) => Number.isInteger(x))
       for (const source of ['algo:pool', 'ai:final', 'ai:site']) {
         const picks = bySource.get(source)
         if (!picks || typeof picks !== 'object') continue
         const straight = Array.isArray(picks.straight) ? picks.straight : []
+        // 直选：多注取「最大逐位命中数」（3D/排三 0–3、七星彩 0–7）
         let straightHits = 0
-        if (game === 'qxc') {
-          // 七星彩推荐是 "7 2 4 7 6 3 14" 字符串，按最大逐位命中数计分
-          for (const s of straight) {
-            const arr = Array.isArray(s) ? s.map(Number) : String(s).trim().split(/[\s,，]+/).map(Number)
-            if (arr.length !== 7 || arr.some((x) => !Number.isInteger(x))) continue
-            const h = arr.filter((x, i) => x === actual.num[i]).length
-            straightHits = Math.max(straightHits, h)
-          }
-        } else {
-          straightHits = straight.filter((x, i) => i < npos && x === actual.num[i]).length
+        for (const s of straight) {
+          const arr = toDigits(s)
+          if (!validNote(arr)) continue
+          const h = arr.filter((x, i) => x === actual.num[i]).length
+          straightHits = Math.max(straightHits, h)
         }
-        const group = Array.isArray(picks.group) ? picks.group : []
-        const groupSet = new Set(group)
-        const groupHits = actual.num.filter((x) => groupSet.has(x)).length
+        // 组选：候选号码集合覆盖到的开奖数字个数（0–npos）
+        const groupNums = new Set()
+        for (const g of Array.isArray(picks.group) ? picks.group : []) {
+          for (const d of toDigits(g)) if (Number.isInteger(d)) groupNums.add(d)
+        }
+        const groupHits = actual.num.filter((x) => groupNums.has(x)).length
+        // 组三：最大逐位命中数
         let group3Hits = 0
-        if (Array.isArray(picks.group3)) {
-          for (const c of picks.group3) {
-            const arr = Array.isArray(c) ? c : String(c).split('').map(Number)
-            const h = arr.filter((x, i) => i < npos && x === actual.num[i]).length
-            group3Hits = Math.max(group3Hits, h)
-          }
+        for (const c of Array.isArray(picks.group3) ? picks.group3 : []) {
+          const arr = toDigits(c)
+          if (!validNote(arr)) continue
+          group3Hits = Math.max(group3Hits, arr.filter((x, i) => x === actual.num[i]).length)
         }
         const loss = hitLoss(straightHits, npos, game === 'qxc' ? 0.09 : 0.1)
         hitsOut[source] = straightHits
@@ -558,8 +564,9 @@ export async function persistPredictions(sql, game, drawId, rows) {
 // ────────────────────────── Phase 2：AI 自我复盘经验笔记 ──────────────────────────
 
 const NOTES_SYSTEM =
-  '你是彩票推荐系统的自我复盘模块。根据各彩种近期命中摘要与当前权重，总结一条对后续分析有用的经验笔记。' +
-  '只输出JSON {"note":"…"}，≤300字，诚实：只优化一致性与可解释性，不提高中奖概率。'
+  '你是彩票推荐系统的自我复盘模块。根据各彩种近期命中摘要与当前权重，总结一条对后续分析有用的经验。' +
+  '只输出JSON {"note":"…"}，≤120字。只写方向性结论（区间配比、奇偶、冷热、位置倾向、权重调整），' +
+  '禁止写任何具体号码、期号或开奖数字；诚实：只优化一致性与可解释性，不提高中奖概率。'
 
 /** 从模型回复里抠出 {note} */
 function parseNote(raw) {

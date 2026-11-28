@@ -1,13 +1,13 @@
 // ============================================================
 // 每日推荐推送 —— Vercel Cron（14:00 Asia/Shanghai = 06:00 UTC）
-// 计算快乐8 / 福彩3D / 排列三 / 排列五 / 大乐透 下期参考号码，推送到飞书自定义机器人 Webhook。
-// 每个彩种都走站内当前最强算法，卡片标题里标明档位：排列三、排列五 = v3 Pro（9 专家 Hedge 权重 + 结构约束）。
+// 计算快乐8 / 福彩3D / 排列三 / 七星彩 / 大乐透 下期参考号码，推送到飞书自定义机器人 Webhook。
+// 每个彩种都走站内当前最强算法，卡片标题里标明档位：排列三 = v4 技术指标；七星彩 = v3 Pro（9 专家 Hedge 权重 + 结构约束）。
 //
 // 配置来源（优先数据库）：
 //   1) Neon admin_config 表 key = 'daily_push_config'
 //      value = {"webhook":"https://open.feishu.cn/open-apis/bot/v2/hook/xxx",
 //               "secret":"（可选，机器人开启签名校验时必填）",
-//               "kl8":true,"fc3d":true,"pl3":true,"pl5":true,"dlt":true}
+//               "kl8":true,"fc3d":true,"pl3":true,"qxc":true,"dlt":true}
 //   2) 环境变量 FEISHU_WEBHOOK_URL / FEISHU_WEBHOOK_SECRET
 //
 // 手动触发：GET /api/daily-push?test=1
@@ -17,7 +17,6 @@ import { getSql, readConfig, writeConfig, ensureTables } from './_lib/neon.js'
 import { fetchKl8Draws } from './_lib/kl8.js'
 import { fetchFc3dDraws } from './_lib/fc3d.js'
 import { fetchPl3Draws } from './_lib/pl3.js'
-import { fetchPl5Draws } from './_lib/pl5.js'
 import { fetchQxcDraws } from './_lib/qxc.js'
 import { fetchDltDraws } from './_lib/dlt.js'
 import { resolveLlmSettings, callAi } from './_lib/ai.js'
@@ -28,16 +27,12 @@ import {
   summarizeDigit,
   digitCandidatePool,
   buildDigitMessages,
-  summarizeDigit5,
-  pl5CandidatePool,
-  buildPL5Messages,
   summarizeQxc,
   qxcCandidatePool,
   buildQXCMessages,
 } from '../src/lib/digitAi.js'
 import { predictFC3Dv2 } from '../src/lib/fc3dPredict.js'
 import { predictFC3Dv4 } from '../src/lib/pl3Predict.js'
-import { predictPL5 } from '../src/lib/pl5Predict.js'
 import { predictQXC } from '../src/lib/qxcPredict.js'
 import { predictDLT } from '../src/lib/dltPredict.js'
 import { applyCors } from './_lib/http.js'
@@ -123,7 +118,6 @@ async function loadConfig() {
     kl8: cfg.kl8 !== false,
     fc3d: cfg.fc3d !== false,
     pl3: cfg.pl3 !== false,
-    pl5: cfg.pl5 !== false,
     qxc: cfg.qxc !== false,
     dlt: cfg.dlt !== false,
   }
@@ -169,19 +163,6 @@ function buildFc3d(draws, learned = null) {
 /** 排列三：v4 技术指标档（MA/布林/MACD 投影和值·跨度 + KDJ 温和修正，按需求作为推送默认算法） */
 function buildPl3(draws) {
   const p = predictFC3Dv4(draws)
-  if (!p) return null
-  return { latest: draws[0], pred: p }
-}
-
-/** 排列五：v3 Pro 档（9 专家 Hedge 自适应权重 + 结构约束 + 5 位穷举 10 万注） */
-function buildPl5(draws, learned = null) {
-  const ex = learned && !learned.coldStart ? learned.experts : null
-  const wOverride =
-    ex && Array.isArray(ex.p0) && Array.isArray(ex.p1) && Array.isArray(ex.p2) &&
-    Array.isArray(ex.p3) && Array.isArray(ex.p4)
-      ? [ex.p0, ex.p1, ex.p2, ex.p3, ex.p4]
-      : null
-  const p = predictPL5(draws, wOverride ? { weightsOverride: wOverride } : {})
   if (!p) return null
   return { latest: draws[0], pred: p }
 }
@@ -321,21 +302,20 @@ async function persistDigitRun(sql, payload) {
   }
 }
 
-/** 3D / 排列三 / 排列五：算法候选池 + AI 终选（3D/排列三 3+2+1，排列五 5 注直选），失败回退算法前几 */
+/** 3D / 排列三 / 七星彩：算法候选池 + AI 终选（3D/排列三 3+2+1，七星彩 5 注直选），失败回退算法前几 */
 export async function buildDigitAi({ game, label, draws, sql, llm }) {
   const started = Date.now()
-  const is5 = game === 'pl5'
   const is7 = game === 'qxc'
-  const digitCount = is7 ? 7 : is5 ? 5 : 3
-  const needStraight = is5 || is7 ? 5 : 3
-  const needGroup = is5 || is7 ? 0 : 2
-  const needGroup3 = is5 || is7 ? 0 : 1
+  const digitCount = is7 ? 7 : 3
+  const needStraight = is7 ? 5 : 3
+  const needGroup = is7 ? 0 : 2
+  const needGroup3 = is7 ? 0 : 1
   const totalNeed = needStraight + needGroup + needGroup3
   const drawId = Number(draws?.[0]?.id)
-  const summary = (is7 ? summarizeQxc : is5 ? summarizeDigit5 : summarizeDigit)(draws, 100)
+  const summary = (is7 ? summarizeQxc : summarizeDigit)(draws, 100)
   if (!drawId || !summary) return null
-  const pool = is7 ? qxcCandidatePool(summary) : is5 ? pl5CandidatePool(summary) : digitCandidatePool(summary)
-  if (!pool.straight.length || (!is5 && !is7 && (!pool.group.length || !pool.group3.length))) return null
+  const pool = is7 ? qxcCandidatePool(summary) : digitCandidatePool(summary)
+  if (!pool.straight.length || (!is7 && (!pool.group.length || !pool.group3.length))) return null
   const algoTop = {
     straight: pool.straight.slice(0, needStraight),
     group: (pool.group || []).slice(0, needGroup),
@@ -371,30 +351,26 @@ export async function buildDigitAi({ game, label, draws, sql, llm }) {
 
   // 2) 现场调用一次大模型：只让它从候选池里终选
   try {
-    const [sys, user] = (is7 ? buildQXCMessages : is5 ? buildPL5Messages : buildDigitMessages)(
+    const [sys, user] = (is7 ? buildQXCMessages : buildDigitMessages)(
       summary,
       label,
     )
-    // 注入 AI 自我复盘沉淀的历史经验笔记（空串跳过）
+    // 历史经验只提供方向性结论（笔记已去除号码），不回流往期推荐
     const notes = await notesForPrompt(sql, game)
     const notesBlock = notes
-      ? '【历史经验笔记（AI 自我复盘沉淀，仅供参考，不提高中奖概率）】\n' + notes + '\n\n'
+      ? `\n\n【历史经验（仅方向提示，不含号码；不提高中奖概率）】\n${notes}`
       : ''
     const messages = [
       sys,
       {
         role: 'user',
         content:
-          `${user.content}\n\n` +
-          notesBlock +
+          `${user.content}${notesBlock}\n\n` +
           '只输出一个 JSON 对象，不要解释文字、不要代码块围栏：' +
           (is7
             ? '{"straight":["7 2 4 7 6 3 14","1 9 3 5 2 8 12"],"reasons":{"7 2 4 7 6 3 14":"一句话依据"},"summary":"60 字内","risk":"一句风险提示"}。' +
               'straight 必须正好 5 个，每注 7 位（前 6 位 0-9，后区 0-14，用空格分隔），且都只能来自上面给出的候选池。'
-            : is5
-              ? '{"straight":["01234","56789"],"reasons":{"01234":"一句话依据"},"summary":"60 字内","risk":"一句风险提示"}。' +
-                'straight 必须正好 5 个，且都只能来自上面给出的候选池。'
-              : '{"straight":["123","456","789"],"group":["135","246"],"group3":["112"],' +
+            : '{"straight":["123","456","789"],"group":["135","246"],"group3":["112"],' +
                 '"reasons":{"123":"一句话依据"},"summary":"60 字内","risk":"一句风险提示"}。' +
                 'straight 必须正好 3 个、group 正好 2 个、group3 正好 1 个，且都只能来自上面给出的候选池。'),
       },
@@ -404,7 +380,7 @@ export async function buildDigitAi({ game, label, draws, sql, llm }) {
       AI_TIMEOUT_MS,
     )
     const obj = extractJson(raw)
-    if (!obj) return { ...base, note: `AI 输出无法解析，已回退算法前${is5 || is7 ? '五' : '三'}` }
+    if (!obj) return { ...base, note: `AI 输出无法解析，已回退算法前${is7 ? '五' : '三'}` }
     const takeQxc = (arr, max) => {
       const out = []
       for (const x of Array.isArray(arr) ? arr : []) {
@@ -433,8 +409,8 @@ export async function buildDigitAi({ game, label, draws, sql, llm }) {
         .slice(0, max)
     // AI 选中的（先过滤到池内），不足的用算法池顺序补齐——不因为缺一两注就整份作废
     const sAi = pickInPool(is7 ? takeQxc(obj?.straight, 12) : take(obj?.straight, 12), pool.straight, needStraight)
-    const gAi = is5 || is7 ? [] : pickInPool(take(obj?.group, 8), pool.group, needGroup)
-    const g3Ai = is5 || is7 ? [] : pickInPool(take(obj?.group3, 5), pool.group3, needGroup3)
+    const gAi = is7 ? [] : pickInPool(take(obj?.group, 8), pool.group, needGroup)
+    const g3Ai = is7 ? [] : pickInPool(take(obj?.group3, 5), pool.group3, needGroup3)
     const fillTo = (have, poolList, need) => {
       const out = [...have]
       for (const n of poolList) {
@@ -454,9 +430,7 @@ export async function buildDigitAi({ game, label, draws, sql, llm }) {
     const summaryText = String(obj?.summary || '').slice(0, 200)
     const risk = is7
       ? '每注直选 1/15000000 不变，一、二等奖为浮动奖金。'
-      : is5
-        ? '每注直选 1/100000 不变。'
-        : '每注直选 1/1000、组六约 1/167、组三约 1/333 不变。'
+      : '每注直选 1/1000、组六约 1/167、组三约 1/333 不变。'
     // 写回共享表：14:00 推送算一次，站内用户当天直接复用
     await persistDigitRun(sql, {
       game,
@@ -503,15 +477,14 @@ function pickInPool(list, pool, max) {
   return [...new Set(list)].filter((n) => pool.includes(n)).slice(0, max)
 }
 
-/** 3D/排列三/排列五：算法候选池 Top 注（写 learning_predictions algo:pool 行用） */
+/** 3D/排列三/七星彩：算法候选池 Top 注（写 learning_predictions algo:pool 行用） */
 function digitAlgoPicks(game, draws) {
-  const is5 = game === 'pl5'
   const is7 = game === 'qxc'
-  const summary = (is7 ? summarizeQxc : is5 ? summarizeDigit5 : summarizeDigit)(draws, 100)
+  const summary = (is7 ? summarizeQxc : summarizeDigit)(draws, 100)
   if (!summary) return null
-  const pool = is7 ? qxcCandidatePool(summary) : is5 ? pl5CandidatePool(summary) : digitCandidatePool(summary)
+  const pool = is7 ? qxcCandidatePool(summary) : digitCandidatePool(summary)
   if (!pool?.straight?.length) return null
-  return is5 || is7
+  return is7
     ? { straight: pool.straight.slice(0, 5) }
     : {
         straight: pool.straight.slice(0, 3),
@@ -578,7 +551,7 @@ export async function buildKl8Ai({ draws, built, sql, llm }) {
 
   // 2) 现场调用一次大模型：从算法 20 码里终选 6 码
   try {
-    // 注入 AI 自我复盘沉淀的历史经验笔记（空串跳过）
+    // 历史经验只提供方向性结论（笔记已去除号码），不回流往期推荐
     const notes = await notesForPrompt(sql, 'kl8')
     const messages = [
       {
@@ -598,13 +571,7 @@ export async function buildKl8Ai({ draws, built, sql, llm }) {
             .map((d) => `第${d.id}期：${d.nums.map(pad).join(' ')}`),
           '',
           `算法候选 20 码（按底层评分排序）：${wide.map(pad).join(' ')}`,
-          ...(notes
-            ? [
-                '',
-                '【历史经验笔记（AI 自我复盘沉淀，仅供参考，不提高中奖概率）】',
-                notes,
-              ]
-            : []),
+          ...(notes ? ['', '【历史经验（仅方向提示，不含号码；不提高中奖概率）】', notes] : []),
           '',
           `请从上面 20 个候选里终选正好 ${KL8_PLAY} 个（可以放弃排名靠后的号）。` +
             `只输出 JSON：{"picks":[号码 x${KL8_PLAY}],"summary":"60 字内"}。不要逐号解释，不要代码块。`,
@@ -670,7 +637,7 @@ async function saveHistory(history) {
   }
 }
 
-/** 3D / 排列三 / 排列五：把一组推荐对照实际开奖，返回各玩法命中注数 */
+/** 3D / 排列三 / 七星彩：把一组推荐对照实际开奖，返回各玩法命中注数 */
 function digitHitOf(picks, num, digitCount = 3) {
   if (digitCount === 7) {
     const actual = (num || []).join(' ')
@@ -709,19 +676,12 @@ function digitAlgoPrev(draws, game = 'fc3d') {
   const latest = draws?.[0]
   const hist = draws?.slice(1) || []
   if (!latest || hist.length < 10) return null
-  const is5 = game === 'pl5'
   const is7 = game === 'qxc'
-  const digitCount = is7 ? 7 : is5 ? 5 : 3
-  const summary = (is7 ? summarizeQxc : is5 ? summarizeDigit5 : summarizeDigit)(hist, 100)
-  const pool = summary
-    ? is7
-      ? qxcCandidatePool(summary)
-      : is5
-        ? pl5CandidatePool(summary)
-        : digitCandidatePool(summary)
-    : null
+  const digitCount = is7 ? 7 : 3
+  const summary = (is7 ? summarizeQxc : summarizeDigit)(hist, 100)
+  const pool = summary ? (is7 ? qxcCandidatePool(summary) : digitCandidatePool(summary)) : null
   if (!pool?.straight.length) return null
-  const picks = is5 || is7
+  const picks = is7
     ? { straight: pool.straight.slice(0, 5) }
     : {
         straight: pool.straight.slice(0, 3),
@@ -774,7 +734,7 @@ async function digitAiPrev(sql, game, draws, prev) {
         SELECT result FROM digit_ai_runs
         WHERE game = ${game} AND draw_id = ${Number(prevDraw.id)} AND status = 'done'`
       const r = rows[0]?.result
-      if (r?.schema === DIGIT_SCHEMA && r.picks?.straight?.length === (game === 'pl5' || game === 'qxc' ? 5 : 3)) return r.picks
+      if (r?.schema === DIGIT_SCHEMA && r.picks?.straight?.length === (game === 'qxc' ? 5 : 3)) return r.picks
     } catch {
       /* 读缓存失败继续看推送记录 */
     }
@@ -861,19 +821,15 @@ function digitAiLines(ai, digitCount = 3) {
   if (!ai) return []
   const p = ai.picks
   const is7 = digitCount === 7
-  const tag =
-    ai.source === 'ai' ? 'AI 终选' : `算法前${digitCount === 5 || is7 ? '五' : '三'}（AI 未过校验）`
-  const poolLine =
-    digitCount === 5 || is7
-      ? `算法池 直选 ${ai.pool.straight.length} 注`
-      : `算法池 ${ai.pool.straight.length}/${ai.pool.group.length}/${ai.pool.group3.length} 注（直选/组六/组三）`
+  const tag = ai.source === 'ai' ? 'AI 终选' : `算法前${is7 ? '五' : '三'}（AI 未过校验）`
+  const poolLine = is7
+    ? `算法池 直选 ${ai.pool.straight.length} 注`
+    : `算法池 ${ai.pool.straight.length}/${ai.pool.group.length}/${ai.pool.group3.length} 注（直选/组六/组三）`
   return [
     HR,
     line(grey(poolLine)),
     line(`**${tag}** 直选 ${red(p.straight.join('　'))}`),
-    digitCount === 5 || is7
-      ? null
-      : line(`组六 ${red(p.group.join(' '))}　组三 ${red(p.group3.join(' '))}`),
+    is7 ? null : line(`组六 ${red(p.group.join(' '))}　组三 ${red(p.group3.join(' '))}`),
     ai.cached ? line(grey('复用站内已生成结果')) : null,
   ].filter(Boolean)
 }
@@ -885,18 +841,10 @@ function buildFc3dCard(
 ) {
   const p = digit.pred
   const labels =
-    digitCount === 7
-      ? ['一', '二', '三', '四', '五', '六', '后']
-      : digitCount === 5
-        ? ['万', '千', '百', '十', '个']
-        : ['百', '十', '个']
+    digitCount === 7 ? ['一', '二', '三', '四', '五', '六', '后'] : ['百', '十', '个']
   const bets = p.posTop.reduce((n, list) => n * list.length, 1)
   const hitLine = hits
     ? digitCount === 7
-      ? `**上期命中**（第 ${hits.drawId} 期，直选）：算法 ${hits.algo.straight}　AI ${
-          hits.ai ? hits.ai.straight : '无记录'
-        }`
-      : digitCount === 5
       ? `**上期命中**（第 ${hits.drawId} 期，直选）：算法 ${hits.algo.straight}　AI ${
           hits.ai ? hits.ai.straight : '无记录'
         }`
@@ -914,15 +862,18 @@ function buildFc3dCard(
         grey(
           digitCount === 7
             ? '概率 直选 1/15000000（前 6 位 0-9 + 后区 0-14）· 总中奖率 8.146%'
-            : digitCount === 5
-              ? '概率 直选 1/100000（排列五只有直选）'
-              : '概率 直选 1/1000 · 组六 1/167 · 组三 1/333',
+            : '概率 直选 1/1000 · 组六 1/167 · 组三 1/333',
         ),
       ),
       hitLine ? line(hitLine) : line(grey('上期命中：暂无上期推荐记录，下次推送起显示')),
       HR,
       line(`**直选复式** ${bets} 注 · ${bets * 2} 元`),
-      line(p.posTop.map((list, i) => `${labels[i]} ${red(list.join('/'))}`).join('　')),
+      line(
+        p.posTop
+          .slice(0, digitCount === 7 ? 6 : digitCount)
+          .map((list, i) => `${labels[i]} ${red(list.join('/'))}`)
+          .join('　'),
+      ),
       line(`**胆码** ${red(p.dan.join('/'))}　拖码 ${p.tuo.join('/')}`),
       line(`和值 ${p.sumRange[0]}~${p.sumRange[1]}　跨度 ${p.spanRange[0]}~${p.spanRange[1]}　杀号 ${grey(p.kill.map((k) => k.digit).join('/'))}`),
       ...extra,
@@ -931,41 +882,9 @@ function buildFc3dCard(
   })
 }
 
-/** 排列三卡：在 3D 版式上补一行覆盖档位（命中与成本） */
+/** 排列三卡：沿用 3D 版式（v4 技术指标不含覆盖档位） */
 function buildPl3Card(pl3, title, warning, ai = null, hits = null) {
-  const tiers = pl3.pred.tiers || []
-  const extra = tiers.length
-    ? [
-        line(
-          `**覆盖档位** ${tiers
-            .map((t) => `${t.cover}码 ${t.expectHits}个/${t.groupCost}元`)
-            .join('　')}`,
-        ),
-      ]
-    : []
-  return buildFc3dCard(pl3, title, { template: 'orange', extra, warning, ai, hits })
-}
-
-/** 排列五卡：5 位直选，补一行覆盖档位（注数与成本） */
-function buildPl5Card(pl5, title, warning, ai = null, hits = null) {
-  const tiers = pl5.pred.tiers || []
-  const extra = tiers.length
-    ? [
-        line(
-          `**覆盖档位** ${tiers
-            .map((t) => `${t.cover}码 ${t.directBets}注/${t.directCost}元`)
-            .join('　')}`,
-        ),
-      ]
-    : []
-  return buildFc3dCard(pl5, title, {
-    template: 'purple',
-    extra,
-    warning,
-    ai,
-    hits,
-    digitCount: 5,
-  })
+  return buildFc3dCard(pl3, title, { template: 'orange', warning, ai, hits })
 }
 
 /** 七星彩卡：7 位定位（前 6 位 + 后区）+ 和值/跨度 + 六奖级概率 */
@@ -1082,15 +1001,14 @@ export default async function handler(req, res) {
     // 机器人查询用：only 只算单个彩种；dry=1 只返回卡片内容，不往群里发
     const only = String(req.query?.only || '').trim()
     if (only) {
-      for (const k of ['kl8', 'fc3d', 'pl3', 'pl5', 'qxc', 'dlt']) if (k !== only) cfg[k] = false
+      for (const k of ['kl8', 'fc3d', 'pl3', 'qxc', 'dlt']) if (k !== only) cfg[k] = false
     }
 
     // 并行走六个数据源，单个失败不影响其它
-    let [kl8Res, fc3dRes, pl3Res, pl5Res, qxcRes, dltRes] = await Promise.allSettled([
+    let [kl8Res, fc3dRes, pl3Res, qxcRes, dltRes] = await Promise.allSettled([
       cfg.kl8 ? fetchKl8Draws(100) : Promise.resolve(null),
       cfg.fc3d ? fetchFc3dDraws(100) : Promise.resolve(null),
       cfg.pl3 ? fetchPl3Draws(100) : Promise.resolve(null),
-      cfg.pl5 ? fetchPl5Draws(100) : Promise.resolve(null),
       cfg.qxc ? fetchQxcDraws(100) : Promise.resolve(null),
       cfg.dlt ? fetchDltDraws(100) : Promise.resolve(null),
     ])
@@ -1110,11 +1028,10 @@ export default async function handler(req, res) {
       // 补抓没变新就保留原结果，至少还能发出去
       return retried?.length ? again : r
     }
-    ;[kl8Res, fc3dRes, pl3Res, pl5Res, qxcRes, dltRes] = await Promise.all([
+    ;[kl8Res, fc3dRes, pl3Res, qxcRes, dltRes] = await Promise.all([
       refetchIfStale(kl8Res, cfg.kl8, fetchKl8Draws),
       refetchIfStale(fc3dRes, cfg.fc3d, fetchFc3dDraws),
       refetchIfStale(pl3Res, cfg.pl3, fetchPl3Draws),
-      refetchIfStale(pl5Res, cfg.pl5, fetchPl5Draws),
       refetchIfStale(qxcRes, cfg.qxc, fetchQxcDraws),
       refetchIfStale(dltRes, cfg.dlt, fetchDltDraws, 4),
     ])
@@ -1134,7 +1051,6 @@ export default async function handler(req, res) {
     const kl8Draws = drawsOf(kl8Res)
     const fc3dDraws = drawsOf(fc3dRes)
     const pl3Draws = drawsOf(pl3Res)
-    const pl5Draws = drawsOf(pl5Res)
     const qxcDraws = drawsOf(qxcRes)
     const dltDraws = drawsOf(dltRes)
 
@@ -1147,7 +1063,6 @@ export default async function handler(req, res) {
           ['kl8', kl8Draws],
           ['fc3d', fc3dDraws],
           ['pl3', pl3Draws],
-          ['pl5', pl5Draws],
           ['qxc', qxcDraws],
           ['dlt', dltDraws],
         ].filter(([g, d]) => d?.length && freshness(d[0], g === 'dlt' || g === 'qxc' ? 4 : 1).state === 'ok')
@@ -1190,7 +1105,6 @@ export default async function handler(req, res) {
           ['kl8', kl8Draws],
           ['fc3d', fc3dDraws],
           ['pl3', pl3Draws],
-          ['pl5', pl5Draws],
           ['qxc', qxcDraws],
           ['dlt', dltDraws],
         ].filter(([, d]) => d?.length)
@@ -1206,7 +1120,6 @@ export default async function handler(req, res) {
     const kl8 = kl8Res.status === 'fulfilled' && kl8Res.value ? buildKl8(kl8Draws, learnedOf.kl8) : null
     const fc3d = fc3dRes.status === 'fulfilled' && fc3dRes.value ? buildFc3d(fc3dDraws, learnedOf.fc3d) : null
     const pl3 = pl3Res.status === 'fulfilled' && pl3Res.value ? buildPl3(pl3Draws) : null
-    const pl5 = pl5Res.status === 'fulfilled' && pl5Res.value ? buildPl5(pl5Draws, learnedOf.pl5) : null
     const qxc = qxcRes.status === 'fulfilled' && qxcRes.value ? buildQxc(qxcDraws, learnedOf.qxc) : null
     const dlt = dltRes.status === 'fulfilled' && dltRes.value ? buildDlt(dltDraws, learnedOf.dlt) : null
 
@@ -1242,7 +1155,7 @@ export default async function handler(req, res) {
             }
           })()
         : Promise.resolve(null)
-    const [kl8Ai, fc3dAi, pl3Ai, pl5Ai, qxcAi] = llm
+    const [kl8Ai, fc3dAi, pl3Ai, qxcAi] = llm
       ? await Promise.all([
           kl8 ? safely(() => buildKl8Ai({ draws: kl8Draws, built: kl8, sql: sqlAi, llm })) : null,
           fc3d
@@ -1255,18 +1168,13 @@ export default async function handler(req, res) {
                 buildDigitAi({ game: 'pl3', label: '排列三', draws: pl3Draws, sql: sqlAi, llm }),
               )
             : null,
-          pl5
-            ? safely(() =>
-                buildDigitAi({ game: 'pl5', label: '排列五', draws: pl5Draws, sql: sqlAi, llm }),
-              )
-            : null,
           qxc
             ? safely(() =>
                 buildDigitAi({ game: 'qxc', label: '七星彩', draws: qxcDraws, sql: sqlAi, llm }),
               )
             : null,
         ])
-      : [null, null, null, null, null]
+      : [null, null, null, null]
     await notesTask
 
     // ⑥ 发卡前写本期目标期预测行（次日 scoreAndLearn 打分用；hedge:experts 行由打分流程自己回填，不写）
@@ -1281,7 +1189,6 @@ export default async function handler(req, res) {
         for (const [g, aiRes, dList] of [
           ['fc3d', fc3dAi, fc3dDraws],
           ['pl3', pl3Ai, pl3Draws],
-          ['pl5', pl5Ai, pl5Draws],
           ['qxc', qxcAi, qxcDraws],
         ]) {
           if (!dList?.length) continue
@@ -1310,7 +1217,7 @@ export default async function handler(req, res) {
 
     // 上期命中：算法部分用「上期及更早」的数据严格前推重算，AI 部分读站内共享结果/上次推送记录
     const prevHistory = await loadHistory()
-    const hits = { kl8: null, fc3d: null, pl3: null, pl5: null, qxc: null, dlt: null }
+    const hits = { kl8: null, fc3d: null, pl3: null, qxc: null, dlt: null }
     if (kl8 && kl8Draws) {
       const algo = kl8AlgoPrev(kl8Draws)
       const aiPicks = await kl8AiPrev(sqlAi, kl8Draws, prevHistory)
@@ -1347,18 +1254,6 @@ export default async function handler(req, res) {
           }
         : null
     }
-    if (pl5 && pl5Draws) {
-      const algo = digitAlgoPrev(pl5Draws, 'pl5')
-      const aiPicks = await digitAiPrev(sqlAi, 'pl5', pl5Draws, prevHistory)
-      hits.pl5 = algo
-        ? {
-            drawId: algo.drawId,
-            actual: algo.actual,
-            algo: { straight: algo.straight },
-            ai: aiPicks ? digitHitOf(aiPicks, pl5Draws[0].num, 5) : null,
-          }
-        : null
-    }
     if (qxc && qxcDraws) {
       const algo = digitAlgoPrev(qxcDraws, 'qxc')
       const aiPicks = await digitAiPrev(sqlAi, 'qxc', qxcDraws, prevHistory)
@@ -1377,7 +1272,6 @@ export default async function handler(req, res) {
       kl8: kl8 ? freshness(kl8.latest) : null,
       fc3d: fc3d ? freshness(fc3d.latest) : null,
       pl3: pl3 ? freshness(pl3.latest) : null,
-      pl5: pl5 ? freshness(pl5.latest) : null,
       qxc: qxc ? freshness(qxc.latest, 4) : null,
       dlt: dlt ? freshness(dlt.latest, 4) : null,
     }
@@ -1386,12 +1280,11 @@ export default async function handler(req, res) {
       kl8: kl8Res.status === 'rejected' ? kl8Res.reason?.message : null,
       fc3d: fc3dRes.status === 'rejected' ? fc3dRes.reason?.message : null,
       pl3: pl3Res.status === 'rejected' ? pl3Res.reason?.message : null,
-      pl5: pl5Res.status === 'rejected' ? pl5Res.reason?.message : null,
       qxc: qxcRes.status === 'rejected' ? qxcRes.reason?.message : null,
       dlt: dltRes.status === 'rejected' ? dltRes.reason?.message : null,
     }
 
-    if (!kl8 && !fc3d && !pl3 && !pl5 && !qxc && !dlt) {
+    if (!kl8 && !fc3d && !pl3 && !qxc && !dlt) {
       const errs = Object.values(skipped).filter(Boolean)
       const error = `开奖数据获取失败：${errs.join('；') || '未知原因'}`
       await savePushStatus({ at: new Date().toISOString(), ok: false, error, skipped })
@@ -1429,16 +1322,6 @@ export default async function handler(req, res) {
           staleWarning(fresh.pl3, '排列三'),
           pl3Ai,
           hits.pl3,
-        ),
-      )
-    if (pl5)
-      cards.push(
-        buildPl5Card(
-          pl5,
-          `${prefix}排列五 v3 Pro 推荐 · ${dateText}`,
-          staleWarning(fresh.pl5, '排列五'),
-          pl5Ai,
-          hits.pl5,
         ),
       )
     if (qxc)
@@ -1501,7 +1384,6 @@ export default async function handler(req, res) {
         : prevHistory?.kl8 || null,
       fc3d: fc3dAi ? { targetId: Number(fc3dAi.drawId) + 1, ai: fc3dAi.picks } : prevHistory?.fc3d || null,
       pl3: pl3Ai ? { targetId: Number(pl3Ai.drawId) + 1, ai: pl3Ai.picks } : prevHistory?.pl3 || null,
-      pl5: pl5Ai ? { targetId: Number(pl5Ai.drawId) + 1, ai: pl5Ai.picks } : prevHistory?.pl5 || null,
       qxc: qxcAi ? { targetId: Number(qxcAi.drawId) + 1, ai: qxcAi.picks } : prevHistory?.qxc || null,
       dlt: dlt
         ? { targetId: Number(dlt.latest.id) + 1, front: dlt.pred.front, back: dlt.pred.back }
@@ -1513,19 +1395,18 @@ export default async function handler(req, res) {
       ok: true,
       test: isTest,
       sent,
-      pushed: { kl8: !!kl8, fc3d: !!fc3d, pl3: !!pl3, pl5: !!pl5, qxc: !!qxc, dlt: !!dlt },
+      pushed: { kl8: !!kl8, fc3d: !!fc3d, pl3: !!pl3, qxc: !!qxc, dlt: !!dlt },
       // 抓取失败原因（重试后仍失败才算），用于排查某彩种卡片整张缺失
       fetchErrors: Object.entries({
         kl8: kl8Res,
         fc3d: fc3dRes,
         pl3: pl3Res,
-        pl5: pl5Res,
         qxc: qxcRes,
         dlt: dltRes,
       })
         .filter(([, r]) => r.status === 'rejected')
         .map(([g, r]) => `${g}: ${String(r.reason?.message || r.reason).slice(0, 120)}`),
-      ai: { kl8: !!kl8Ai, fc3d: !!fc3dAi, pl3: !!pl3Ai, pl5: !!pl5Ai, qxc: !!qxcAi },
+      ai: { kl8: !!kl8Ai, fc3d: !!fc3dAi, pl3: !!pl3Ai, qxc: !!qxcAi },
       hits,
       fresh,
       learning: learningSummary,
@@ -1534,12 +1415,11 @@ export default async function handler(req, res) {
     return res.status(200).json({
       ok: true,
       test: isTest,
-      pushed: { kl8: !!kl8, fc3d: !!fc3d, pl3: !!pl3, pl5: !!pl5, qxc: !!qxc, dlt: !!dlt },
+      pushed: { kl8: !!kl8, fc3d: !!fc3d, pl3: !!pl3, qxc: !!qxc, dlt: !!dlt },
       ai: {
         kl8: kl8Ai ? { source: kl8Ai.source, cached: kl8Ai.cached, ten: kl8Ai.ten } : null,
         fc3d: fc3dAi ? { source: fc3dAi.source, cached: fc3dAi.cached, picks: fc3dAi.picks } : null,
         pl3: pl3Ai ? { source: pl3Ai.source, cached: pl3Ai.cached, picks: pl3Ai.picks } : null,
-        pl5: pl5Ai ? { source: pl5Ai.source, cached: pl5Ai.cached, picks: pl5Ai.picks } : null,
         qxc: qxcAi ? { source: qxcAi.source, cached: qxcAi.cached, picks: qxcAi.picks } : null,
       },
       messages: payloads.length,

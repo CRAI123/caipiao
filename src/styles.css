@@ -167,48 +167,7 @@ body {
 .lottery-indicator.pl3 { transform: translateX(200%); }
 .lottery-indicator.qxc { transform: translateX(300%); }
 .lottery-indicator.dlt { transform: translateX(400%); }
-.lottery-indicator.pl5 { transform: translateX(300%); }
 .lottery-indicator.ssq { transform: translateX(400%); }
-
-/* 排列三·五 栏目内的子切换 */
-.pl-kind-switch {
-  display: flex;
-  align-items: center;
-  gap: 4px;
-  margin: 10px 0 0;
-  padding: 4px;
-  width: fit-content;
-  background: var(--paper-deep);
-  border: 1px solid var(--ink-20);
-  border-radius: 6px;
-}
-.pl-kind-label {
-  padding: 0 10px;
-  font-family: var(--font-serif);
-  font-size: 12px;
-  font-weight: 700;
-  color: var(--ink-60);
-  letter-spacing: 1px;
-}
-.pl-kind-btn {
-  appearance: none;
-  border: 1px solid transparent;
-  background: transparent;
-  padding: 5px 16px;
-  border-radius: 4px;
-  font-family: var(--font-serif);
-  font-size: 13px;
-  font-weight: 700;
-  color: var(--ink-60);
-  cursor: pointer;
-  transition: all 0.2s ease;
-}
-.pl-kind-btn:hover { color: var(--ink); }
-.pl-kind-btn.active {
-  background: var(--red);
-  border-color: var(--red);
-  color: #fff;
-}
 
 /* ---------- 福彩3D 板块 ---------- */
 .fc3d { max-width: 1180px; margin: 0 auto; padding: 0 24px 40px; }

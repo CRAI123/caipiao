@@ -9,7 +9,6 @@ const GAME_LABEL = {
   dlt: '大乐透',
   fc3d: '福彩3D',
   pl3: '排列三',
-  pl5: '排列五',
   qxc: '七星彩',
   kl8: '快乐8',
 }

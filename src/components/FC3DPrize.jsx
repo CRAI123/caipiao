@@ -8,7 +8,6 @@ import { syncRecordToNeon } from '../lib/sync.js'
 import {
   DIGIT_PRIZES,
   DIGIT_SHAPE,
-  PL5_PRIZES,
   QXC_PRIZES,
   QXC_WIN_PROB,
   expectedReturn,
@@ -23,10 +22,6 @@ const PLAYS = [
   { id: 'direct', name: '直选', amount: 1040, desc: '三位号码与开奖完全相同（位置一致）' },
   { id: 'group3', name: '组选3', amount: 346, desc: '两同一不同，不限位置' },
   { id: 'group6', name: '组选6', amount: 173, desc: '三位各不相同，不限位置' },
-]
-
-const PL5_PLAYS = [
-  { id: 'direct', name: '直选', amount: 100000, desc: '五位号码与开奖完全相同（位置一致），单注 2 元' },
 ]
 
 const QXC_PLAYS = [
@@ -129,11 +124,11 @@ export default function FC3DPrize({
   label = '福彩3D',
   digitCount = 3,
   qxc = false,
-  plays = qxc ? QXC_PLAYS : digitCount === 5 ? PL5_PLAYS : PLAYS,
+  plays = qxc ? QXC_PLAYS : PLAYS,
 }) {
   const [drawIdx, setDrawIdx] = useState(0)
   const [text, setText] = useState('')
-  const [play, setPlay] = useState(qxc || digitCount === 5 ? 'direct' : '')
+  const [play, setPlay] = useState(qxc ? 'direct' : '')
   const [saving, setSaving] = useState(false)
   const [savedTick, setSavedTick] = useState(0)
   const [ledgerMsg, setLedgerMsg] = useState(null)
@@ -173,8 +168,8 @@ export default function FC3DPrize({
 
   const askPlay = rows.length > 0 && !play
 
-  // 精确概率表：按当前彩种切换（3D / 排三 三位、排五 五位、七星彩六奖级）
-  const oddsRows = qxc ? QXC_PRIZES : digitCount === 5 ? PL5_PRIZES : DIGIT_PRIZES
+  // 精确概率表：按当前彩种切换（3D / 排三 三位、七星彩六奖级）
+  const oddsRows = qxc ? QXC_PRIZES : DIGIT_PRIZES
   const perPlay = qxc ? [expectedReturn(QXC_PRIZES, UNIT)] : oddsRows.map((r) => expectedReturn([r], UNIT))
   const avgRate = perPlay.reduce((s, x) => s + x.returnRate, 0) / perPlay.length
   const avgLoss = perPlay.reduce((s, x) => s + x.lossPerTicket, 0) / perPlay.length
@@ -445,7 +440,7 @@ export default function FC3DPrize({
         </>
       )}
 
-      {/* 精确概率表：三位号码 10³=1000 种、五位号码 10⁵=100000 种，全部等可能 */}
+      {/* 精确概率表：三位号码 10³=1000 种，全部等可能 */}
       <Card
         title="精确概率表"
         tag={qxc ? `${label} · 15,000,000 种等可能号码` : `${label} · 等可能号码计数`}
@@ -516,9 +511,7 @@ export default function FC3DPrize({
             <i className="odds-sub">
               {qxc
                 ? '任意奖级 · 六项合计 8.146%'
-                : digitCount === 5
-                  ? '直选'
-                  : '直选 / 组选3 / 组选6'}
+                : '直选 / 组选3 / 组选6'}
             </i>
           </div>
           <div className="odds-summary-item">
@@ -544,11 +537,6 @@ export default function FC3DPrize({
               <div>一等奖 1 种 / 二等奖 14 种 / 三等奖 54 种</div>
               <div>四等奖 1,971 种 / 五等奖 31,590 种 / 六等奖 1,188,270 种</div>
               <div>合计 1,221,900 种中奖组合 → 总中奖率 8.146%</div>
-            </>
-          ) : digitCount === 5 ? (
-            <>
-              <div>00000–99999：10⁵ = 100,000 个等可能开奖号码</div>
-              <div>直选只有 1 个号码与投注完全一致 → 1/100,000</div>
             </>
           ) : (
             <>

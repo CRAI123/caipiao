@@ -3,11 +3,11 @@
 // draws 约定最新在前：
 //   kl8  { id, date, nums: [20 个 1-80] }
 //   dlt  { id, date, front: [5 个 1-35], back: [2 个 1-12] }
-//   fc3d / pl3 / pl5  { id, date, num: [3 或 5 个 0-9] }
+//   fc3d / pl3 / qxc  { id, date, num: [3 或 7 个 0-9] }
 
 const pad2 = (n) => String(n).padStart(2, '0')
 
-const isDigitGame = (game) => game === 'fc3d' || game === 'pl3' || game === 'pl5' || game === 'qxc'
+const isDigitGame = (game) => game === 'fc3d' || game === 'pl3' || game === 'qxc'
 const fmtN = (game, n) => (isDigitGame(game) ? String(n) : pad2(n))
 
 function numsOf(game, d) {
@@ -31,12 +31,12 @@ const clampText = (t) => (t.length <= 40 ? t : `${t.slice(0, 39)}…`)
 
 /**
  * 按彩种从真实数据现算趣闻卡
- * @param {'kl8'|'fc3d'|'pl3'|'pl5'|'dlt'} game
+ * @param {'kl8'|'fc3d'|'pl3'|'dlt'} game
  * @param {Array} draws 最新在前的开奖数组
  * @returns {{title:string, text:string}[]} 最多 10 条，不足有多少给多少
  */
 export function buildFunFacts(game, draws) {
-  if (!['kl8', 'fc3d', 'pl3', 'pl5', 'qxc', 'dlt'].includes(game)) return []
+  if (!['kl8', 'fc3d', 'pl3', 'qxc', 'dlt'].includes(game)) return []
   const list = (Array.isArray(draws) ? draws : []).filter((d) => numsOf(game, d))
   if (list.length < 5) return []
   const win = list.slice(0, 100)

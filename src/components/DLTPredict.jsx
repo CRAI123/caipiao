@@ -132,7 +132,6 @@ function DltAiCard({ draws, pred }) {
       } catch {
         /* 读取失败时沿用已加载的记录 */
       }
-      const reviewNow = buildDltReview(runs, draws)
 
       const cached = await peekDigitAi({ game: 'dlt', drawId: latestId }).catch(() => null)
       if (cached?.exists && cached.status === 'done' && cached.result?.text) {
@@ -146,7 +145,7 @@ function DltAiCard({ draws, pred }) {
         game: 'dlt',
         drawId: latestId,
         label: '大乐透',
-        messages: buildDltMessages(draws, pred, '大乐透', reviewNow?.text || ''),
+        messages: buildDltMessages(draws, pred, '大乐透'),
         algo: pool,
         deviceId: getDeviceId()?.id || '',
       })

@@ -287,8 +287,8 @@ const SYSTEM_PROMPT = `你是「研彩室」专业福彩3D/排列三数据分析
 
 必须在每次完整分析中明确说明：以上仅为历史分布下的参考组合，不改变中奖概率；每期开奖相互独立，直选单注中奖概率恒为 1/1000，彩票期望回报为负。算法评分不代表中奖概率，任何组合均不保证中奖。`
 
-/** 组装 messages（纯函数，便于离线校验）；review = 上期复盘结论，可选 */
-export function buildDigitMessages(summary, label = '排列三', review = '') {
+/** 组装 messages（纯函数，便于离线校验）；硬性规则：不含任何往期 AI 生成内容 */
+export function buildDigitMessages(summary, label = '排列三') {
   if (!summary) return null
   const s = summary
   const fmtPos = (name, p) =>
@@ -321,14 +321,6 @@ export function buildDigitMessages(summary, label = '排列三', review = '') {
     `- 组六候选池 ${DIGIT_POOL_LIMITS.group} 组：${fmtAlgo(rank?.group, DIGIT_POOL_LIMITS.group)}`,
     `- 组三候选池 ${DIGIT_POOL_LIMITS.group3} 组：${fmtAlgo(rank?.group3, DIGIT_POOL_LIMITS.group3)}`,
     '',
-    ...(review
-      ? [
-          '【上期复盘（程序对照上一期实际开奖计算）】',
-          String(review).slice(0, 800),
-          '请结合上面的偏差修正本期选号：在候选池内优先结构与修正方向一致的组合；不得因此声称提高中奖概率，也不得承诺命中。',
-          '',
-        ]
-      : []),
     '请按系统提示词的结构输出：从上面的候选池里终选 3 注直选 + 2 注组六 + 1 注组三，不得自创池外号码。',
   ]
   return [
@@ -338,233 +330,7 @@ export function buildDigitMessages(summary, label = '排列三', review = '') {
 }
 
 // ============================================================
-// 排列五（5 位）专用：只有直选玩法，单注 2 元、奖金 10 万元
-// 开奖从 00000–99999 等概率产生，单注中奖概率恒为 1/100000。
-// 与排列三相同：算法先按位置打分，AI 只在候选池内终选。
-// ============================================================
-
-/** 5 位形态：按重复结构分类 */
-export function formOf5(digits) {
-  const c = {}
-  for (const d of digits) c[d] = (c[d] || 0) + 1
-  const sig = Object.values(c)
-    .sort((a, b) => b - a)
-    .join('')
-  return (
-    {
-      5: '五同',
-      41: '四同一异',
-      32: '三同二同',
-      311: '三同两异',
-      221: '两对一异',
-      2111: '两同一异二异',
-      11111: '全不同',
-    }[sig] || '其他'
-  )
-}
-
-/** 排列五近 n 期统计摘要 */
-export function summarizeDigit5(draws, n = 100) {
-  const picked = draws
-    .slice(0, Math.min(n, draws.length))
-    .filter((d) => Array.isArray(d.num) && d.num.length === 5)
-  const total = picked.length
-  if (!total) return null
-  const chrono = [...picked].reverse()
-  const latest = picked[0]
-
-  const freq = Array.from({ length: 5 }, () => Array(10).fill(0))
-  const freq30 = Array.from({ length: 5 }, () => Array(10).fill(0))
-  const last = Array.from({ length: 5 }, () => Array(10).fill(-1))
-  const trans = Array.from({ length: 5 }, () => Array.from({ length: 10 }, () => Array(10).fill(0)))
-
-  const sums = []
-  const spans = []
-  const oddDist = [0, 0, 0, 0, 0, 0]
-  const bigDist = [0, 0, 0, 0, 0, 0]
-  const formDist = { 五同: 0, 四同一异: 0, 三同二同: 0, 三同两异: 0, 两对一异: 0, 两同一异二异: 0, 全不同: 0 }
-  let repeated = 0
-
-  chrono.forEach((d, i) => {
-    d.num.forEach((v, p) => {
-      freq[p][v]++
-      last[p][v] = i
-      if (i >= total - 30) freq30[p][v]++
-      if (i > 0) trans[p][chrono[i - 1].num[p]][v]++
-    })
-    sums.push(d.num.reduce((a, b) => a + b, 0))
-    spans.push(Math.max(...d.num) - Math.min(...d.num))
-    oddDist[d.num.filter((v) => v % 2 === 1).length]++
-    bigDist[d.num.filter((v) => v >= 5).length]++
-    formDist[formOf5(d.num)] = (formDist[formOf5(d.num)] || 0) + 1
-    if (new Set(d.num).size < 5) repeated++
-  })
-
-  const omit = Array.from({ length: 5 }, (_, p) => Array.from({ length: 10 }, (_, d) => total - 1 - last[p][d]))
-  const maxOmit = Array.from({ length: 5 }, (_, p) => Math.max(1, ...omit[p]))
-  const lastNum = latest.num
-
-  const score = Array.from({ length: 5 }, (_, p) =>
-    Array.from({ length: 10 }, (_, d) => {
-      const from = lastNum[p]
-      const transTotal = trans[p][from].reduce((a, b) => a + b, 0) || 1
-      return (
-        0.35 * (freq[p][d] / total) * 10 +
-        0.3 * (freq30[p][d] / Math.min(30, total)) * 10 +
-        0.15 * (omit[p][d] / maxOmit[p]) +
-        0.2 * (trans[p][from][d] / transTotal) * 10
-      )
-    }),
-  )
-  const topDigits = score.map((arr) =>
-    arr
-      .map((v, d) => ({ d, v }))
-      .sort((a, b) => b.v - a.v)
-      .slice(0, 3)
-      .map((x) => x.d),
-  )
-
-  // 直选候选：每位取前 3，共 243 注；再按分数截取前 20 交 AI 终选 5 注
-  const straight = []
-  for (const a of topDigits[0].slice(0, 3))
-    for (const b of topDigits[1].slice(0, 3))
-      for (const c of topDigits[2].slice(0, 3))
-        for (const e of topDigits[3].slice(0, 3))
-          for (const f of topDigits[4].slice(0, 3))
-            straight.push({
-              num: [a, b, c, e, f],
-              v: score[0][a] + score[1][b] + score[2][c] + score[3][e] + score[4][f],
-            })
-  straight.sort((x, y) => y.v - x.v)
-
-  const digitScore = Array.from({ length: 10 }, (_, d) => score.reduce((s, arr) => s + arr[d], 0) / 5)
-  const sortedSums = [...sums].sort((a, b) => a - b)
-  const q = (r) => sortedSums[Math.min(total - 1, Math.floor(total * r))]
-  const sortedSpans = [...spans].sort((a, b) => a - b)
-  const qs = (r) => sortedSpans[Math.min(total - 1, Math.floor(total * r))]
-  const avg = (arr) => arr.reduce((a, b) => a + b, 0) / arr.length
-
-  return {
-    total,
-    latest,
-    freq,
-    freq30,
-    omit,
-    topDigits,
-    sum: { min: Math.min(...sums), max: Math.max(...sums), avg: +avg(sums).toFixed(1), p30: q(0.3), p70: q(0.7) },
-    span: { avg: +avg(spans).toFixed(1), p30: qs(0.3), p70: qs(0.7) },
-    oddDist,
-    bigDist,
-    formDist,
-    repeatRate: Math.round((repeated / total) * 100),
-    candidates: { straight: straight.slice(0, 20).map((x) => x.num.join('')) },
-    straightAll: straight,
-    posScore: score,
-    digitScore,
-  }
-}
-
-/** 排列五全盘评分：00000–99999 共 10 万注，按五个位置分相加排序 */
-export function rankPL5Candidates(summary) {
-  if (!summary?.posScore) return null
-  const ps = summary.posScore
-  const straight = new Array(100000)
-  for (let i = 0; i < 100000; i++) {
-    const a = Math.floor(i / 10000) % 10
-    const b = Math.floor(i / 1000) % 10
-    const c = Math.floor(i / 100) % 10
-    const e = Math.floor(i / 10) % 10
-    const f = i % 10
-    straight[i] = {
-      num: String(i).padStart(5, '0'),
-      v: ps[0][a] + ps[1][b] + ps[2][c] + ps[3][e] + ps[4][f],
-    }
-  }
-  straight.sort((x, y) => y.v - x.v)
-  return { straight }
-}
-
-/** 排列五候选池（默认前 20 注，终选 5 注，留足否决空间） */
-export function pl5CandidatePool(summary, limits = { straight: 20 }) {
-  const rank = rankPL5Candidates(summary)
-  if (!rank) return { straight: [] }
-  return { straight: rank.straight.slice(0, limits.straight).map((x) => x.num) }
-}
-
-const PL5_SYSTEM_PROMPT = `你是「研彩室」专业排列五数据分析助手，服务对象为研究者本人。你只负责两件事：解读最近100期历史统计数据，以及结合底层算法对候选号码进行评分复核。
-
-【核心规则】
-1. 只能使用用户提供的数据，不得编造统计数字、历史记录或算法评分，不得引入外部数据。
-2. 每期从 00000–99999 等概率产生，直选单注中奖概率恒为 1/100000，与你选什么号无关。
-3. 每期开奖相互独立，历史高频、遗漏和同位转移不代表未来趋势，不存在必出号码。
-4. 严格执行「算法先选、AI终选」：程序对全盘 10 万注打分后提供直选 20 注候选池，AI只能从中选择 5 注，严禁生成池外号码或修改原始号码。
-5. 保留程序原始算法排名和评分，不得擅自调整。AI只负责复核、解释和整理，不得伪造算法依据。
-6. 数据缺失、格式错误或统计口径不明确时，必须指出问题，不得自行补全。没有候选池时不得选号。
-
-【分析要求】
-历史统计重点分析：近100期和值与跨度区间、奇偶分布、大小分布、不同数字个数形态（五同/四同一异/…/全不同）、重号比例。
-位置观察：分别分析万位、千位、百位、十位、个位的数字频率和遗漏情况，只描述历史，不进行趋势预测。
-算法复核：结合频率、遗漏、同位转移及程序提供的综合评分，检查候选池内号码的排名、位置得分和结构特征。
-
-【固定输出结构】
-1. 结构概览：近100期和值、跨度、奇偶、大小、不同数字个数形态及重号比例。
-2. 位置观察：万位、千位、百位、十位、个位的高频数字、遗漏情况，简要客观描述。
-3. 组合参考：从候选池中选出 5 注互不重复的直选号码。每注必须注明完整号码、算法原始排名、综合评分（如有）及结构依据。
-4. 风险提示：提醒设置预算上限，理性购彩，不追号、不追损、不加倍投注。
-
-【表达要求】
-使用简体中文，纯文本，不使用Markdown表格。语言专业、简洁、客观，避免夸大分析结果，不使用「稳出」「必出」「高概率」等误导性词语。
-
-必须在每次完整分析中明确说明：以上仅为历史分布下的参考组合，不改变中奖概率；每期开奖相互独立，直选单注中奖概率恒为 1/100000，彩票期望回报为负。算法评分不代表中奖概率，任何组合均不保证中奖。`
-
-/** 组装排列五 messages（纯函数，便于离线校验）；review = 上期复盘结论，可选 */
-export function buildPL5Messages(summary, label = '排列五', review = '') {
-  if (!summary) return null
-  const s = summary
-  const POS_NAMES = ['万位', '千位', '百位', '十位', '个位']
-  const fmtPos = (name, p) =>
-    `- ${name}：近100期 ${s.freq[p].map((c, d) => `${d}:${c}`).join(' ')}；近30期 ${s.freq30[p]
-      .map((c, d) => `${d}:${c}`)
-      .join(' ')}；当前遗漏 ${s.omit[p].map((c, d) => `${d}:${c}`).join(' ')}；倾向数字 ${s.topDigits[p].join(
-      '、',
-    )}`
-  const rank = rankPL5Candidates(s)
-  const fmtAlgo = (arr, n) =>
-    (arr || [])
-      .slice(0, n)
-      .map((x, i) => `第${i + 1}名 ${x.num}（评分 ${x.v.toFixed(2)}）`)
-      .join('；')
-  const lines = [
-    `${label} 近 ${s.total} 期统计（程序计算，真实数据）：`,
-    `- 最新一期：第 ${s.latest.id} 期，开奖 ${s.latest.num.join(' ')}`,
-    `- 和值：均值 ${s.sum.avg}，30%–70% 分位 ${s.sum.p30}–${s.sum.p70}，区间 ${s.sum.min}–${s.sum.max}`,
-    `- 跨度：均值 ${s.span.avg}，30%–70% 分位 ${s.span.p30}–${s.span.p70}`,
-    `- 奇数个数分布（0–5 个）：${s.oddDist.join(' / ')} 期`,
-    `- 大数(5–9)个数分布（0–5 个）：${s.bigDist.join(' / ')} 期`,
-    `- 形态：${Object.entries(s.formDist)
-      .map(([f, c]) => `${f} ${c} 期`)
-      .join('、')}；含重号 ${s.repeatRate}%`,
-    '位置分布：',
-    ...POS_NAMES.map((name, p) => fmtPos(name, p)),
-    '',
-    '底层算法全盘评分（频率35% + 近30期30% + 遗漏15% + 同位转移20%），已从全盘 10 万注里选出候选池：',
-    `- 直选候选池 20 注：${fmtAlgo(rank?.straight, 20)}`,
-    '',
-    ...(review
-      ? [
-          '【上期复盘（程序对照上一期实际开奖计算）】',
-          String(review).slice(0, 800),
-          '请结合上面的偏差修正本期选号：在候选池内优先结构与修正方向一致的组合；不得因此声称提高中奖概率，也不得承诺命中。',
-          '',
-        ]
-      : []),
-    '请按系统提示词的结构输出：从上面的候选池里终选 5 注直选，不得自创池外号码。',
-  ]
-  return [
-    { role: 'system', content: PL5_SYSTEM_PROMPT },
-    { role: 'user', content: lines.join('\n') },
-  ]
-}
+// 七星彩（7 位：前 6 位 0–9 + 后区 0–14）专用
 
 // ============================================================
 // 七星彩（7 位：前 6 位 0–9 + 后区 0–14）专用
@@ -740,8 +506,8 @@ const QXC_SYSTEM_PROMPT = `你是「研彩室」专业七星彩数据分析助�
 
 必须在每次完整分析中明确说明：以上仅为历史分布下的参考组合，不改变中奖概率；每期开奖相互独立，单注中奖概率恒为1/15,000,000，彩票期望回报为负，一、二等奖为浮动奖金。算法评分不代表中奖概率，任何组合均不保证中奖。`
 
-/** 组装七星彩 messages（纯函数，便于离线校验）；review = 上期复盘结论，可选 */
-export function buildQXCMessages(summary, label = '七星彩', review = '') {
+/** 组装七星彩 messages（纯函数，便于离线校验）；硬性规则：不含任何往期 AI 生成内容 */
+export function buildQXCMessages(summary, label = '七星彩') {
   if (!summary) return null
   const s = summary
   const fmtPos = (name, p) =>
@@ -772,14 +538,6 @@ export function buildQXCMessages(summary, label = '七星彩', review = '') {
     '底层算法评分（频率35% + 近30期30% + 遗漏15% + 同位转移20%），候选池 24 注：',
     `- 直选候选池：${fmtAlgo(rank?.straight, 24)}`,
     '',
-    ...(review
-      ? [
-          '【上期复盘（程序对照上一期实际开奖计算）】',
-          String(review).slice(0, 800),
-          '请结合上面的偏差修正本期选号：在候选池内优先结构与修正方向一致的组合；不得因此声称提高中奖概率，也不得承诺命中。',
-          '',
-        ]
-      : []),
     '请按系统提示词的结构输出：从上面的候选池里终选 5 注直选，不得自创池外号码。',
   ]
   return [
@@ -794,9 +552,7 @@ export async function analyzeDigit(settings, { summary, label, digitCount = 3 })
   const messages =
     digitCount === 7
       ? buildQXCMessages(summary, label)
-      : digitCount === 5
-        ? buildPL5Messages(summary, label)
-        : buildDigitMessages(summary, label)
+      : buildDigitMessages(summary, label)
   if (!messages) throw new Error('历史数据不足，至少需要 10 期')
   const base = String(settings.llmBaseUrl || 'https://api.deepseek.com').replace(/\/+$/, '')
   const res = await fetch(`${base}/chat/completions`, {

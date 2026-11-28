@@ -1088,8 +1088,8 @@ const DLT_SYSTEM_PROMPT = `你是「研彩室」专业大乐透数据分析助�
 
 必须在每次完整分析中明确说明：以上仅为历史分布下的参考组合，不改变中奖概率；每期开奖相互独立，单注一等奖概率恒为 1/21,425,712，彩票期望回报为负，一、二等奖为浮动奖金。算法评分不代表中奖概率，任何组合均不保证中奖。`
 
-/** 组装大乐透 AI 终选的 messages；review = 上期复盘结论，可选 */
-export function buildDltMessages(draws, pred, label = '大乐透', review = '') {
+/** 组装大乐透 AI 终选的 messages；硬性规则：不含任何往期 AI 生成内容 */
+export function buildDltMessages(draws, pred, label = '大乐透') {
   if (!pred || !Array.isArray(draws) || !draws.length) return null
   const latest = draws[0]
   const a = analyzeDraw(latest)
@@ -1116,14 +1116,6 @@ export function buildDltMessages(draws, pred, label = '大乐透', review = '') 
     `- 后区评分前 4：${backDesc}`,
     `- 候选池前区 ${pool?.front.length || 0} 个、后区 ${pool?.back.length || 0} 个`,
     '',
-    ...(review
-      ? [
-          '【上期复盘（程序对照上一期实际开奖计算）】',
-          String(review).slice(0, 800),
-          '请结合上面的偏差修正本期终选：在候选池内优先结构与修正方向一致的组合；不得因此声称提高中奖概率，也不得承诺命中。',
-          '',
-        ]
-      : []),
     '请按系统提示词的结构输出：从上面的候选池里终选 5 个前区 + 2 个后区，不得自创池外号码。',
   ]
   return [

@@ -38,7 +38,7 @@ export default function OmissionPanel({
   preset = DEFAULT_PRESET,
   positions = POS_LABEL,
 }) {
-  const isDigit = lottery === 'fc3d' || lottery === 'pl3' || lottery === 'pl5' || lottery === 'qxc'
+  const isDigit = lottery === 'fc3d' || lottery === 'pl3' || lottery === 'qxc'
   const isDlt = lottery === 'dlt'
   const [pos, setPos] = useState(0)
   const [digit, setDigit] = useState(0)
@@ -47,7 +47,7 @@ export default function OmissionPanel({
   const [sortKey, setSortKey] = useState('default')
   const [filterKey, setFilterKey] = useState('all')
   const digitMax = lottery === 'qxc' && pos === 6 ? 14 : 9
-  // 切换彩种后位置数可能变少（七星彩 7 位 → 排列五 5 位），把越界的位置拉回 0
+  // 切换彩种后位置数可能变少（七星彩 7 位 → 福彩3D 3 位），把越界的位置拉回 0
   useEffect(() => {
     if (pos >= positions.length) setPos(0)
   }, [pos, positions.length])

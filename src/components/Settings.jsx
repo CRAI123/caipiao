@@ -53,7 +53,6 @@ export default function Settings() {
     kl8: true,
     fc3d: true,
     pl3: true,
-    pl5: true,
     qxc: true,
     dlt: true,
   })
@@ -113,7 +112,6 @@ export default function Settings() {
             kl8: true,
             fc3d: true,
             pl3: true,
-            pl5: true,
             qxc: true,
             dlt: true,
             ...pushCfg,
@@ -206,7 +204,6 @@ export default function Settings() {
         data.skipped?.kl8 && `快乐8：${data.skipped.kl8}`,
         data.skipped?.fc3d && `福彩3D：${data.skipped.fc3d}`,
         data.skipped?.pl3 && `排列三：${data.skipped.pl3}`,
-        data.skipped?.pl5 && `排列五：${data.skipped.pl5}`,
         data.skipped?.qxc && `七星彩：${data.skipped.qxc}`,
         data.skipped?.dlt && `大乐透：${data.skipped.dlt}`,
       ]
@@ -377,14 +374,6 @@ export default function Settings() {
               onChange={(e) => setPush({ ...push, pl3: e.target.checked })}
             />{' '}
             推送排列三
-          </label>
-          <label className="sync-badge" style={{ cursor: 'pointer' }}>
-            <input
-              type="checkbox"
-              checked={push.pl5}
-              onChange={(e) => setPush({ ...push, pl5: e.target.checked })}
-            />{' '}
-            推送排列五
           </label>
           <label className="sync-badge" style={{ cursor: 'pointer' }}>
             <input
